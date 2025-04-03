@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Your Clean Dashboard</title>
+  <style>
+    body { font-family: sans-serif; max-width: 800px; margin: 0 auto; padding: 1rem; }
+    .post { border-bottom: 1px solid #ccc; padding: 1rem 0; }
+    .controls { margin-bottom: 1rem; }
+  </style>
+</head>
+<body>
+  <h1>🎛️ Your Authentic Dashboard</h1>
+
+  <div class="controls">
+    <form method="post" action="{% url 'toggle_mode' %}">
+      {% csrf_token %}
+      <label>
+        <input type="checkbox" name="friends_only" {% if preferences.friends_only %}checked{% endif %}>
+        Friends Only Mode
+      </label>
+      <button type="submit">Update</button>
+    </form>
+  </div>
+
+  <h2>Posts</h2>
+  {% for post in posts %}
+    <div class="post">
+      <strong>{{ post.platform|title }}</strong><br>
+      {{ post.content }}<br>
+      <small>Posted by: {{ post.user.username }}</small>
+    </div>
+  {% empty %}
+    <p>No posts match your current filter.</p>
+  {% endfor %}
+</body>
+</html>

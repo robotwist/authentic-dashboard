@@ -1,0 +1,22 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8" />
+  <title>Sensor Runner</title>
+  <style>
+    body { font-family: sans-serif; width: 250px; padding: 10px; }
+    select, button { width: 100%; margin-top: 10px; }
+  </style>
+</head>
+<body>
+  <h3>Run a Sensor</h3>
+  <select id="sensorSelect">
+    <option value="buzzwords">Buzzword Buster</option>
+    <!-- Future sensors like popup, urgency, tracker can go here -->
+  </select>
+  <button id="runSensor">Run Sensor</button>
+  <div id="result" style="margin-top: 10px;"></div>
+
+  <script src="popup.js"></script>
+</body>
+</html>
