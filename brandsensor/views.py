@@ -478,29 +478,24 @@ def toggle_mode(request):
 @login_required
 def onboarding(request):
     """
-    Handles first-time setup for new users.
-    On POST, saves the user's filter preferences and redirects to the dashboard.
+    View for the onboarding process after extension installation.
+    Guides users through setting up their API key and preferences.
     """
-    if request.method == "POST":
-        preferences, _ = UserPreference.objects.get_or_create(user=request.user)
-        preferences.friends_only = 'friends_only' in request.POST
-        preferences.family_only = 'family_only' in request.POST
-        preferences.hide_sponsored = 'hide_sponsored' in request.POST
-        preferences.show_verified_only = 'show_verified_only' in request.POST
-        preferences.bizfluencer_filter = 'bizfluencer_filter' in request.POST
-        preferences.high_sentiment_only = 'high_sentiment_only' in request.POST
-        preferences.hide_job_posts = 'hide_job_posts' in request.POST
-        preferences.interest_filter = request.POST.get('interest_filter', '').strip()
-        preferences.approved_brands = request.POST.get('approved_brands', '').strip()
-        preferences.excluded_keywords = request.POST.get('excluded_keywords', '').strip()
-        preferences.favorite_hashtags = request.POST.get('favorite_hashtags', '').strip()
-        preferences.save()
-        
-        # Process existing posts with ML
-        process_user_posts(request.user.id)
-        
-        return redirect('dashboard')
-    return render(request, "brandsensor/onboarding.html")
+    # Get the current user if authenticated
+    user = request.user if request.user.is_authenticated else None
+    
+    # If user is authenticated, try to get their API key
+    api_key = None
+    if user:
+        api_key = APIKey.objects.filter(user=user).first()
+    
+    context = {
+        'user': user,
+        'api_key': api_key,
+        'has_api_key': api_key is not None,
+    }
+    
+    return render(request, 'brandsensor/onboarding.html', context)
 
 
 @login_required

@@ -1,12 +1,25 @@
 # Authentic Dashboard
 
+Ultimate Directive
+I think the ultimate directive that should guide development could be:
+> "Restore user sovereignty over the digital experience by creating transparent tools that prioritize genuine human satisfaction rather than engagement metrics."
+This directive emphasizes:
+User control ("sovereignty")
+Transparency in how content is filtered
+Human-centered design (satisfaction vs engagement)
+Ethical technology principles
+
 A personalized dashboard experience layered on top of social platforms like Facebook, Instagram, and LinkedIn. This project reclaims the user experience by giving people the ability to filter and reframe their online environment based on what they actually want to see.
+
+
 
 ## Description
 
-People rate their time on social platforms as a 2 or 3 out of 10, yet they use them daily. This project is a response to that contradiction — a tool to make these platforms livable again. It lets users bypass algorithmic feeds and manipulative design by creating modes that display only the content they value. This isn't a boycott — it's a lens for clarity.
+Cursory reseach shows that people rate their time on social platforms as a 2 or 3 out of 10, yet they use these sites daily. The AuthD project is a response to that contradiction — a tool to make these platforms livable again. It lets users bypass algorithmic feeds and manipulative design by creating modes that display only the content they value. This isn't a boycott — it's a lens for clarity. It takes what the user tries to do in practice and quantizes it and gives the user soveriegnty over their own viewing.
 
-This is part of a broader effort to build a cleaner, more humane internet. The dashboard is paired with a Chrome extension that scans platform content using custom sensors to detect and log behavior patterns like spam, buzzwords, urgency traps, promotional language, and more.
+This is part of a broader effort to build, simply, an internet worth using, a cleaner, more humane internet unsubverterd by anyone other than the user's wishes. The dashboard is paired with a Chrome extension that scans platform content using custom sensors to detect and log behavior patterns like spam, buzzwords, urgency traps, promotional language, and more.
+
+Our Founder characterized AD providing "an honest algo that reflects what will give them a 10/10 experience" - where our users say that's absolutely on point. What makes this project special is that unlike platform algorithms optimized for engagement and ad revenue, Authentic Dashboard is optimized for genuine user satisfaction and wellbeing.
 
 ## Features
 

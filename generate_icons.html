@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Generate Extension Icons</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        canvas {
+            border: 1px solid #ccc;
+            margin: 10px 0;
+        }
+        button {
+            padding: 10px 15px;
+            background-color: #4361ee;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            margin: 5px;
+        }
+        .icon-container {
+            margin-bottom: 30px;
+        }
+    </style>
+</head>
+<body>
+    <h1>Generate Icons for Authentic Dashboard Extension</h1>
+    <p>Click the buttons below to generate and download the icon files needed for the Chrome extension.</p>
+    
+    <div class="icon-container">
+        <h2>Icon 16x16</h2>
+        <canvas id="canvas16" width="16" height="16"></canvas><br>
+        <button onclick="downloadIcon(16)">Download icon16.png</button>
+    </div>
+    
+    <div class="icon-container">
+        <h2>Icon 48x48</h2>
+        <canvas id="canvas48" width="48" height="48"></canvas><br>
+        <button onclick="downloadIcon(48)">Download icon48.png</button>
+    </div>
+    
+    <div class="icon-container">
+        <h2>Icon 128x128</h2>
+        <canvas id="canvas128" width="128" height="128"></canvas><br>
+        <button onclick="downloadIcon(128)">Download icon128.png</button>
+    </div>
+    
+    <script>
+        // Function to draw the icon
+        function drawIcon(size) {
+            const canvas = document.getElementById(`canvas${size}`);
+            const ctx = canvas.getContext('2d');
+            
+            // Clear canvas
+            ctx.clearRect(0, 0, size, size);
+            
+            // Draw background
+            ctx.fillStyle = '#4361ee';
+            ctx.beginPath();
+            ctx.arc(size/2, size/2, size/2, 0, Math.PI * 2);
+            ctx.fill();
+            
+            // Draw checkmark
+            ctx.strokeStyle = 'white';
+            ctx.lineWidth = size * 0.1;
+            ctx.beginPath();
+            ctx.moveTo(size * 0.3, size * 0.5);
+            ctx.lineTo(size * 0.45, size * 0.65);
+            ctx.lineTo(size * 0.7, size * 0.35);
+            ctx.stroke();
+        }
+        
+        // Function to download the icon
+        function downloadIcon(size) {
+            const canvas = document.getElementById(`canvas${size}`);
+            const link = document.createElement('a');
+            link.download = `icon${size}.png`;
+            link.href = canvas.toDataURL('image/png');
+            link.click();
+        }
+        
+        // Draw all icons on page load
+        window.onload = function() {
+            drawIcon(16);
+            drawIcon(48);
+            drawIcon(128);
+        };
+    </script>
+</body>
+</html> 

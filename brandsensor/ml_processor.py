@@ -7,6 +7,17 @@ This module provides ML-powered analysis of social media content:
 - Toxicity detection
 - Engagement prediction
 - Content relevance scoring
+
+Ultimate Directive
+
+"Restore user sovereignty over the digital experience by creating transparent tools that prioritize genuine human satisfaction rather than engagement metrics."
+
+This directive emphasizes:
+
+User control ("sovereignty")
+Transparency in how content is filtered
+Human-centered design (satisfaction vs engagement)
+Ethical technology principles
 """
 
 import json

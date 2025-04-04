@@ -31,6 +31,14 @@ urlpatterns = [
     path('api/post-stats/', brandsensor_views.post_stats, name='post_stats'),
     path('api/feedback/', brandsensor_views.feedback, name='feedback'),
     
+    # API Log endpoints (compatibility with older extension versions)
+    path('api/post/', brandsensor_views.api_log_post, name='api_post'),
+    path('api/log/post/', brandsensor_views.api_log_post, name='api_log_post'),
+    path('api/log/behavior/', brandsensor_views.api_log_behavior, name='api_log_behavior'),
+    
+    # ML processing
+    path('process-ml/', brandsensor_views.process_ml, name='process_ml'),
+    
     # Filter preset URLs
     path('filter-presets/', brandsensor_views.filter_presets, name='filter_presets'),
     path('apply-preset/<int:preset_id>/', brandsensor_views.apply_preset, name='apply_preset'),
@@ -44,6 +52,9 @@ urlpatterns = [
     path('api-keys/', brandsensor_views.api_keys, name='api_keys'),
     path('generate-api-key/', brandsensor_views.generate_api_key, name='generate_api_key'),
     path('delete-api-key/<int:key_id>/', brandsensor_views.delete_api_key, name='delete_api_key'),
+    
+    # Onboarding URL
+    path('onboarding/', brandsensor_views.onboarding, name='onboarding'),
 ]
 
 if settings.DEBUG:
