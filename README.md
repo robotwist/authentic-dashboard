@@ -4,81 +4,195 @@ A personalized dashboard experience layered on top of social platforms like Face
 
 ## Description
 
-People rate their time on social platforms as a 2 or 3 out of 10, yet they use them daily. This project is a response to that contradiction — a tool to make these platforms livable again. It lets users bypass algorithmic feeds and manipulative design by creating modes that display only the content they value. This isn’t a boycott — it’s a lens for clarity.
+People rate their time on social platforms as a 2 or 3 out of 10, yet they use them daily. This project is a response to that contradiction — a tool to make these platforms livable again. It lets users bypass algorithmic feeds and manipulative design by creating modes that display only the content they value. This isn't a boycott — it's a lens for clarity.
 
 This is part of a broader effort to build a cleaner, more humane internet. The dashboard is paired with a Chrome extension that scans platform content using custom sensors to detect and log behavior patterns like spam, buzzwords, urgency traps, promotional language, and more.
 
 ## Features
 
 - **Friends Only Mode**: Filter your feed to show content only from your first-degree friends.
-- **Family Only Mode** *(in development)*: Focus only on posts from your chosen family group.
-- **Interest Modes**: Tailor your feed around specific topics like “Running Shoes Mode,” displaying posts from trusted sources, brands, and communities you’ve approved.
+- **Family Only Mode**: Focus only on posts from your chosen family group.
+- **Interest Modes**: Tailor your feed around specific topics like "Running Shoes Mode," displaying posts from trusted sources, brands, and communities you've approved.
 - **Brand Trust Filter**: A mode that blocks promotional noise and only shows content from selected brands you've vetted.
 - **Bizfluencer Detection**: A LinkedIn-specific sensor that detects performative buzzword-heavy posts and filters them out.
 - **Sensor-based Content Logging**: Chrome extension detects manipulative or unwanted content patterns and logs them to a Django backend.
-- **Authenticity-Driven UI**: Users see their social content reframed through a personal lens rather than the algorithm’s.
+- **Authenticity-Driven UI**: Users see their social content reframed through a personal lens rather than the algorithm's.
+- **Machine Learning Insights**: Analyze sentiment, predict engagement, detect toxicity, and classify content.
 
 ## Project Structure
 
-authentic_dashboard_project/ ├── chrome_extension/ # Browser extension with sensors and content analysis │ ├── manifest.json │ ├── popup.js / popup.html │ ├── content.js │ └── sensors/ ├── config_project/ # Django project settings ├── brandsensor/ # Django app (models, views, templates) ├── templates/ │ └── brandsensor/dashboard.html ├── manage.py ├── db.sqlite3 ├── requirements.txt ├── venv/ └── README.md
-
+```
+authentic_dashboard_project/
+├── chrome_extension/        # Browser extension with sensors and content analysis
+│   ├── manifest.json
+│   ├── popup.js / popup.html
+│   ├── content.js
+│   └── background.js
+├── config_project/          # Django project settings
+├── brandsensor/             # Django app (models, views, templates)
+│   ├── management/
+│   │   └── commands/
+│   │       └── create_api_key.py  # Command to generate API keys
+│   ├── migrations/
+│   ├── templates/
+│   │   └── brandsensor/
+│   ├── ml_processor.py      # Machine learning module
+│   ├── models.py
+│   ├── views.py
+│   └── urls.py
+├── manage.py
+├── requirements.txt
+├── Procfile                 # For Heroku deployment
+└── README.md
+```
 
 ## Getting Started
 
+### Backend Setup
+
 1. Clone the repository
+   ```bash
+   git clone https://github.com/yourusername/authentic_dashboard_project.git
+   cd authentic_dashboard_project
+   ```
+
 2. Create and activate a virtual environment:
    ```bash
    python3 -m venv venv
-   source venv/bin/activate
-Dashboard UI
-The dashboard is rendered through Django templates and reflects your current filter settings (like Friends Only Mode). Data is logged from the Chrome extension and displayed in the interface, helping users understand and shape their feed experience.
+   source venv/bin/activate  # On Windows: venv\Scripts\activate
+   ```
 
-Technologies Used
-Python / Django
+3. Install dependencies:
+   ```bash
+   pip install -r requirements.txt
+   ```
 
-PostgreSQL (or SQLite for local testing)
+4. Run migrations:
+   ```bash
+   python manage.py migrate
+   ```
 
-JavaScript (Vanilla + Chrome Extension APIs)
+5. Create a test user:
+   ```bash
+   python manage.py createsuperuser
+   ```
 
-HTML/CSS (Django templates)
+6. Generate an API key for Chrome extension authentication:
+   ```bash
+   python manage.py create_api_key --username youruser
+   ```
+   
+   Make note of the generated API key - you'll need it for the Chrome extension.
 
-Git + GitHub for version control
+7. Run the development server:
+   ```bash
+   python manage.py runserver
+   ```
 
-Goals
-Perfect and popularize a personalized dashboard experience that actually makes people happy and serves them well.
+### Chrome Extension Setup
 
-Let people experience a version of social media that shows only what they want.
+1. Navigate to `chrome://extensions/` in Chrome
+2. Enable "Developer mode"
+3. Click "Load unpacked" and select the `chrome_extension` directory
+4. Click on the extension icon and enter your API key in the settings
+5. Visit Facebook, Instagram, or LinkedIn to start collecting data
 
-Provide actionable insight from sensor data (who/what is worth engaging with).
+## Authentication System
 
-Build toward a broader movement to reframe and reclaim the internet.
+The project uses a simple API key authentication system for the Chrome extension to communicate with the Django backend:
 
-Next Steps
-Add additional modes (Family Only, Interests, Trusted Creators)
+1. Each user has one or more API keys associated with their account
+2. The Chrome extension sends the API key with each request in the `X-API-Key` header
+3. The backend validates the API key and associates the data with the correct user
 
-Allow users to define their own sensor rules
+During development, if no API key is provided and DEBUG mode is enabled, the system will default to using the first user in the database to make testing easier.
 
-Build a weekly “authenticity digest” or vibe score report
+## Deployment
 
-Deploy online for others to install and use with real accounts
+### Backend Deployment (Heroku)
 
-Explore open collaboration with others interested in the ethical web
+1. Create a Heroku account and install the Heroku CLI
+2. Log in to Heroku:
+   ```bash
+   heroku login
+   ```
 
-License
-MIT License (or add your preferred license)
+3. Create a new Heroku app:
+   ```bash
+   heroku create your-app-name
+   ```
 
-Attribution
+4. Set environment variables:
+   ```bash
+   heroku config:set DJANGO_SECRET_KEY=your_secret_key
+   heroku config:set DJANGO_DEBUG=False
+   heroku config:set ALLOWED_HOSTS=your-app-name.herokuapp.com
+   heroku config:set CORS_ALLOWED_ORIGINS=https://your-app-name.herokuapp.com,chrome-extension://*
+   ```
+
+5. Add a PostgreSQL database:
+   ```bash
+   heroku addons:create heroku-postgresql:hobby-dev
+   ```
+
+6. Deploy the app:
+   ```bash
+   git push heroku main
+   ```
+
+7. Create a superuser on Heroku:
+   ```bash
+   heroku run python manage.py createsuperuser
+   ```
+
+8. Generate an API key:
+   ```bash
+   heroku run python manage.py create_api_key --username youruser
+   ```
+
+### Chrome Extension Deployment
+
+1. Update the API endpoint URLs in the extension:
+   - Edit `popup.js` and `background.js` to replace `http://localhost:8000` with your deployed backend URL
+   - Update the dashboard links in `popup.html` to point to your deployed dashboard
+
+2. Zip the extension directory for distribution:
+   ```bash
+   cd chrome_extension
+   zip -r ../authentic-dashboard-extension.zip *
+   ```
+
+3. Upload to Chrome Web Store (for distribution) or continue using in Developer Mode
+
+## Testing Without User Authentication
+
+During development, you can test the system without full user authentication:
+
+1. Make sure DEBUG is set to True in settings.py
+2. Create at least one user in the system
+3. The API will default to using the first user when no API key is provided (in DEBUG mode only)
+
+## Technologies Used
+
+- **Backend**: Python / Django
+- **Database**: SQLite (development), PostgreSQL (production)
+- **Frontend**: JavaScript, HTML/CSS (Django templates)
+- **Chrome Extension**: JavaScript, Chrome Extension APIs
+- **Machine Learning**: Basic ML algorithms for content analysis (sentiment analysis, topic classification)
+- **Deployment**: Heroku ready
+
+## Next Steps
+
+- Implement comprehensive user authentication
+- Add more machine learning models for better content categorization
+- Expand to more social platforms
+- Create a mobile application
+- Build a weekly "authenticity digest" or vibe score report
+
+## License
+
+MIT License
+
+## Attribution
+
 Created by [Your Name]. Inspired by ongoing conversations about authenticity, digital overload, and the need for a better online experience.
-
-yaml
-Copy
-Edit
-
----
-
-Let me know if you’d like:
-- A section for collaborators or a contributors table
-- To swap SQLite for Postgres and update the setup instructions
-- A polished project pitch for your course presentation
-
-And I’ll keep pushing it forward with you, one clean, rebellious filter at a time.

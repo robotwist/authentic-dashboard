@@ -1,4 +1,6 @@
 asgiref==3.8.1
 Django==5.2
+django-cors-headers==4.7.0
+numpy==2.2.4
 sqlparse==0.5.3
 typing_extensions==4.13.0

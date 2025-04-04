@@ -1,22 +1,285 @@
 <!DOCTYPE html>
 <html>
 <head>
-  <meta charset="UTF-8" />
-  <title>Sensor Runner</title>
-  <style>
-    body { font-family: sans-serif; width: 250px; padding: 10px; }
-    select, button { width: 100%; margin-top: 10px; }
-  </style>
+    <title>Authentic Dashboard</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            width: 320px;
+            padding: 16px;
+            background-color: #f9f9f9;
+            color: #333;
+        }
+        
+        h1 {
+            font-size: 18px;
+            margin-bottom: 8px;
+            color: #2c3e50;
+        }
+        
+        .description {
+            font-size: 13px;
+            color: #7f8c8d;
+            margin-bottom: 20px;
+        }
+        
+        button {
+            background-color: #3498db;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            padding: 8px 16px;
+            font-size: 14px;
+            cursor: pointer;
+            margin-bottom: 10px;
+            transition: background-color 0.2s;
+            width: 100%;
+        }
+        
+        button:hover {
+            background-color: #2980b9;
+        }
+        
+        button:disabled {
+            background-color: #bdc3c7;
+            cursor: not-allowed;
+        }
+        
+        .status {
+            margin-top: 16px;
+            font-size: 13px;
+            color: #2c3e50;
+        }
+        
+        .status.success {
+            color: #27ae60;
+        }
+        
+        .status.error {
+            color: #e74c3c;
+        }
+        
+        .settings {
+            margin-top: 20px;
+            border-top: 1px solid #ddd;
+            padding-top: 15px;
+        }
+        
+        .toggle-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 10px;
+        }
+        
+        .toggle-label {
+            font-size: 14px;
+        }
+        
+        .toggle {
+            position: relative;
+            display: inline-block;
+            width: 40px;
+            height: 20px;
+        }
+        
+        .toggle input {
+            opacity: 0;
+            width: 0;
+            height: 0;
+        }
+        
+        .slider {
+            position: absolute;
+            cursor: pointer;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background-color: #ccc;
+            transition: .4s;
+            border-radius: 20px;
+        }
+        
+        .slider:before {
+            position: absolute;
+            content: "";
+            height: 16px;
+            width: 16px;
+            left: 2px;
+            bottom: 2px;
+            background-color: white;
+            transition: .4s;
+            border-radius: 50%;
+        }
+        
+        input:checked + .slider {
+            background-color: #2196F3;
+        }
+        
+        input:checked + .slider:before {
+            transform: translateX(20px);
+        }
+        
+        .stats {
+            margin-top: 16px;
+            background-color: #fff;
+            border-radius: 4px;
+            padding: 10px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+        }
+        
+        .stat-row {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 5px;
+            font-size: 13px;
+        }
+        
+        .stat-count {
+            font-weight: bold;
+            color: #3498db;
+        }
+        
+        .recent-scans {
+            margin-top: 16px;
+            font-size: 12px;
+            color: #7f8c8d;
+            max-height: 100px;
+            overflow-y: auto;
+        }
+        
+        .scan-item {
+            padding: 5px 0;
+            border-bottom: 1px dotted #eee;
+        }
+        
+        .scan-platform {
+            font-weight: bold;
+        }
+        
+        .scan-time {
+            font-style: italic;
+            font-size: 11px;
+        }
+        
+        .footer {
+            margin-top: 20px;
+            font-size: 11px;
+            text-align: center;
+            color: #95a5a6;
+        }
+        
+        .footer a {
+            color: #3498db;
+            text-decoration: none;
+        }
+        
+        .api-key-section {
+            margin-top: 10px;
+            display: flex;
+            align-items: center;
+        }
+        
+        .api-key-section label {
+            margin-right: 10px;
+        }
+        
+        .api-key-input {
+            padding: 5px;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+        }
+        
+        .small-button {
+            background-color: #3498db;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            padding: 5px 10px;
+            font-size: 12px;
+            cursor: pointer;
+            margin-left: 10px;
+            transition: background-color 0.2s;
+        }
+        
+        .small-button:hover {
+            background-color: #2980b9;
+        }
+    </style>
 </head>
 <body>
-  <h3>Run a Sensor</h3>
-  <select id="sensorSelect">
-    <option value="buzzwords">Buzzword Buster</option>
-    <!-- Future sensors like popup, urgency, tracker can go here -->
-  </select>
-  <button id="runSensor">Run Sensor</button>
-  <div id="result" style="margin-top: 10px;"></div>
-
-  <script src="popup.js"></script>
+    <h1>Authentic Dashboard</h1>
+    <p class="description">Reclaim control of your social media experience</p>
+    
+    <button id="scanButton">Scan Current Page</button>
+    <div id="status" class="status">Ready to scan.</div>
+    
+    <div class="stats">
+        <div class="stat-row">
+            <span>Posts collected today:</span>
+            <span class="stat-count" id="postsToday">0</span>
+        </div>
+        <div class="stat-row">
+            <span>Total posts:</span>
+            <span class="stat-count" id="postsTotal">0</span>
+        </div>
+        <div class="stat-row">
+            <span>ML processed:</span>
+            <span class="stat-count" id="mlProcessed">0</span>
+        </div>
+    </div>
+    
+    <div class="recent-scans" id="recentScans">
+        <!-- Recent scans will be inserted here -->
+    </div>
+    
+    <div class="settings">
+        <h3 style="font-size: 14px; margin-bottom: 10px;">Scanner Settings</h3>
+        
+        <div class="toggle-row">
+            <span class="toggle-label">Auto-scan on page load</span>
+            <label class="toggle">
+                <input type="checkbox" id="autoScan" checked>
+                <span class="slider"></span>
+            </label>
+        </div>
+        
+        <div class="toggle-row">
+            <span class="toggle-label">Advanced ML processing</span>
+            <label class="toggle">
+                <input type="checkbox" id="advancedML" checked>
+                <span class="slider"></span>
+            </label>
+        </div>
+        
+        <div class="toggle-row">
+            <span class="toggle-label">Collect sponsored content</span>
+            <label class="toggle">
+                <input type="checkbox" id="collectSponsored" checked>
+                <span class="slider"></span>
+            </label>
+        </div>
+        
+        <div class="toggle-row">
+            <span class="toggle-label">Show notifications</span>
+            <label class="toggle">
+                <input type="checkbox" id="showNotifications" checked>
+                <span class="slider"></span>
+            </label>
+        </div>
+        
+        <div class="api-key-section">
+            <label for="apiKey">API Key:</label>
+            <input type="text" id="apiKey" class="api-key-input" placeholder="Enter your API key">
+            <button id="saveApiKey" class="small-button">Save</button>
+        </div>
+    </div>
+    
+    <div class="footer">
+        <p>View your <a href="http://localhost:8000/dashboard/" target="_blank">Dashboard</a> | <a href="http://localhost:8000/ml-dashboard/" target="_blank">ML Insights</a></p>
+    </div>
+    
+    <script src="popup.js"></script>
 </body>
 </html>

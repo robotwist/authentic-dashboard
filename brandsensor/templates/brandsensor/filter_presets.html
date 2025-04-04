@@ -1,0 +1,183 @@
+{% extends 'brandsensor/base.html' %}
+{% load static %}
+
+{% block title %}Filter Presets - Authentic Dashboard{% endblock %}
+
+{% block extra_css %}
+<style>
+    .preset-card {
+        border-radius: 10px;
+        box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+        transition: transform 0.3s ease, box-shadow 0.3s ease;
+        margin-bottom: 20px;
+    }
+    
+    .preset-card:hover {
+        transform: translateY(-5px);
+        box-shadow: 0 6px 12px rgba(0, 0, 0, 0.15);
+    }
+    
+    .preset-card.is-default {
+        border: 2px solid #4caf50;
+    }
+    
+    .preset-card .card-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+    }
+    
+    .preset-actions {
+        display: flex;
+        justify-content: flex-end;
+        gap: 8px;
+    }
+    
+    .preset-badge {
+        margin-left: 10px;
+    }
+    
+    .empty-state {
+        text-align: center;
+        padding: 50px 20px;
+        background-color: #f9f9f9;
+        border-radius: 10px;
+        margin-top: 20px;
+    }
+    
+    .empty-state i {
+        font-size: 48px;
+        color: #ccc;
+        margin-bottom: 20px;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="container mt-4">
+    <div class="row mb-4">
+        <div class="col-md-8">
+            <h1 class="h2">
+                <i class="fas fa-sliders-h mr-2"></i> Filter Presets
+            </h1>
+            <p class="text-muted">
+                Create and manage custom filter combinations to quickly apply to your dashboard.
+            </p>
+        </div>
+        <div class="col-md-4 text-right">
+            <a href="{% url 'dashboard' %}" class="btn btn-outline-primary">
+                <i class="fas fa-arrow-left mr-1"></i> Back to Dashboard
+            </a>
+        </div>
+    </div>
+
+    <!-- Presets Grid -->
+    <div class="row">
+        {% if presets %}
+            {% for preset in presets %}
+                <div class="col-md-6 col-lg-4">
+                    <div class="card preset-card {% if preset.is_default %}is-default{% endif %}">
+                        <div class="card-header bg-{{ preset.color }}">
+                            <h5 class="card-title text-white mb-0">
+                                <i class="fas fa-{{ preset.icon }} mr-2"></i> 
+                                {{ preset.name }}
+                                {% if preset.is_default %}
+                                    <span class="badge badge-light preset-badge">
+                                        <i class="fas fa-star text-warning"></i> Default
+                                    </span>
+                                {% endif %}
+                            </h5>
+                        </div>
+                        <div class="card-body">
+                            {% if preset.description %}
+                                <p class="card-text">{{ preset.description }}</p>
+                            {% endif %}
+                            
+                            <div class="mb-3">
+                                <h6 class="text-muted">Active Filters:</h6>
+                                <div class="d-flex flex-wrap">
+                                    {% if preset.friends_only %}
+                                        <span class="badge badge-info m-1">Friends Only</span>
+                                    {% endif %}
+                                    {% if preset.family_only %}
+                                        <span class="badge badge-info m-1">Family Only</span>
+                                    {% endif %}
+                                    {% if preset.hide_sponsored %}
+                                        <span class="badge badge-info m-1">Hide Sponsored</span>
+                                    {% endif %}
+                                    {% if preset.show_verified_only %}
+                                        <span class="badge badge-info m-1">Verified Only</span>
+                                    {% endif %}
+                                    {% if preset.high_sentiment_only %}
+                                        <span class="badge badge-info m-1">High Sentiment Only</span>
+                                    {% endif %}
+                                    {% if preset.bizfluencer_filter %}
+                                        <span class="badge badge-info m-1">Bizfluencer Filter</span>
+                                    {% endif %}
+                                    {% if preset.hide_job_posts %}
+                                        <span class="badge badge-info m-1">Hide Job Posts</span>
+                                    {% endif %}
+                                    {% if preset.interest_filter %}
+                                        <span class="badge badge-info m-1">Interest Filter</span>
+                                    {% endif %}
+                                </div>
+                            </div>
+                            
+                            <div class="preset-actions">
+                                <a href="{% url 'apply_preset' preset.id %}" class="btn btn-sm btn-success">
+                                    <i class="fas fa-check mr-1"></i> Apply
+                                </a>
+                                
+                                {% if not preset.is_default %}
+                                    <form method="POST" class="d-inline">
+                                        {% csrf_token %}
+                                        <input type="hidden" name="action" value="set_default">
+                                        <input type="hidden" name="preset_id" value="{{ preset.id }}">
+                                        <button type="submit" class="btn btn-sm btn-outline-warning">
+                                            <i class="fas fa-star mr-1"></i> Set Default
+                                        </button>
+                                    </form>
+                                {% endif %}
+                                
+                                <form method="POST" class="d-inline">
+                                    {% csrf_token %}
+                                    <input type="hidden" name="action" value="delete">
+                                    <input type="hidden" name="preset_id" value="{{ preset.id }}">
+                                    <button type="submit" class="btn btn-sm btn-outline-danger" 
+                                           onclick="return confirm('Are you sure you want to delete this preset?')">
+                                        <i class="fas fa-trash-alt"></i>
+                                    </button>
+                                </form>
+                            </div>
+                        </div>
+                        <div class="card-footer text-muted small">
+                            Created: {{ preset.created_at|date:"M d, Y" }}
+                        </div>
+                    </div>
+                </div>
+            {% endfor %}
+        {% else %}
+            <div class="col-12">
+                <div class="empty-state">
+                    <i class="fas fa-filter"></i>
+                    <h3>No Presets Yet</h3>
+                    <p class="text-muted">
+                        You haven't created any filter presets yet. Go to the dashboard to create your first preset.
+                    </p>
+                    <a href="{% url 'dashboard' %}" class="btn btn-primary mt-3">
+                        <i class="fas fa-plus mr-1"></i> Create Your First Preset
+                    </a>
+                </div>
+            </div>
+        {% endif %}
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+    $(document).ready(function() {
+        // Add any JavaScript functionality here
+    });
+</script>
+{% endblock %} 

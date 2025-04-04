@@ -1,183 +1,591 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Your Clean Dashboard</title>
-  <style>
-    body {
-      font-family: system-ui, sans-serif;
-      max-width: 800px;
-      margin: 0 auto;
-      padding: 2rem;
-      background: #f9f9f9;
-    }
+{% extends "brandsensor/base.html" %}
 
-    h1 {
-      font-size: 2rem;
-      margin-bottom: 1rem;
-    }
+{% block title %}Authentic Dashboard{% endblock %}
 
-    .controls {
-      background: #fff;
-      border: 1px solid #ccc;
-      padding: 1rem;
-      margin-bottom: 2rem;
-      border-radius: 8px;
-    }
-
-    .controls h2 {
-      font-size: 1.2rem;
-      margin-bottom: 0.5rem;
-    }
-
-    .form-group {
-      margin-bottom: 1rem;
-    }
-
-    .form-group input[type="text"] {
-      width: 100%;
-      padding: 0.5rem;
-      border: 1px solid #ccc;
-      border-radius: 4px;
-    }
-
-    .form-group label {
-      display: block;
-      margin-bottom: 0.3rem;
-      font-weight: bold;
-    }
-
-    .post {
-      background: #fff;
-      border: 1px solid #ddd;
-      padding: 1rem;
-      border-radius: 6px;
-      margin-bottom: 1rem;
-    }
-
-    .post small {
-      color: #555;
-      font-size: 0.85rem;
-    }
-
-    button {
-      padding: 0.5rem 1rem;
-      font-weight: bold;
-      background-color: #3366cc;
-      color: white;
-      border: none;
-      border-radius: 4px;
-      cursor: pointer;
-    }
-
-    button:hover {
-      background-color: #224499;
-    }
-  </style>
-</head>
-<body>
-  <h1>Your Authentic Dashboard</h1>
-
-  <div class="controls">
-    <h2>Filter Preferences</h2>
-    <form method="post" action="{% url 'toggle_mode' %}">
-      {% csrf_token %}
-      
-      <div class="form-group">
-        <label>
-          <input type="checkbox" name="friends_only" {% if preferences.friends_only %}checked{% endif %}>
-          Friends Only Mode
-        </label>
-      </div>
-
-      <div class="form-group">
-        <label>
-          <input type="checkbox" name="family_only" {% if preferences.family_only %}checked{% endif %}>
-          Family Only Mode
-        </label>
-      </div>
-
-      <div class="form-group">
-        <label for="interest_filter">Interest Mode (e.g. Running Shoes, Gardening):</label>
-        <input type="text" id="interest_filter" name="interest_filter" value="{{ preferences.interest_filter }}">
-      </div>
-
-      <div class="form-group">
-        <label for="approved_brands">Approved Brands (comma-separated):</label>
-        <input type="text" id="approved_brands" name="approved_brands" value="{{ preferences.approved_brands }}">
-      </div>
-
-      <button type="submit">Update Preferences</button>
-    </form>
-  </div>
-
-  <h2>Filtered Posts</h2>
-
-  {% for post in posts %}
-    <div class="post">
-      <strong>{{ post.platform|title }}</strong><br>
-      {{ post.content }}<br>
-      <small>Posted by: {{ post.user.username }}</small>
+{% block content %}
+<div class="dashboard-container">
+    <div class="sidebar">
+        <div class="sidebar-section">
+            <h3>Filter Preferences</h3>
+            
+            <!-- Filter Presets Section -->
+            <div class="filter-presets mb-3">
+                <div class="d-flex justify-content-between align-items-center mb-2">
+                    <h4 class="m-0 text-muted">Saved Presets</h4>
+                    <a href="{% url 'filter_presets' %}" class="btn btn-sm btn-outline-primary">
+                        <i class="fas fa-cog"></i> Manage
+                    </a>
+                </div>
+                
+                {% if filter_presets %}
+                <div class="preset-buttons">
+                    {% for preset in filter_presets %}
+                    <a href="{% url 'apply_preset' preset.id %}{% if days_filter %}?days={{ days_filter }}{% endif %}{% if current_platform %}&platform={{ current_platform }}{% endif %}{% if current_sort %}&sort={{ current_sort }}{% endif %}" 
+                       class="btn btn-sm btn-{{ preset.color }} mb-1 {% if preset.is_default %}border-success{% endif %}">
+                        <i class="fas fa-{{ preset.icon }} mr-1"></i> {{ preset.name }}
+                        {% if preset.is_default %}<i class="fas fa-star text-warning ml-1 small"></i>{% endif %}
+                    </a>
+                    {% endfor %}
+                </div>
+                {% else %}
+                <p class="text-muted small">No saved presets yet. Save your filter combinations below.</p>
+                {% endif %}
+                <hr>
+            </div>
+            
+            <form action="{% url 'toggle_mode' %}" method="post" id="filter-form">
+                {% csrf_token %}
+                <div class="form-group">
+                    <label>
+                        <input type="checkbox" name="friends_only" {% if preferences.friends_only %}checked{% endif %}>
+                        Friends Only Mode
+                    </label>
+                </div>
+                <div class="form-group">
+                    <label>
+                        <input type="checkbox" name="family_only" {% if preferences.family_only %}checked{% endif %}>
+                        Family Only Mode
+                    </label>
+                </div>
+                <div class="form-group">
+                    <label>
+                        <input type="checkbox" name="hide_sponsored" {% if preferences.hide_sponsored %}checked{% endif %}>
+                        Hide Sponsored Content
+                    </label>
+                </div>
+                <div class="form-group">
+                    <label>
+                        <input type="checkbox" name="show_verified_only" {% if preferences.show_verified_only %}checked{% endif %}>
+                        Verified Accounts Only
+                    </label>
+                </div>
+                
+                <!-- New Machine Learning Filters -->
+                <div class="form-group">
+                    <label>
+                        <input type="checkbox" name="bizfluencer_filter" {% if preferences.bizfluencer_filter %}checked{% endif %}>
+                        Filter Bizfluencer Content
+                    </label>
+                    <div class="sub-option {% if not preferences.bizfluencer_filter %}hidden{% endif %}">
+                        <label>Threshold:
+                            <input type="number" name="bizfluencer_threshold" value="{{ preferences.bizfluencer_threshold }}" min="1" max="10">
+                        </label>
+                        <small>Higher = more filtering</small>
+                    </div>
+                </div>
+                
+                <div class="form-group">
+                    <label>
+                        <input type="checkbox" name="high_sentiment_only" {% if preferences.high_sentiment_only %}checked{% endif %}>
+                        Positive Content Only
+                    </label>
+                    <div class="sub-option {% if not preferences.high_sentiment_only %}hidden{% endif %}">
+                        <label>Threshold:
+                            <input type="number" name="sentiment_threshold" value="{{ preferences.sentiment_threshold }}" min="0" max="1" step="0.1">
+                        </label>
+                        <small>Higher = more positive</small>
+                    </div>
+                </div>
+                
+                <div class="form-group">
+                    <label>
+                        <input type="checkbox" name="hide_job_posts" {% if preferences.hide_job_posts %}checked{% endif %}>
+                        Hide Job Postings
+                    </label>
+                </div>
+                
+                <div class="form-group">
+                    <label for="max_content_length">Max Content Length:</label>
+                    <input type="number" name="max_content_length" id="max_content_length" value="{{ preferences.max_content_length }}" placeholder="No limit">
+                    <small>Characters (leave blank for no limit)</small>
+                </div>
+                
+                <div class="form-group">
+                    <label for="interest_filter">Interests:</label>
+                    <input type="text" name="interest_filter" id="interest_filter" placeholder="travel, food, tech" value="{{ preferences.interest_filter }}">
+                </div>
+                <div class="form-group">
+                    <label for="approved_brands">Approved Brands:</label>
+                    <input type="text" name="approved_brands" id="approved_brands" placeholder="brand1, brand2" value="{{ preferences.approved_brands }}">
+                </div>
+                <div class="form-group">
+                    <label for="excluded_keywords">Excluded Keywords:</label>
+                    <input type="text" name="excluded_keywords" id="excluded_keywords" placeholder="spam, scam" value="{{ preferences.excluded_keywords }}">
+                </div>
+                <div class="form-group">
+                    <label for="favorite_hashtags">Favorite Hashtags:</label>
+                    <input type="text" name="favorite_hashtags" id="favorite_hashtags" placeholder="travel, food" value="{{ preferences.favorite_hashtags }}">
+                </div>
+                
+                <button type="submit" class="btn primary-btn">Update Preferences</button>
+                
+                <!-- Save as Preset Section -->
+                <div class="save-preset-section mt-3">
+                    <div class="form-check mb-2">
+                        <input class="form-check-input" type="checkbox" id="save-as-preset-toggle">
+                        <label class="form-check-label" for="save-as-preset-toggle">
+                            Save as Preset
+                        </label>
+                    </div>
+                    
+                    <div id="preset-options" class="mt-2" style="display: none;">
+                        <div class="form-group">
+                            <input type="text" name="preset_name" class="form-control form-control-sm" placeholder="Preset Name" required>
+                        </div>
+                        <div class="form-group">
+                            <textarea name="preset_description" class="form-control form-control-sm" placeholder="Description (optional)" rows="2"></textarea>
+                        </div>
+                        <div class="form-row">
+                            <div class="col">
+                                <select name="preset_icon" class="form-control form-control-sm">
+                                    <option value="filter">Filter</option>
+                                    <option value="star">Star</option>
+                                    <option value="heart">Heart</option>
+                                    <option value="check">Check</option>
+                                    <option value="thumbs-up">Thumbs Up</option>
+                                    <option value="smile">Smile</option>
+                                    <option value="bell">Bell</option>
+                                    <option value="bookmark">Bookmark</option>
+                                </select>
+                            </div>
+                            <div class="col">
+                                <select name="preset_color" class="form-control form-control-sm">
+                                    <option value="primary">Blue</option>
+                                    <option value="success">Green</option>
+                                    <option value="danger">Red</option>
+                                    <option value="warning">Yellow</option>
+                                    <option value="info">Teal</option>
+                                    <option value="secondary">Gray</option>
+                                    <option value="dark">Dark</option>
+                                </select>
+                            </div>
+                        </div>
+                        <div class="form-check mt-2">
+                            <input type="checkbox" class="form-check-input" id="preset-default" name="preset_default">
+                            <label class="form-check-label" for="preset-default">Set as default</label>
+                        </div>
+                        <input type="hidden" name="save_as_preset" value="1">
+                    </div>
+                </div>
+            </form>
+        </div>
+        
+        <div class="sidebar-section">
+            <h3>Time Period</h3>
+            <div class="time-filter">
+                <a href="?days=1{% if current_platform %}&platform={{ current_platform }}{% endif %}{% if current_sort %}&sort={{ current_sort }}{% endif %}" class="{% if days_filter == '1' %}active{% endif %}">Today</a>
+                <a href="?days=7{% if current_platform %}&platform={{ current_platform }}{% endif %}{% if current_sort %}&sort={{ current_sort }}{% endif %}" class="{% if days_filter == '7' %}active{% endif %}">Last Week</a>
+                <a href="?days=30{% if current_platform %}&platform={{ current_platform }}{% endif %}{% if current_sort %}&sort={{ current_sort }}{% endif %}" class="{% if days_filter == '30' %}active{% endif %}">Last Month</a>
+                <a href="?days=90{% if current_platform %}&platform={{ current_platform }}{% endif %}{% if current_sort %}&sort={{ current_sort }}{% endif %}" class="{% if days_filter == '90' %}active{% endif %}">Last 3 Months</a>
+                <a href="?days=365{% if current_platform %}&platform={{ current_platform }}{% endif %}{% if current_sort %}&sort={{ current_sort }}{% endif %}" class="{% if days_filter == '365' %}active{% endif %}">Last Year</a>
+            </div>
+        </div>
+        
+        <div class="sidebar-section">
+            <h3>Platform</h3>
+            <div class="platform-filter">
+                <a href="?{% if days_filter %}days={{ days_filter }}{% endif %}{% if current_sort %}&sort={{ current_sort }}{% endif %}" class="{% if not current_platform %}active{% endif %}">All</a>
+                {% for platform_code, platform_name in platforms %}
+                <a href="?platform={{ platform_code }}{% if days_filter %}&days={{ days_filter }}{% endif %}{% if current_sort %}&sort={{ current_sort }}{% endif %}" class="{% if current_platform == platform_code %}active{% endif %}">{{ platform_name }}</a>
+                {% endfor %}
+            </div>
+        </div>
+        
+        <div class="sidebar-section">
+            <h3>Sort By</h3>
+            <div class="sort-filter">
+                <a href="?{% if days_filter %}days={{ days_filter }}{% endif %}{% if current_platform %}&platform={{ current_platform }}{% endif %}" class="{% if not current_sort %}active{% endif %}">Newest</a>
+                <a href="?sort=relevance{% if days_filter %}&days={{ days_filter }}{% endif %}{% if current_platform %}&platform={{ current_platform }}{% endif %}" class="{% if current_sort == 'relevance' %}active{% endif %}">Relevance</a>
+                <a href="?sort=engagement{% if days_filter %}&days={{ days_filter }}{% endif %}{% if current_platform %}&platform={{ current_platform }}{% endif %}" class="{% if current_sort == 'engagement' %}active{% endif %}">Engagement</a>
+                <a href="?sort=sentiment{% if days_filter %}&days={{ days_filter }}{% endif %}{% if current_platform %}&platform={{ current_platform }}{% endif %}" class="{% if current_sort == 'sentiment' %}active{% endif %}">Sentiment</a>
+            </div>
+        </div>
+        
+        <div class="sidebar-section">
+            <h3>ML Processing</h3>
+            <p>{{ ml_processed_count }} of {{ total_posts_count }} posts processed</p>
+            <button id="process-ml-btn" class="btn secondary-btn">Process More Posts</button>
+            <div id="ml-status" class="mt-2 hidden"></div>
+        </div>
     </div>
-  {% empty %}
-    <p>No posts match your current filter settings. Adjust above to see more content.</p>
-  {% endfor %}
-</body>
-</html>
-<h2>Your Curated Feed</h2>
+
+    <div class="main-content">
+        <div class="dashboard-header">
+            <h2>Your Authentic Feed</h2>
+            <div class="post-count">
+                Showing {{ posts|length }} posts
+            </div>
+        </div>
+
+        <div class="stats-section">
+            <div class="stat-card">
+                <h3>Platform Distribution</h3>
+                <div class="platform-stats">
+                    {% for platform in platform_stats %}
+                    <div class="platform-stat">
+                        <div class="platform-name">{{ platform.platform }}</div>
+                        <div class="platform-count">{{ platform.count }}</div>
+                    </div>
+                    {% endfor %}
+                </div>
+            </div>
+            
+            <div class="stat-card">
+                <h3>Categories</h3>
+                <div class="category-stats">
+                    {% for category in category_stats %}
+                    <div class="category-badge">
+                        {{ category.name }} ({{ category.count }})
+                    </div>
+                    {% endfor %}
+                </div>
+            </div>
+            
+            <div class="stat-card">
+                <h3>Auto-Detected Topics</h3>
+                <div class="topic-stats">
+                    {% for topic in topic_stats %}
+                    <div class="topic-badge">
+                        {{ topic.automated_category }} ({{ topic.count }})
+                    </div>
+                    {% endfor %}
+                </div>
+            </div>
+            
+            <div class="stat-card">
+                <h3>Sentiment Analysis</h3>
+                <div class="sentiment-stats">
+                    <div class="sentiment-overview">
+                        <div class="sentiment-score">
+                            {% if sentiment_stats.avg_sentiment %}
+                                <span class="large-number">{{ sentiment_stats.avg_sentiment|floatformat:2 }}</span>
+                                <span class="sentiment-label">
+                                    {% if sentiment_stats.avg_sentiment > 0.2 %}
+                                        Positive
+                                    {% elif sentiment_stats.avg_sentiment < -0.2 %}
+                                        Negative
+                                    {% else %}
+                                        Neutral
+                                    {% endif %}
+                                </span>
+                            {% else %}
+                                <span class="neutral">No sentiment data</span>
+                            {% endif %}
+                        </div>
+                    </div>
+                    <div class="sentiment-distribution">
+                        <div class="sentiment-bar positive" style="width: {% if sentiment_stats.positive_count %}{{ sentiment_stats.positive_count|floatformat:0 }}%{% else %}0{% endif %}">
+                            Positive: {{ sentiment_stats.positive_count|default:0 }}
+                        </div>
+                        <div class="sentiment-bar neutral" style="width: {% if sentiment_stats.neutral_count %}{{ sentiment_stats.neutral_count|floatformat:0 }}%{% else %}0{% endif %}">
+                            Neutral: {{ sentiment_stats.neutral_count|default:0 }}
+                        </div>
+                        <div class="sentiment-bar negative" style="width: {% if sentiment_stats.negative_count %}{{ sentiment_stats.negative_count|floatformat:0 }}%{% else %}0{% endif %}">
+                            Negative: {{ sentiment_stats.negative_count|default:0 }}
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="posts-container">
+            {% if posts %}
+                {% for post in posts %}
+                <div class="post-card {% if post.is_sponsored %}sponsored{% endif %} {% if post.starred %}starred{% endif %}">
+                    <div class="post-header">
+                        <div class="post-user">
+                            <strong>{{ post.original_user }}</strong>
+                            {% if post.verified %}<span class="verified-badge">✓</span>{% endif %}
+                            {% if post.is_friend %}<span class="friend-badge">Friend</span>{% endif %}
+                            {% if post.is_family %}<span class="family-badge">Family</span>{% endif %}
+                        </div>
+                        <div class="post-meta">
+                            <span class="post-platform">{{ post.get_platform_display }}</span>
+                            {% if post.timestamp %}
+                            <span class="post-time">{{ post.timestamp|date:"M d, Y" }}</span>
+                            {% endif %}
+                        </div>
+                    </div>
+                    <div class="post-content">
+                        {{ post.content|linebreaks|truncatewords:50 }}
+                        {% if post.content|wordcount > 50 %}
+                        <a href="{% url 'post_detail' post.id %}" class="read-more">Read more</a>
+                        {% endif %}
+                    </div>
+                    
+                    {% if post.automated_category %}
+                    <div class="ml-insights">
+                        <div class="ml-tag topic">
+                            <span class="label">Topic:</span> 
+                            <span class="value">{{ post.automated_category }}</span>
+                        </div>
+                        
+                        {% if post.sentiment_score %}
+                        <div class="ml-tag sentiment {% if post.sentiment_score > 0.2 %}positive{% elif post.sentiment_score < -0.2 %}negative{% else %}neutral{% endif %}">
+                            <span class="label">Sentiment:</span> 
+                            <span class="value">{{ post.sentiment_score|floatformat:2 }}</span>
+                        </div>
+                        {% endif %}
+                        
+                        {% if post.relevance_score %}
+                        <div class="ml-tag relevance">
+                            <span class="label">Relevance:</span> 
+                            <span class="value">{{ post.relevance_score|floatformat:2 }}</span>
+                        </div>
+                        {% endif %}
+                        
+                        {% if post.engagement_prediction %}
+                        <div class="ml-tag engagement">
+                            <span class="label">Engagement:</span> 
+                            <span class="value">{{ post.engagement_prediction|floatformat:2 }}</span>
+                        </div>
+                        {% endif %}
+                    </div>
+                    {% endif %}
+                    
+                    {% if post.hashtags %}
+                    <div class="post-hashtags">
+                        {% for tag in post.hashtags.split %} 
+                        <span class="hashtag">{{ tag }}</span>
+                        {% endfor %}
+                    </div>
+                    {% endif %}
+                    
+                    <div class="post-engagement">
+                        {% if post.likes > 0 %}
+                        <span class="engagement-stat likes">{{ post.likes }} likes</span>
+                        {% endif %}
+                        {% if post.comments > 0 %}
+                        <span class="engagement-stat comments">{{ post.comments }} comments</span>
+                        {% endif %}
+                        {% if post.shares > 0 %}
+                        <span class="engagement-stat shares">{{ post.shares }} shares</span>
+                        {% endif %}
+                    </div>
+                    
+                    <div class="post-actions">
+                        <form action="{% url 'post_action' post.id %}" method="post" class="ajax-form">
+                            {% csrf_token %}
+                            <input type="hidden" name="action" value="star">
+                            <button type="submit" class="action-btn star-btn {% if post.starred %}active{% endif %}">
+                                {% if post.starred %}★{% else %}☆{% endif %}
+                            </button>
+                        </form>
+                        <form action="{% url 'post_action' post.id %}" method="post" class="ajax-form">
+                            {% csrf_token %}
+                            <input type="hidden" name="action" value="hide">
+                            <button type="submit" class="action-btn hide-btn">
+                                Hide
+                            </button>
+                        </form>
+                        <a href="{% url 'post_detail' post.id %}" class="action-btn detail-btn">View Details</a>
+                    </div>
+                </div>
+                {% endfor %}
+            {% else %}
+                <div class="no-posts">
+                    <p>No posts match your current filters.</p>
+                    <p>Try adjusting your preferences or collecting more content using the Chrome extension.</p>
+                </div>
+            {% endif %}
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_styles %}
 <style>
-  .post-feed {
-    display: flex;
-    flex-direction: column;
-    gap: 1.25rem;
-    margin-top: 2rem;
-  }
-
-  .post-card {
-    background: #f9f9f9;
-    border: 1px solid #ddd;
-    padding: 1rem;
-    border-radius: 8px;
-  }
-
-  .post-meta {
-    font-size: 0.85rem;
-    color: #555;
-    margin-bottom: 0.5rem;
-    display: flex;
-    justify-content: space-between;
-  }
-
-  .post-body {
-    font-size: 1rem;
-    line-height: 1.4;
-    margin-bottom: 0.5rem;
-  }
-
-  .post-tags {
-    font-size: 0.75rem;
-    color: #888;
-  }
+    .sentiment-score .large-number {
+        font-size: 2rem;
+        font-weight: bold;
+    }
+    
+    .sentiment-distribution {
+        display: flex;
+        flex-direction: column;
+        gap: 5px;
+        margin-top: 10px;
+    }
+    
+    .sentiment-bar {
+        padding: 5px;
+        color: white;
+        border-radius: 3px;
+        text-align: center;
+        min-width: 30px;
+    }
+    
+    .sentiment-bar.positive {
+        background-color: #4CAF50;
+    }
+    
+    .sentiment-bar.neutral {
+        background-color: #9E9E9E;
+    }
+    
+    .sentiment-bar.negative {
+        background-color: #F44336;
+    }
+    
+    .ml-insights {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        margin: 10px 0;
+        font-size: 0.85rem;
+    }
+    
+    .ml-tag {
+        padding: 3px 8px;
+        border-radius: 12px;
+        background-color: #f1f1f1;
+        display: inline-flex;
+        align-items: center;
+    }
+    
+    .ml-tag .label {
+        font-weight: bold;
+        margin-right: 4px;
+    }
+    
+    .ml-tag.topic {
+        background-color: #E3F2FD;
+        color: #1565C0;
+    }
+    
+    .ml-tag.sentiment {
+        background-color: #F1F8E9;
+        color: #558B2F;
+    }
+    
+    .ml-tag.sentiment.positive {
+        background-color: #E8F5E9;
+        color: #2E7D32;
+    }
+    
+    .ml-tag.sentiment.negative {
+        background-color: #FFEBEE;
+        color: #C62828;
+    }
+    
+    .ml-tag.sentiment.neutral {
+        background-color: #ECEFF1;
+        color: #455A64;
+    }
+    
+    .ml-tag.relevance {
+        background-color: #FFF8E1;
+        color: #FF8F00;
+    }
+    
+    .ml-tag.engagement {
+        background-color: #E8EAF6;
+        color: #3949AB;
+    }
+    
+    .topic-stats, .topic-badge {
+        margin-top: 10px;
+    }
+    
+    .topic-badge {
+        display: inline-block;
+        padding: 5px 10px;
+        background-color: #E3F2FD;
+        color: #1565C0;
+        border-radius: 15px;
+        margin-right: 5px;
+        margin-bottom: 5px;
+    }
+    
+    .sub-option {
+        margin-left: 20px;
+        margin-top: 5px;
+        padding: 5px;
+        border-left: 2px solid #eee;
+    }
+    
+    .sub-option.hidden {
+        display: none;
+    }
+    
+    .hidden {
+        display: none;
+    }
+    
+    #ml-status {
+        padding: 8px;
+        border-radius: 4px;
+        margin-top: 8px;
+    }
+    
+    #ml-status.success {
+        background-color: #E8F5E9;
+        color: #2E7D32;
+    }
+    
+    #ml-status.error {
+        background-color: #FFEBEE;
+        color: #C62828;
+    }
 </style>
+{% endblock %}
 
-{% if posts %}
-  <div class="post-feed">
-    {% for post in posts %}
-      <div class="post-card">
-        <div class="post-meta">
-          <strong>{{ post.platform|title }}</strong> 
-          <span class="post-time">{{ post.created_at|date:"M d, Y @ H:i" }}</span>
-        </div>
-        <div class="post-body">
-          {{ post.content }}
-        </div>
-        <div class="post-tags">
-          <small>Category: {{ post.category }}</small>
-        </div>
-      </div>
-    {% endfor %}
-  </div>
-{% else %}
-  <p>No posts match your current filter.</p>
-{% endif %}
+{% block extra_scripts %}
+<script>
+    $(document).ready(function() {
+        // Toggle sub-options for filters with thresholds
+        $('input[name="bizfluencer_filter"]').change(function() {
+            if($(this).is(':checked')) {
+                $(this).closest('.form-group').find('.sub-option').removeClass('hidden');
+            } else {
+                $(this).closest('.form-group').find('.sub-option').addClass('hidden');
+            }
+        });
+        
+        $('input[name="high_sentiment_only"]').change(function() {
+            if($(this).is(':checked')) {
+                $(this).closest('.form-group').find('.sub-option').removeClass('hidden');
+            } else {
+                $(this).closest('.form-group').find('.sub-option').addClass('hidden');
+            }
+        });
+        
+        // Toggle preset options
+        $('#save-as-preset-toggle').change(function() {
+            if($(this).is(':checked')) {
+                $('#preset-options').slideDown();
+            } else {
+                $('#preset-options').slideUp();
+            }
+        });
+        
+        // Process ML posts button
+        $('#process-ml-btn').click(function() {
+            var btn = $(this);
+            var statusDiv = $('#ml-status');
+            
+            btn.prop('disabled', true).text('Processing...');
+            statusDiv.removeClass('hidden').html('<div class="progress"><div class="progress-bar progress-bar-striped progress-bar-animated" role="progressbar" style="width: 100%"></div></div>');
+            
+            $.ajax({
+                url: '/api/process-ml/',
+                method: 'POST',
+                data: { 
+                    csrfmiddlewaretoken: '{{ csrf_token }}',
+                    limit: 20
+                },
+                success: function(response) {
+                    statusDiv.html('<div class="alert alert-success">Processed ' + response.processed + ' posts successfully.</div>');
+                    setTimeout(function() {
+                        location.reload();
+                    }, 1500);
+                },
+                error: function() {
+                    statusDiv.html('<div class="alert alert-danger">Error processing posts. Please try again.</div>');
+                    btn.prop('disabled', false).text('Process More Posts');
+                }
+            });
+        });
+    });
+</script>
+{% endblock %}

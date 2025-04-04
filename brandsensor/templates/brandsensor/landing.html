@@ -1,0 +1,164 @@
+{% extends 'brandsensor/base.html' %}
+{% load static %}
+
+{% block title %}Authentic Dashboard - Reclaim Your Social Experience{% endblock %}
+
+{% block extra_css %}
+<style>
+    .hero-section {
+        background-color: #f9f9fc;
+        padding: 6rem 2rem;
+        text-align: center;
+        border-radius: 10px;
+        margin: 2rem 0;
+    }
+    
+    .hero-title {
+        font-size: 3rem;
+        font-weight: 800;
+        margin-bottom: 1.5rem;
+        color: var(--primary);
+    }
+    
+    .hero-subtitle {
+        font-size: 1.5rem;
+        font-weight: 400;
+        margin-bottom: 2rem;
+        color: var(--text);
+        max-width: 800px;
+        margin-left: auto;
+        margin-right: auto;
+    }
+    
+    .feature-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+        gap: 2rem;
+        margin: 4rem 0;
+    }
+    
+    .feature-card {
+        background-color: white;
+        border-radius: 10px;
+        padding: 2rem;
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
+        transition: transform 0.3s ease;
+    }
+    
+    .feature-card:hover {
+        transform: translateY(-5px);
+    }
+    
+    .feature-icon {
+        font-size: 2.5rem;
+        margin-bottom: 1rem;
+        color: var(--primary);
+    }
+    
+    .feature-title {
+        font-size: 1.5rem;
+        font-weight: 600;
+        margin-bottom: 1rem;
+    }
+    
+    .feature-description {
+        color: var(--light-text);
+    }
+    
+    .cta-buttons {
+        margin-top: 2rem;
+        display: flex;
+        gap: 1rem;
+        justify-content: center;
+    }
+    
+    .btn-secondary {
+        background-color: white;
+        color: var(--primary);
+        border: 2px solid var(--primary);
+    }
+    
+    .btn-secondary:hover {
+        background-color: var(--primary);
+        color: white;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="container">
+    <div class="hero-section">
+        <h1 class="hero-title">Authentic Dashboard</h1>
+        <p class="hero-subtitle">
+            Reclaim your social media experience with AI-powered filtering and analytics.
+            See what truly matters to you without the noise.
+        </p>
+        <div class="cta-buttons">
+            <a href="{% url 'register' %}" class="btn">Get Started</a>
+            <a href="{% url 'login' %}" class="btn btn-secondary">Login</a>
+        </div>
+    </div>
+    
+    <div class="feature-grid">
+        <div class="feature-card">
+            <div class="feature-icon">
+                <i class="fas fa-users"></i>
+            </div>
+            <h3 class="feature-title">Friends & Family Mode</h3>
+            <p class="feature-description">
+                Focus on content from your closest connections without distractions from brands or distant acquaintances.
+            </p>
+        </div>
+        
+        <div class="feature-card">
+            <div class="feature-icon">
+                <i class="fas fa-brain"></i>
+            </div>
+            <h3 class="feature-title">Smart Content Analysis</h3>
+            <p class="feature-description">
+                Our ML algorithms detect content types, sentiment, and relevance to help you find what matters most.
+            </p>
+        </div>
+        
+        <div class="feature-card">
+            <div class="feature-icon">
+                <i class="fas fa-sliders-h"></i>
+            </div>
+            <h3 class="feature-title">Custom Filter Presets</h3>
+            <p class="feature-description">
+                Create and save personalized filter combinations to quickly switch between different viewing modes.
+            </p>
+        </div>
+        
+        <div class="feature-card">
+            <div class="feature-icon">
+                <i class="fas fa-chart-line"></i>
+            </div>
+            <h3 class="feature-title">Content Analytics</h3>
+            <p class="feature-description">
+                Understand your social feed with detailed analytics on content types, platforms, and engagement patterns.
+            </p>
+        </div>
+        
+        <div class="feature-card">
+            <div class="feature-icon">
+                <i class="fas fa-shield-alt"></i>
+            </div>
+            <h3 class="feature-title">Sponsored Content Detection</h3>
+            <p class="feature-description">
+                Automatically identify and filter sponsored posts and advertisements from your social feeds.
+            </p>
+        </div>
+        
+        <div class="feature-card">
+            <div class="feature-icon">
+                <i class="fas fa-th-large"></i>
+            </div>
+            <h3 class="feature-title">Cross-Platform Integration</h3>
+            <p class="feature-description">
+                View content from multiple social platforms in one unified, clean interface.
+            </p>
+        </div>
+    </div>
+</div>
+{% endblock %} 

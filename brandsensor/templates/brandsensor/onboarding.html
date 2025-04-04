@@ -1,96 +1,372 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <title>Welcome to Your Authentic Dashboard</title>
-  <style>
-    body {
-      font-family: sans-serif;
-      max-width: 600px;
-      margin: 0 auto;
-      padding: 2rem;
-      background-color: #fefefe;
-    }
+{% extends "brandsensor/base.html" %}
 
-    h1 {
+{% block title %}Welcome to Authentic Dashboard{% endblock %}
+
+{% block content %}
+<div class="container">
+  <div class="onboarding-container">
+    <div class="onboarding-header">
+      <h1>Welcome to Authentic Dashboard</h1>
+      <p class="lead-text">Take control of your social media experience by setting up your content preferences.</p>
+    </div>
+    
+    <div class="onboarding-steps">
+      <div class="step active" id="step1">
+        <div class="step-number">1</div>
+        <h3>Basic Preferences</h3>
+        <div class="step-content">
+          <p>Let's start by setting up your basic filtering preferences. These will help you see exactly what matters to you.</p>
+          
+          <form id="onboardingForm" method="post" action="{% url 'onboarding' %}">
+            {% csrf_token %}
+            
+            <div class="form-section">
+              <h4>Content Filters</h4>
+              
+              <div class="form-check">
+                <input type="checkbox" id="friends_only" name="friends_only">
+                <label for="friends_only">
+                  <strong>Friends Only Mode</strong>
+                  <span class="form-text">Only show content from your friends</span>
+                </label>
+              </div>
+              
+              <div class="form-check">
+                <input type="checkbox" id="family_only" name="family_only">
+                <label for="family_only">
+                  <strong>Family Only Mode</strong>
+                  <span class="form-text">Only show content from your family members</span>
+                </label>
+              </div>
+              
+              <div class="form-check">
+                <input type="checkbox" id="hide_sponsored" name="hide_sponsored" checked>
+                <label for="hide_sponsored">
+                  <strong>Hide Sponsored Content</strong>
+                  <span class="form-text">Remove ads and sponsored posts from your feed</span>
+                </label>
+              </div>
+              
+              <div class="form-check">
+                <input type="checkbox" id="show_verified_only" name="show_verified_only">
+                <label for="show_verified_only">
+                  <strong>Verified Accounts Only</strong>
+                  <span class="form-text">Only show content from verified accounts</span>
+                </label>
+              </div>
+            </div>
+            
+            <div class="form-actions">
+              <button type="button" class="btn btn-next" onclick="showStep(2)">Next: Interests & Keywords</button>
+            </div>
+          </div>
+        </div>
+        
+        <div class="step" id="step2">
+          <div class="step-number">2</div>
+          <h3>Interests & Keywords</h3>
+          <div class="step-content">
+            <p>Now let's define your interests and specify any content you'd like to filter out.</p>
+            
+            <div class="form-section">
+              <div class="form-group">
+                <label for="interest_filter">
+                  <strong>Your Interests</strong>
+                  <span class="form-text">Enter topics you're interested in (comma-separated)</span>
+                </label>
+                <input type="text" id="interest_filter" name="interest_filter" class="form-control" 
+                       placeholder="e.g. photography, cooking, travel, yoga">
+              </div>
+              
+              <div class="form-group">
+                <label for="excluded_keywords">
+                  <strong>Keywords to Exclude</strong>
+                  <span class="form-text">Enter words or topics you'd like to filter out (comma-separated)</span>
+                </label>
+                <input type="text" id="excluded_keywords" name="excluded_keywords" class="form-control" 
+                       placeholder="e.g. politics, clickbait, spoilers">
+              </div>
+            </div>
+            
+            <div class="form-actions">
+              <button type="button" class="btn-back" onclick="showStep(1)">Back</button>
+              <button type="button" class="btn btn-next" onclick="showStep(3)">Next: Favorite Content</button>
+            </div>
+          </div>
+        </div>
+        
+        <div class="step" id="step3">
+          <div class="step-number">3</div>
+          <h3>Favorite Content</h3>
+          <div class="step-content">
+            <p>Finally, tell us about your favorite accounts and hashtags.</p>
+            
+            <div class="form-section">
+              <div class="form-group">
+                <label for="approved_brands">
+                  <strong>Preferred Accounts</strong>
+                  <span class="form-text">Enter accounts/brands you trust (comma-separated)</span>
+                </label>
+                <input type="text" id="approved_brands" name="approved_brands" class="form-control" 
+                       placeholder="e.g. natgeo, tedtalks, friendusername">
+              </div>
+              
+              <div class="form-group">
+                <label for="favorite_hashtags">
+                  <strong>Favorite Hashtags</strong>
+                  <span class="form-text">Enter hashtags you enjoy (comma-separated, without the # symbol)</span>
+                </label>
+                <input type="text" id="favorite_hashtags" name="favorite_hashtags" class="form-control" 
+                       placeholder="e.g. nature, foodie, motivation">
+              </div>
+            </div>
+            
+            <div class="form-actions">
+              <button type="button" class="btn-back" onclick="showStep(2)">Back</button>
+              <button type="submit" class="btn btn-complete">Complete Setup</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+    
+    <div class="onboarding-info">
+      <div class="info-panel">
+        <div class="info-icon">
+          <i class="fas fa-lightbulb"></i>
+        </div>
+        <h3>How It Works</h3>
+        <p>Authentic Dashboard reclaims your social experience by filtering out the noise and showing you only what matters. Our Chrome extension captures content from Facebook and Instagram, then applies your preferences to create a cleaner, more focused feed.</p>
+      </div>
+      
+      <div class="info-panel">
+        <div class="info-icon">
+          <i class="fas fa-shield-alt"></i>
+        </div>
+        <h3>Privacy First</h3>
+        <p>Your preferences and data stay on your device. We don't share your information, and the extension only collects what's needed to filter your content according to your preferences.</p>
+      </div>
+      
+      <div class="info-panel">
+        <div class="info-icon">
+          <i class="fas fa-sliders-h"></i>
+        </div>
+        <h3>Fully Customizable</h3>
+        <p>You can adjust your preferences anytime from the dashboard. Experiment with different filters to find the perfect balance for your social media experience.</p>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block extra_styles %}
+<style>
+  .onboarding-container {
+    max-width: 900px;
+    margin: 0 auto;
+    padding: 2rem 0 4rem;
+  }
+  
+  .onboarding-header {
+    text-align: center;
+    margin-bottom: 3rem;
+  }
+  
+  .onboarding-header h1 {
+    font-size: 2.5rem;
+    font-weight: 700;
+    color: var(--primary);
+    margin-bottom: 1rem;
+  }
+  
+  .lead-text {
+    font-size: 1.25rem;
+    color: var(--light-text);
+  }
+  
+  .onboarding-steps {
+    background: var(--card-bg);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow);
+    margin-bottom: 3rem;
+    overflow: hidden;
+  }
+  
+  .step {
+    display: none;
+    padding: 2rem;
+    border-bottom: 1px solid var(--border);
+  }
+  
+  .step.active {
+    display: block;
+  }
+  
+  .step-number {
+    width: 40px;
+    height: 40px;
+    border-radius: 50%;
+    background: var(--primary);
+    color: white;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: 700;
+    margin-bottom: 1rem;
+  }
+  
+  .step h3 {
+    font-size: 1.5rem;
+    font-weight: 600;
+    margin-bottom: 1.5rem;
+  }
+  
+  .step-content {
+    color: var(--text);
+  }
+  
+  .step-content p {
+    margin-bottom: 1.5rem;
+    color: var(--light-text);
+  }
+  
+  .form-section {
+    margin-bottom: 2rem;
+  }
+  
+  .form-section h4 {
+    font-size: 1.1rem;
+    font-weight: 600;
+    margin-bottom: 1rem;
+    color: var(--primary);
+  }
+  
+  .form-check {
+    margin-bottom: 1rem;
+    display: flex;
+    align-items: flex-start;
+    gap: 0.75rem;
+  }
+  
+  .form-check label {
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+  }
+  
+  .form-text {
+    font-size: 0.875rem;
+    color: var(--light-text);
+  }
+  
+  .form-actions {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 1rem;
+  }
+  
+  .btn-next {
+    background: var(--primary);
+    padding: 0.875rem 1.5rem;
+  }
+  
+  .btn-back {
+    color: var(--light-text);
+    background: none;
+    border: none;
+    font-family: inherit;
+    font-size: 0.875rem;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+  }
+  
+  .btn-back:hover {
+    color: var(--primary);
+  }
+  
+  .btn-back::before {
+    content: '←';
+  }
+  
+  .btn-complete {
+    background: var(--success);
+    padding: 0.875rem 1.5rem;
+  }
+  
+  .onboarding-info {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+    gap: 1.5rem;
+  }
+  
+  .info-panel {
+    background: var(--card-bg);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow);
+    padding: 2rem;
+    text-align: center;
+  }
+  
+  .info-icon {
+    width: 60px;
+    height: 60px;
+    background: var(--primary);
+    color: white;
+    font-size: 1.5rem;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin: 0 auto 1.5rem;
+  }
+  
+  .info-panel h3 {
+    font-size: 1.25rem;
+    font-weight: 600;
+    margin-bottom: 1rem;
+  }
+  
+  .info-panel p {
+    color: var(--light-text);
+    font-size: 0.875rem;
+    line-height: 1.6;
+  }
+  
+  @media (max-width: 768px) {
+    .onboarding-header h1 {
       font-size: 2rem;
-      margin-bottom: 1rem;
     }
-
-    p {
-      color: #444;
-      margin-bottom: 2rem;
+    
+    .lead-text {
+      font-size: 1rem;
     }
-
-    form {
-      background: #fff;
-      border: 1px solid #ddd;
+    
+    .step {
       padding: 1.5rem;
-      border-radius: 8px;
     }
+  }
+</style>
+{% endblock %}
 
-    label {
-      font-weight: bold;
-      display: block;
-      margin-top: 1rem;
-    }
-
-    input[type="text"] {
-      width: 100%;
-      padding: 0.5rem;
-      margin-top: 0.5rem;
-      border: 1px solid #ccc;
-      border-radius: 4px;
-    }
-
-    .checkbox-group {
-      margin-top: 1rem;
-    }
-
-    button {
-      margin-top: 2rem;
-      padding: 0.75rem 1.5rem;
-      background-color: #3366cc;
-      color: white;
-      border: none;
-      border-radius: 4px;
-      font-weight: bold;
-      cursor: pointer;
-    }
-
-    button:hover {
-      background-color: #224499;
-    }
-  </style>
-</head>
-<body>
-  <h1>Let's Set Up Your Dashboard</h1>
-  <p>Choose what kind of content you want to see. You can change these later anytime.</p>
-
-  <form method="POST">
-    {% csrf_token %}
-
-    <div class="checkbox-group">
-      <label>
-        <input type="checkbox" name="friends_only">
-        Friends Only Mode
-      </label>
-    </div>
-
-    <div class="checkbox-group">
-      <label>
-        <input type="checkbox" name="family_only">
-        Family Only Mode
-      </label>
-    </div>
-
-    <label for="interest_filter">Interest Mode (e.g. Running Shoes, Gardening):</label>
-    <input type="text" name="interest_filter" id="interest_filter">
-
-    <label for="approved_brands">Approved Brands (comma-separated):</label>
-    <input type="text" name="approved_brands" id="approved_brands">
-
-    <button type="submit">Save and View Dashboard</button>
-  </form>
-</body>
-</html>
+{% block extra_scripts %}
+<script>
+  function showStep(stepNumber) {
+    // Hide all steps
+    document.querySelectorAll('.step').forEach(step => {
+      step.classList.remove('active');
+    });
+    
+    // Show the requested step
+    document.getElementById('step' + stepNumber).classList.add('active');
+    
+    // Scroll to top of the form
+    document.querySelector('.onboarding-steps').scrollIntoView({
+      behavior: 'smooth',
+      block: 'start'
+    });
+  }
+</script>
+{% endblock %}
