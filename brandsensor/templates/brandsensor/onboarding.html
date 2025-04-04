@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Welcome to Your Authentic Dashboard</title>
+  <style>
+    body {
+      font-family: sans-serif;
+      max-width: 600px;
+      margin: 0 auto;
+      padding: 2rem;
+      background-color: #fefefe;
+    }
+
+    h1 {
+      font-size: 2rem;
+      margin-bottom: 1rem;
+    }
+
+    p {
+      color: #444;
+      margin-bottom: 2rem;
+    }
+
+    form {
+      background: #fff;
+      border: 1px solid #ddd;
+      padding: 1.5rem;
+      border-radius: 8px;
+    }
+
+    label {
+      font-weight: bold;
+      display: block;
+      margin-top: 1rem;
+    }
+
+    input[type="text"] {
+      width: 100%;
+      padding: 0.5rem;
+      margin-top: 0.5rem;
+      border: 1px solid #ccc;
+      border-radius: 4px;
+    }
+
+    .checkbox-group {
+      margin-top: 1rem;
+    }
+
+    button {
+      margin-top: 2rem;
+      padding: 0.75rem 1.5rem;
+      background-color: #3366cc;
+      color: white;
+      border: none;
+      border-radius: 4px;
+      font-weight: bold;
+      cursor: pointer;
+    }
+
+    button:hover {
+      background-color: #224499;
+    }
+  </style>
+</head>
+<body>
+  <h1>Let's Set Up Your Dashboard</h1>
+  <p>Choose what kind of content you want to see. You can change these later anytime.</p>
+
+  <form method="POST">
+    {% csrf_token %}
+
+    <div class="checkbox-group">
+      <label>
+        <input type="checkbox" name="friends_only">
+        Friends Only Mode
+      </label>
+    </div>
+
+    <div class="checkbox-group">
+      <label>
+        <input type="checkbox" name="family_only">
+        Family Only Mode
+      </label>
+    </div>
+
+    <label for="interest_filter">Interest Mode (e.g. Running Shoes, Gardening):</label>
+    <input type="text" name="interest_filter" id="interest_filter">
+
+    <label for="approved_brands">Approved Brands (comma-separated):</label>
+    <input type="text" name="approved_brands" id="approved_brands">
+
+    <button type="submit">Save and View Dashboard</button>
+  </form>
+</body>
+</html>

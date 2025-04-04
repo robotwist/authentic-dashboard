@@ -1,10 +1,11 @@
 from django.urls import path
-from .views import dashboard
-from .views import toggle_mode
+from . import views
 
-urlpatterns = []
-
-urlpatterns += [
-    path('toggle-mode/', toggle_mode, name='toggle_mode'),
-    path('dashboard/', dashboard, name='dashboard'),
+urlpatterns = [
+    path('dashboard/', views.dashboard, name='dashboard'),
+    path('toggle-mode/', views.toggle_mode, name='toggle_mode'),
+    path('onboarding/', views.onboarding, name='onboarding'),
+    path('api/log/', views.api_log_behavior, name='api_log_behavior'),
+    path('api/post/', views.api_log_post, name='api_log_post'),
+    path('rate/<int:post_id>/', views.rate_post, name='rate_post'),
 ]

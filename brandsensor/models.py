@@ -1,6 +1,7 @@
 from django.db import models
 from django.contrib.auth.models import User
 
+
 class Brand(models.Model):
     name = models.CharField(max_length=255)
     domain = models.URLField(unique=True)
@@ -8,6 +9,7 @@ class Brand(models.Model):
 
     def __str__(self):
         return self.name
+
 
 class BehaviorLog(models.Model):
     BEHAVIOR_TYPES = [
@@ -25,15 +27,18 @@ class BehaviorLog(models.Model):
 
     def __str__(self):
         return f"{self.brand.name} - {self.behavior_type} ({self.count})"
-from django.contrib.auth.models import User
+
 
 class UserPreference(models.Model):
     user = models.OneToOneField(User, on_delete=models.CASCADE)
     friends_only = models.BooleanField(default=False)
-    # Add other future modes here like `family_only`, `interests`, etc.
+    family_only = models.BooleanField(default=False)
+    interest_filter = models.CharField(max_length=100, blank=True)  # e.g., "running"
+    approved_brands = models.TextField(blank=True)  # comma-separated list
 
     def __str__(self):
         return f"Preferences for {self.user.username}"
+
 
 class SocialPost(models.Model):
     PLATFORM_CHOICES = [
