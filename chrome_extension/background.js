@@ -182,4 +182,20 @@ function updateStats(platform, count, currentSettings) {
         // Save updated settings
         chrome.storage.local.set({ settings: settings });
     });
-} 
+}
+
+// Handle authentication redirects more efficiently
+chrome.webNavigation.onBeforeNavigate.addListener(
+  function(details) {
+    // Check if this is a navigation to accounts/login/
+    if (details.url.includes('/accounts/login/')) {
+      // Create the correct login URL
+      const correctLoginUrl = details.url.replace('/accounts/login/', '/login/');
+      console.log('Fixing login URL redirect:', correctLoginUrl);
+      
+      // Update the tab to the correct URL
+      chrome.tabs.update(details.tabId, {url: correctLoginUrl});
+    }
+  },
+  {url: [{urlContains: 'localhost:8000/accounts/login'}]}
+); 

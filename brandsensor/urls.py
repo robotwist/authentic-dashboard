@@ -14,6 +14,8 @@ urlpatterns = [
     # API endpoints for Chrome extension
     path('api/log/', views.api_log_behavior, name='api_log_behavior'),
     path('api/post/', views.api_log_post, name='api_log_post'),
+    path('api/health-check/', views.api_health_check, name='api_health_check'),
+    path('api/verify-key/', views.verify_api_key, name='verify_api_key'),
     
     # Machine learning endpoints
     path('api/process_ml/', views.process_ml, name='process_ml'),

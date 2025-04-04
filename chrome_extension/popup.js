@@ -49,6 +49,23 @@ document.addEventListener('DOMContentLoaded', function() {
     document.getElementById('saveApiKey').addEventListener('click', function() {
         updateAPIKey();
     });
+
+    // Add event listeners for dashboard links
+    document.getElementById('dashboardLink').addEventListener('click', function(e) {
+        e.preventDefault();
+        openDashboard();
+    });
+    
+    document.getElementById('mlDashboardLink').addEventListener('click', function(e) {
+        e.preventDefault();
+        openMLDashboard();
+    });
+    
+    // Add event listener for troubleshoot link
+    document.getElementById('troubleshootLink').addEventListener('click', function(e) {
+        e.preventDefault();
+        troubleshootDashboardAccess();
+    });
 });
 
 // Function to perform scan on the current page
@@ -319,6 +336,136 @@ function updateAPIKey() {
                 statusElement.className = 'status';
             }, 2000);
         });
+    });
+}
+
+// Function to open dashboard with proper auth handling
+function openDashboard() {
+    // Get the API key to help with authentication
+    chrome.storage.local.get(['settings'], function(result) {
+        const settings = result.settings || DEFAULT_SETTINGS;
+        const apiKey = settings.apiKey || '';
+        
+        // Create URL with API key if available
+        let dashboardUrl = 'http://localhost:8000/dashboard/';
+        if (apiKey) {
+            dashboardUrl += `?api_key=${encodeURIComponent(apiKey)}`;
+        }
+        
+        // Track dashboard opening attempts
+        const openAttempt = {
+            type: 'dashboard',
+            timestamp: new Date().toISOString()
+        };
+        
+        // Store the attempt to potentially handle errors later
+        chrome.storage.local.get(['dashboardAttempts'], function(data) {
+            const attempts = data.dashboardAttempts || [];
+            attempts.unshift(openAttempt);
+            
+            // Keep only the last 5 attempts
+            if (attempts.length > 5) {
+                attempts.pop();
+            }
+            
+            chrome.storage.local.set({ dashboardAttempts: attempts });
+            
+            // Open the dashboard
+            chrome.tabs.create({url: dashboardUrl});
+        });
+    });
+}
+
+// Function to open ML dashboard with proper auth handling
+function openMLDashboard() {
+    // Get the API key to help with authentication
+    chrome.storage.local.get(['settings'], function(result) {
+        const settings = result.settings || DEFAULT_SETTINGS;
+        const apiKey = settings.apiKey || '';
+        
+        // Create URL with API key if available
+        let mlDashboardUrl = 'http://localhost:8000/ml-dashboard/';
+        if (apiKey) {
+            mlDashboardUrl += `?api_key=${encodeURIComponent(apiKey)}`;
+        }
+        
+        // Track dashboard opening attempts
+        const openAttempt = {
+            type: 'ml-dashboard',
+            timestamp: new Date().toISOString()
+        };
+        
+        // Store the attempt to potentially handle errors later
+        chrome.storage.local.get(['dashboardAttempts'], function(data) {
+            const attempts = data.dashboardAttempts || [];
+            attempts.unshift(openAttempt);
+            
+            // Keep only the last 5 attempts
+            if (attempts.length > 5) {
+                attempts.pop();
+            }
+            
+            chrome.storage.local.set({ dashboardAttempts: attempts });
+            
+            // Open the dashboard
+            chrome.tabs.create({url: mlDashboardUrl});
+        });
+    });
+}
+
+// Function to troubleshoot dashboard access issues
+function troubleshootDashboardAccess() {
+    // Check if the Django server is running
+    fetch('http://localhost:8000/api/health-check/', { 
+        method: 'GET',
+        headers: {
+            'Content-Type': 'application/json'
+        }
+    })
+    .then(response => {
+        if (response.ok) {
+            return response.json();
+        }
+        throw new Error('Server not responding');
+    })
+    .then(data => {
+        // Server is running, check authentication
+        chrome.storage.local.get(['settings'], function(result) {
+            const settings = result.settings || DEFAULT_SETTINGS;
+            const apiKey = settings.apiKey || '';
+            
+            if (!apiKey) {
+                document.getElementById('status').textContent = 'API key is missing. Please add a valid API key.';
+                document.getElementById('status').className = 'status error';
+                return;
+            }
+            
+            // Check if API key is valid
+            fetch('http://localhost:8000/api/verify-key/', {
+                method: 'GET',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-API-Key': apiKey
+                }
+            })
+            .then(response => {
+                if (response.ok) {
+                    document.getElementById('status').textContent = 'Authentication is working correctly.';
+                    document.getElementById('status').className = 'status success';
+                } else {
+                    document.getElementById('status').textContent = 'API key is invalid. Please update your API key.';
+                    document.getElementById('status').className = 'status error';
+                }
+            })
+            .catch(error => {
+                document.getElementById('status').textContent = 'Error verifying API key: ' + error.message;
+                document.getElementById('status').className = 'status error';
+            });
+        });
+    })
+    .catch(error => {
+        document.getElementById('status').textContent = 'Django server is not running at localhost:8000.';
+        document.getElementById('status').className = 'status error';
     });
 }
   

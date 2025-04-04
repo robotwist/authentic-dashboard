@@ -175,6 +175,17 @@
             text-decoration: none;
         }
         
+        .troubleshoot-link {
+            font-size: 11px;
+            color: #95a5a6;
+            text-decoration: none;
+        }
+        
+        .troubleshoot-link:hover {
+            color: #3498db;
+            text-decoration: underline;
+        }
+        
         .api-key-section {
             margin-top: 10px;
             display: flex;
@@ -277,7 +288,8 @@
     </div>
     
     <div class="footer">
-        <p>View your <a href="http://localhost:8000/dashboard/" target="_blank">Dashboard</a> | <a href="http://localhost:8000/ml-dashboard/" target="_blank">ML Insights</a></p>
+        <p>View your <a href="#" id="dashboardLink">Dashboard</a> | <a href="#" id="mlDashboardLink">ML Insights</a></p>
+        <p><a href="#" id="troubleshootLink" class="troubleshoot-link">Troubleshoot Connection</a></p>
     </div>
     
     <script src="popup.js"></script>

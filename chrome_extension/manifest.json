@@ -15,12 +15,14 @@
       "storage",
       "activeTab",
       "scripting",
-      "notifications"
+      "notifications",
+      "webNavigation"
     ],
     "host_permissions": [
       "*://*.instagram.com/*",
       "*://*.facebook.com/*",
-      "*://*.linkedin.com/*"
+      "*://*.linkedin.com/*",
+      "*://localhost:8000/*"
     ],
     "content_scripts": [
       {

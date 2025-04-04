@@ -140,6 +140,10 @@ def get_user_from_api_key(request):
     """
     api_key = request.headers.get('X-API-Key')
     
+    # Check for API key in query parameters if not in header
+    if not api_key and request.GET.get('api_key'):
+        api_key = request.GET.get('api_key')
+    
     # During testing/development, fallback to the first user if no API key
     if not api_key and settings.DEBUG:
         return User.objects.first()
@@ -1340,3 +1344,53 @@ def delete_api_key(request, key_id):
     )
     
     return redirect('api_keys')
+
+@csrf_exempt
+def api_health_check(request):
+    """
+    API endpoint to check if the server is running.
+    Used by the Chrome extension to verify connectivity.
+    """
+    return JsonResponse({
+        'status': 'ok',
+        'server': 'Authentic Dashboard',
+        'version': '1.0',
+        'timestamp': timezone.now().isoformat()
+    })
+
+@csrf_exempt
+def verify_api_key(request):
+    """
+    API endpoint to verify if an API key is valid.
+    Used by the Chrome extension for troubleshooting.
+    """
+    # Get API key from header
+    api_key = request.headers.get('X-API-Key')
+    
+    if not api_key:
+        return JsonResponse({
+            'status': 'error',
+            'message': 'No API key provided'
+        }, status=401)
+    
+    # Check if API key exists and is active
+    try:
+        key_obj = APIKey.objects.get(key=api_key, is_active=True)
+        
+        # Update last used timestamp
+        key_obj.last_used = timezone.now()
+        key_obj.save(update_fields=['last_used'])
+        
+        return JsonResponse({
+            'status': 'ok',
+            'valid': True,
+            'user': key_obj.user.username,
+            'created': key_obj.created_at.isoformat(),
+            'last_used': key_obj.last_used.isoformat()
+        })
+    except APIKey.DoesNotExist:
+        return JsonResponse({
+            'status': 'error',
+            'valid': False,
+            'message': 'Invalid or inactive API key'
+        }, status=401)

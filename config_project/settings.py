@@ -183,6 +183,11 @@ CACHE_TTL = 60 * 15  # 15 minutes default
 CACHE_TTL_SHORT = 60 * 5  # 5 minutes for frequently changing data
 CACHE_TTL_LONG = 60 * 60 * 24  # 24 hours for static data
 
+# Authentication settings
+LOGIN_URL = '/login/'
+LOGIN_REDIRECT_URL = '/dashboard/'
+LOGOUT_REDIRECT_URL = '/'
+
 # Custom template filters
 from django.template.defaultfilters import register
 import json
