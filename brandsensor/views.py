@@ -5,11 +5,14 @@ from django.views.decorators.csrf import csrf_exempt
 from django.db.models import Q, Count, Avg, F
 from django.utils import timezone
 from django.conf import settings
+from django.core.cache import cache
+from django.views.decorators.cache import cache_page
 import json
 import datetime
 import uuid
 import secrets
 import string
+import hashlib
 
 from .models import SocialPost, UserPreference, Brand, BehaviorLog, SocialConnection, MLModel, MLPredictionLog, APIKey, FilterPreset
 from .ml_processor import process_post, process_user_posts
@@ -155,6 +158,24 @@ def get_user_from_api_key(request):
     except APIKey.DoesNotExist:
         return None
 
+# Helper function to create a user-specific cache key
+def user_cache_key(user_id, prefix, **kwargs):
+    """
+    Create a user-specific cache key with additional parameters.
+    This ensures each user gets their own cached data.
+    """
+    key = f"{prefix}_{user_id}"
+    
+    # Add additional kwargs to the key if provided
+    if kwargs:
+        # Sort items to ensure consistent keys
+        sorted_items = sorted(kwargs.items())
+        param_str = "_".join(f"{k}_{v}" for k, v in sorted_items)
+        key = f"{key}_{param_str}"
+    
+    # Use MD5 to ensure the key length is not too long
+    return f"cached_{hashlib.md5(key.encode()).hexdigest()}"
+
 # ------------------------------
 # Dashboard and User Preference Views
 # ------------------------------
@@ -193,6 +214,25 @@ def dashboard(request):
     except ValueError:
         days_ago = 30
     
+    # Generate a cache key for this specific view and parameters
+    cache_key = user_cache_key(
+        request.user.id, 
+        'dashboard', 
+        days=days_ago,
+        platform=request.GET.get('platform', ''),
+        sort=request.GET.get('sort', ''),
+        # Include user preferences state in the cache key to invalidate when they change
+        preferences_updated=preferences.updated_at.isoformat() if hasattr(preferences, 'updated_at') else ''
+    )
+    
+    # Try to get cached data
+    cached_context = cache.get(cache_key)
+    if cached_context:
+        # We have cached data, but still need to add the current filter presets
+        cached_context['filter_presets'] = FilterPreset.objects.filter(user=request.user)
+        return render(request, "brandsensor/dashboard.html", cached_context)
+    
+    # No cached data, continue with normal data fetching
     since_date = timezone.now() - datetime.timedelta(days=days_ago)
     
     # Build the base query
@@ -379,6 +419,10 @@ def dashboard(request):
         "total_posts_count": SocialPost.objects.filter(user=request.user).count(),
         "filter_presets": filter_presets,  # Add filter presets to the context
     }
+    
+    # Cache this context for 5 minutes (short-lived cache for dashboard)
+    cache.set(cache_key, context, settings.CACHE_TTL_SHORT)
+    
     return render(request, "brandsensor/dashboard.html", context)
 
 
@@ -407,6 +451,9 @@ def toggle_mode(request):
                 
             if 'max_content_length' in request.POST and request.POST.get('max_content_length'):
                 preferences.max_content_length = int(request.POST.get('max_content_length', 2000))
+            else:
+                preferences.max_content_length = None
+                
         except (ValueError, TypeError):
             pass  # Ignore conversion errors and keep defaults
         
@@ -415,7 +462,17 @@ def toggle_mode(request):
         preferences.approved_brands = request.POST.get('approved_brands', '').strip()
         preferences.excluded_keywords = request.POST.get('excluded_keywords', '').strip()
         preferences.favorite_hashtags = request.POST.get('favorite_hashtags', '').strip()
+        
         preferences.save()
+        
+        # Invalidate the user's dashboard cache when preferences change
+        cache_pattern = f"cached_{hashlib.md5(f'dashboard_{request.user.id}'.encode()).hexdigest()}"
+        keys_to_delete = []
+        for key in cache.keys(f"{cache_pattern}*"):
+            keys_to_delete.append(key)
+        
+        if keys_to_delete:
+            cache.delete_many(keys_to_delete)
         
         # Check if we need to save these settings as a preset
         save_as_preset = request.POST.get('save_as_preset')
@@ -460,6 +517,13 @@ def toggle_mode(request):
                     pass
                     
                 preset.save()
+        
+        # Log the preference change
+        BehaviorLog.objects.create(
+            user=request.user,
+            action='update_preferences',
+            details="Updated dashboard filter preferences"
+        )
     
     # Return to dashboard with any existing query parameters
     platform = request.GET.get('platform', '')
@@ -762,6 +826,18 @@ def ml_dashboard(request):
     except ValueError:
         days_ago = 30
     
+    # Generate a cache key for this view and its parameters
+    cache_key = user_cache_key(
+        request.user.id, 
+        'ml_dashboard', 
+        days=days_ago
+    )
+    
+    # Try to get cached data
+    cached_context = cache.get(cache_key)
+    if cached_context:
+        return render(request, "brandsensor/ml_dashboard.html", cached_context)
+    
     since_date = timezone.now() - datetime.timedelta(days=days_ago)
     
     # Process any unprocessed posts
@@ -908,6 +984,9 @@ def ml_dashboard(request):
         'toxic_posts': toxic_posts,
         'days_filter': days_filter,
     }
+    
+    # Cache this heavy computation result (ML dashboard is very compute-intensive)
+    cache.set(cache_key, context, settings.CACHE_TTL)
     
     return render(request, "brandsensor/ml_dashboard.html", context)
 
@@ -1066,6 +1145,18 @@ def post_stats(request):
     if user is None:
         return JsonResponse({'status': 'error', 'message': 'Invalid API key'}, status=401)
     
+    # Generate cache key based on user
+    cache_key = user_cache_key(user.id, 'post_stats')
+    
+    # Try to get cached data
+    cached_data = cache.get(cache_key)
+    if cached_data:
+        return JsonResponse({
+            'status': 'success',
+            'stats': cached_data,
+            'cached': True
+        })
+    
     try:
         # Get counts
         total_posts = SocialPost.objects.filter(user=user).count()
@@ -1079,16 +1170,22 @@ def post_stats(request):
         # Get ML stats
         ml_processed = SocialPost.objects.filter(user=user, automated_category__isnull=False).count()
         
+        # Prepare stats data
+        stats_data = {
+            'total_posts': total_posts,
+            'sponsored_count': sponsored_count,
+            'friend_count': friend_count,
+            'family_count': family_count,
+            'ml_processed': ml_processed,
+            'platform_distribution': list(platform_stats)
+        }
+        
+        # Cache the stats for a moderate amount of time (10 minutes)
+        cache.set(cache_key, stats_data, settings.CACHE_TTL_SHORT)
+        
         return JsonResponse({
             'status': 'success',
-            'stats': {
-                'total_posts': total_posts,
-                'sponsored_count': sponsored_count,
-                'friend_count': friend_count,
-                'family_count': family_count,
-                'ml_processed': ml_processed,
-                'platform_distribution': list(platform_stats)
-            }
+            'stats': stats_data
         })
     except Exception as e:
         return JsonResponse({'status': 'error', 'message': str(e)}, status=500)

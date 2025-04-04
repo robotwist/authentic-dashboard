@@ -151,6 +151,38 @@ STATIC_URL = 'static/'
 
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
+# Redis Cache configuration
+try:
+    import django_redis
+    CACHES = {
+        "default": {
+            "BACKEND": "django_redis.cache.RedisCache",
+            "LOCATION": "redis://127.0.0.1:6379/1",
+            "OPTIONS": {
+                "CLIENT_CLASS": "django_redis.client.DefaultClient",
+                "SOCKET_CONNECT_TIMEOUT": 5,  # seconds
+                "SOCKET_TIMEOUT": 5,  # seconds
+            }
+        }
+    }
+
+    # Use Redis for session storage
+    SESSION_ENGINE = "django.contrib.sessions.backends.cache"
+    SESSION_CACHE_ALIAS = "default"
+except ImportError:
+    # Fallback to local memory cache if django_redis is not installed
+    CACHES = {
+        'default': {
+            'BACKEND': 'django.core.cache.backends.locmem.LocMemCache',
+            'LOCATION': 'unique-snowflake',
+        }
+    }
+
+# Cache timeout settings (in seconds)
+CACHE_TTL = 60 * 15  # 15 minutes default
+CACHE_TTL_SHORT = 60 * 5  # 5 minutes for frequently changing data
+CACHE_TTL_LONG = 60 * 60 * 24  # 24 hours for static data
+
 # Custom template filters
 from django.template.defaultfilters import register
 import json
