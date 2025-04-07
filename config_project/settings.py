@@ -38,13 +38,14 @@ INSTALLED_APPS = [
     'django.contrib.messages',
     'django.contrib.staticfiles',
     'brandsensor',
-    'corsheaders',  # Enable CORS for cross-origin requests
+    'brandsensor.templatetags',  # Add templatetags as a separate app for custom filters
+    # 'corsheaders',  # Enable CORS for cross-origin requests - temporarily removed
 ]
 
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
-    'corsheaders.middleware.CorsMiddleware',  # This must come before CommonMiddleware
+    # 'corsheaders.middleware.CorsMiddleware',  # This must come before CommonMiddleware - temporarily removed
     'django.middleware.common.CommonMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
     'django.contrib.auth.middleware.AuthenticationMiddleware',
@@ -52,29 +53,29 @@ MIDDLEWARE = [
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
 ]
 
-# CORS settings
-CORS_ALLOW_ALL_ORIGINS = True  # For development - in production, specify domains
-CORS_ALLOW_CREDENTIALS = True
-CORS_ALLOW_METHODS = [
-    'GET',
-    'POST',
-    'PUT',
-    'PATCH',
-    'DELETE',
-    'OPTIONS',
-]
-CORS_ALLOW_HEADERS = [
-    'accept',
-    'accept-encoding',
-    'authorization',
-    'content-type',
-    'dnt',
-    'origin',
-    'user-agent',
-    'x-csrftoken',
-    'x-requested-with',
-    'x-api-key',  # Allow the API key header
-]
+# CORS settings - temporarily disabled
+# CORS_ALLOW_ALL_ORIGINS = True  # For development - in production, specify domains
+# CORS_ALLOW_CREDENTIALS = True
+# CORS_ALLOW_METHODS = [
+#     'GET',
+#     'POST',
+#     'PUT',
+#     'PATCH',
+#     'DELETE',
+#     'OPTIONS',
+# ]
+# CORS_ALLOW_HEADERS = [
+#     'accept',
+#     'accept-encoding',
+#     'authorization',
+#     'content-type',
+#     'dnt',
+#     'origin',
+#     'user-agent',
+#     'x-csrftoken',
+#     'x-requested-with',
+#     'x-api-key',  # Allow the API key header
+# ]
 
 ROOT_URLCONF = 'config_project.urls'
 
@@ -92,6 +93,7 @@ TEMPLATES = [
             ],
             'builtins': [
                 'django.templatetags.static',
+                'brandsensor.templatetags.custom_filters',
             ],
         },
     },
@@ -188,35 +190,3 @@ CACHE_TTL_LONG = 60 * 60 * 24  # 24 hours for static data
 LOGIN_URL = '/login/'
 LOGIN_REDIRECT_URL = '/dashboard/'
 LOGOUT_REDIRECT_URL = '/'
-
-# Custom template filters
-from django.template.defaultfilters import register
-import json
-
-@register.filter(name='json_parse')
-def json_parse(value):
-    """Parse a JSON string into a Python object"""
-    if not value:
-        return {}
-    try:
-        return json.loads(value)
-    except (ValueError, TypeError):
-        return {}
-
-@register.filter(name='multiply')
-def multiply(value, arg):
-    """Multiply the value by the argument"""
-    try:
-        return float(value) * float(arg)
-    except (ValueError, TypeError):
-        return 0
-
-@register.filter(name='sort_by')
-def sort_by(value, arg):
-    """Sort a list of tuples or dictionaries by the specified key"""
-    if not value:
-        return []
-    try:
-        return sorted(value, key=lambda x: x[arg])
-    except (KeyError, TypeError):
-        return value

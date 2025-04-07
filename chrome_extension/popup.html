@@ -2,84 +2,114 @@
 <html>
 <head>
     <title>Authentic Dashboard</title>
-    <style>
+  <style>
         body {
             font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            width: 320px;
-            padding: 16px;
+            margin: 0;
+            padding: 15px;
+            max-width: 400px;
             background-color: #f9f9f9;
-            color: #333;
+            color: #222;
+        }
+        
+        .header {
+            margin-bottom: 20px;
         }
         
         h1 {
             font-size: 18px;
-            margin-bottom: 8px;
-            color: #2c3e50;
+            color: #222;
+            margin-bottom: 5px;
         }
         
         .description {
             font-size: 13px;
-            color: #7f8c8d;
-            margin-bottom: 20px;
+            color: #444;
+            margin-bottom: 15px;
         }
         
-        button {
+        #scanButton {
             background-color: #3498db;
             color: white;
             border: none;
-            border-radius: 4px;
-            padding: 8px 16px;
+            border-radius: 5px;
+            padding: 8px 15px;
             font-size: 14px;
             cursor: pointer;
+            width: 100%;
             margin-bottom: 10px;
             transition: background-color 0.2s;
-            width: 100%;
         }
         
-        button:hover {
+        #scanButton:hover {
             background-color: #2980b9;
         }
         
-        button:disabled {
-            background-color: #bdc3c7;
-            cursor: not-allowed;
-        }
-        
         .status {
-            margin-top: 16px;
             font-size: 13px;
-            color: #2c3e50;
+            color: #444;
+            margin-bottom: 15px;
+            text-align: center;
         }
         
-        .status.success {
-            color: #27ae60;
+        .stats {
+            background-color: #f0f2f5;
+            border-radius: 8px;
+            padding: 10px;
+            margin-bottom: 15px;
         }
         
-        .status.error {
-            color: #e74c3c;
+        .stat-row {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 5px;
+            font-size: 13px;
         }
         
-        .settings {
-            margin-top: 20px;
-            border-top: 1px solid #ddd;
-            padding-top: 15px;
+        .stat-row span {
+            color: #333;
+        }
+        
+        .stat-count {
+            font-weight: bold;
+            color: #2980b9;
+        }
+        
+        .recent-scans {
+            margin-bottom: 15px;
+        }
+        
+        .scan-item {
+            font-size: 12px;
+            color: #333;
+            margin-bottom: 8px;
+            padding: 8px;
+            background-color: #e9eef2;
+            border-radius: 5px;
+        }
+        
+        .scan-time {
+            font-size: 11px;
+            color: #444;
+            margin-top: 4px;
         }
         
         .toggle-row {
             display: flex;
             justify-content: space-between;
             align-items: center;
-            margin-bottom: 10px;
+            margin-bottom: 15px;
         }
         
         .toggle-label {
-            font-size: 14px;
+            font-size: 13px;
+            color: #333;
         }
         
         .toggle {
             position: relative;
             display: inline-block;
-            width: 40px;
+            width: 36px;
             height: 20px;
         }
         
@@ -97,6 +127,7 @@
             right: 0;
             bottom: 0;
             background-color: #ccc;
+            -webkit-transition: .4s;
             transition: .4s;
             border-radius: 20px;
         }
@@ -109,94 +140,38 @@
             left: 2px;
             bottom: 2px;
             background-color: white;
+            -webkit-transition: .4s;
             transition: .4s;
             border-radius: 50%;
         }
         
         input:checked + .slider {
-            background-color: #2196F3;
+            background-color: #3498db;
+        }
+        
+        input:focus + .slider {
+            box-shadow: 0 0 1px #3498db;
         }
         
         input:checked + .slider:before {
-            transform: translateX(20px);
-        }
-        
-        .stats {
-            margin-top: 16px;
-            background-color: #fff;
-            border-radius: 4px;
-            padding: 10px;
-            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
-        }
-        
-        .stat-row {
-            display: flex;
-            justify-content: space-between;
-            margin-bottom: 5px;
-            font-size: 13px;
-        }
-        
-        .stat-count {
-            font-weight: bold;
-            color: #3498db;
-        }
-        
-        .recent-scans {
-            margin-top: 16px;
-            font-size: 12px;
-            color: #7f8c8d;
-            max-height: 100px;
-            overflow-y: auto;
-        }
-        
-        .scan-item {
-            padding: 5px 0;
-            border-bottom: 1px dotted #eee;
-        }
-        
-        .scan-platform {
-            font-weight: bold;
-        }
-        
-        .scan-time {
-            font-style: italic;
-            font-size: 11px;
-        }
-        
-        .footer {
-            margin-top: 20px;
-            font-size: 11px;
-            text-align: center;
-            color: #95a5a6;
-        }
-        
-        .footer a {
-            color: #3498db;
-            text-decoration: none;
-        }
-        
-        .troubleshoot-link {
-            font-size: 11px;
-            color: #95a5a6;
-            text-decoration: none;
-        }
-        
-        .troubleshoot-link:hover {
-            color: #3498db;
-            text-decoration: underline;
+            -webkit-transform: translateX(16px);
+            -ms-transform: translateX(16px);
+            transform: translateX(16px);
         }
         
         .api-key-section {
             margin-top: 10px;
-            display: flex;
-            align-items: center;
         }
         
         .api-key-section label {
-            margin-right: 10px;
+            display: block;
+            margin-bottom: 5px;
+            font-size: 13px;
+            color: #333;
         }
         
         .api-key-input {
+            width: calc(100% - 100px);
             padding: 5px;
             border: 1px solid #ccc;
             border-radius: 4px;
@@ -207,10 +182,9 @@
             color: white;
             border: none;
             border-radius: 4px;
-            padding: 5px 10px;
+            padding: 6px 12px;
             font-size: 12px;
             cursor: pointer;
-            margin-left: 10px;
             transition: background-color 0.2s;
         }
         
@@ -239,7 +213,7 @@
             transition: 0.3s;
             border-radius: 4px 4px 0 0;
             margin-bottom: -1px;
-            color: #666;
+            color: #444;
         }
         
         .tab-button:hover {
@@ -274,18 +248,20 @@
         .data-category h4 {
             margin: 5px 0;
             font-size: 14px;
-            color: #2c3e50;
+            color: #222;
+            font-weight: 600;
         }
         
         .data-items {
             margin-left: 15px;
             font-size: 12px;
-            color: #7f8c8d;
+            color: #444;
         }
         
         .data-control {
             font-size: 12px;
             margin-top: 5px;
+            color: #333;
         }
         
         .data-control label {
@@ -299,7 +275,7 @@
         
         .learn-more {
             font-size: 11px;
-            color: #3498db;
+            color: #2980b9;
             text-decoration: underline;
             cursor: pointer;
             margin-left: 5px;
@@ -316,7 +292,7 @@
         .tooltip .tooltiptext {
             visibility: hidden;
             width: 200px;
-            background-color: #555;
+            background-color: #333;
             color: #fff;
             text-align: center;
             border-radius: 6px;
@@ -329,6 +305,7 @@
             opacity: 0;
             transition: opacity 0.3s;
             font-size: 11px;
+            font-weight: normal;
         }
         
         .tooltip:hover .tooltiptext {
@@ -351,6 +328,7 @@
         .connection-warning p {
             margin: 0 0 10px 0;
             font-size: 13px;
+            color: #6d5630;
         }
         
         .retry-button {
@@ -359,16 +337,36 @@
             font-size: 12px;
             padding: 5px 10px;
             margin: 0;
+            color: #fff;
         }
         
         .retry-button:hover {
             background-color: #ec971f;
         }
         
-        .header {
-            position: relative;
+        .footer {
+            margin-top: 20px;
+            font-size: 11px;
+            text-align: center;
+            color: #555;
         }
-    </style>
+        
+        .footer a {
+            color: #2980b9;
+            text-decoration: none;
+        }
+        
+        .troubleshoot-link {
+            font-size: 11px;
+            color: #555;
+            text-decoration: none;
+        }
+        
+        .troubleshoot-link:hover {
+            color: #2980b9;
+            text-decoration: underline;
+        }
+  </style>
 </head>
 <body>
     <div class="header">
@@ -407,8 +405,8 @@
         </div>
         
         <!-- Settings Tab -->
-        <div id="settingsTab" class="tab-content active">
-            <h3 style="font-size: 14px; margin-bottom: 10px;">Scanner Settings</h3>
+        <div id="settingsTab" class="tab-content">
+            <h3 style="font-size: 14px; margin-bottom: 10px; color: #222;">Scanner Settings</h3>
             
             <div class="toggle-row">
                 <span class="toggle-label">Auto-scan on page load</span>
@@ -443,16 +441,16 @@
             </div>
             
             <div class="api-key-section">
-                <label for="apiKey">API Key:</label>
-                <input type="text" id="apiKey" class="api-key-input" placeholder="Enter your API key">
-                <button id="saveApiKey" class="small-button">Save</button>
+                <label for="apiKey" style="color: #333; font-weight: 500;">API Key:</label>
+                <input type="text" id="apiKey" class="api-key-input" placeholder="Enter your API key" style="border: 1px solid #bbb;">
+                <button id="saveApiKey" class="small-button" style="background-color: #3498db; color: white;">Save</button>
             </div>
         </div>
         
         <!-- Transparency Tab -->
         <div id="transparencyTab" class="tab-content">
-            <h3 style="font-size: 14px; margin-bottom: 10px;">Data Collection Transparency</h3>
-            <p style="font-size: 12px; color: #7f8c8d; margin-bottom: 15px;">
+            <h3 style="font-size: 14px; margin-bottom: 10px; color: #222;">Data Collection Transparency</h3>
+            <p style="font-size: 12px; color: #444; margin-bottom: 15px;">
                 Control exactly what data we collect to align with your preferences.
             </p>
             
@@ -516,13 +514,13 @@
         
         <!-- Insights Tab -->
         <div id="insightsTab" class="tab-content">
-            <h3 style="font-size: 14px; margin-bottom: 10px;">Your Feed Insights</h3>
-            <p style="font-size: 12px; color: #7f8c8d; margin-bottom: 15px;">
+            <h3 style="font-size: 14px; margin-bottom: 10px; color: #222;">Your Feed Insights</h3>
+            <p style="font-size: 12px; color: #444; margin-bottom: 15px;">
                 Real-time analysis of your current browsing session.
             </p>
             
             <div id="currentPageInsights">
-                <div style="text-align: center; color: #95a5a6; font-size: 12px; padding: 20px;">
+                <div style="text-align: center; color: #555; font-size: 12px; padding: 20px;">
                     Click "Scan Current Page" to see insights
                 </div>
             </div>
@@ -533,7 +531,7 @@
         <p>View your <a href="#" id="dashboardLink">Dashboard</a> | <a href="#" id="mlDashboardLink">ML Insights</a></p>
         <p><a href="#" id="troubleshootLink" class="troubleshoot-link">Troubleshoot Connection</a></p>
     </div>
-    
-    <script src="popup.js"></script>
+
+  <script src="popup.js"></script>
 </body>
 </html>

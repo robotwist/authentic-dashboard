@@ -358,7 +358,7 @@ function performScan() {
                     statusElement.className = 'status error';
                 }
             });
-        });
+      });
     });
 }
 
@@ -830,5 +830,5 @@ function troubleshootDashboardAccess() {
             document.getElementById('status').className = 'status error';
         });
     });
-}
+  }
   

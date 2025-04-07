@@ -1454,12 +1454,37 @@ def api_process_ml(request):
     try:
         data = json.loads(request.body)
         
-        # Process the post data with ML models
-        results = {
-            "status": "success",
-            "message": "ML processing completed",
-            "processed_at": timezone.now().isoformat()
-        }
+        # Log the incoming data for debugging
+        print(f"Processing ML data for platform: {data.get('platform', 'unknown')}")
+        
+        # Ensure boolean fields are properly typed
+        for field in ['is_friend', 'is_family', 'verified', 'is_sponsored', 'is_job_post']:
+            if field in data:
+                data[field] = bool(data[field])
+        
+        # Apply ML processing to the content
+        content = data.get('content', '')
+        if content:
+            # Apply simple sentiment analysis to feed back to extension
+            sentiment_result = analyze_sentiment(content)
+            
+            # Return the processed results with ML data
+            results = {
+                "status": "success",
+                "message": "ML processing completed",
+                "processed_at": timezone.now().isoformat(),
+                "ml_data": {
+                    "sentiment_score": sentiment_result.get('sentiment_score', 0),
+                    "positive_indicators": sentiment_result.get('positive_indicators', 0),
+                    "negative_indicators": sentiment_result.get('negative_indicators', 0)
+                }
+            }
+        else:
+            results = {
+                "status": "error",
+                "message": "No content provided for processing",
+                "processed_at": timezone.now().isoformat()
+            }
         
         # Return the results
         response = JsonResponse(results)
@@ -1470,6 +1495,7 @@ def api_process_ml(request):
         response["Access-Control-Allow-Origin"] = "*"
         return response
     except Exception as e:
+        print(f"Error in api_process_ml: {str(e)}")
         response = JsonResponse({"error": str(e)}, status=500)
         response["Access-Control-Allow-Origin"] = "*"
         return response

@@ -34,19 +34,19 @@
             </div>
             
             <form action="{% url 'toggle_mode' %}" method="post" id="filter-form">
-                {% csrf_token %}
-                <div class="form-group">
-                    <label>
-                        <input type="checkbox" name="friends_only" {% if preferences.friends_only %}checked{% endif %}>
-                        Friends Only Mode
-                    </label>
-                </div>
-                <div class="form-group">
-                    <label>
-                        <input type="checkbox" name="family_only" {% if preferences.family_only %}checked{% endif %}>
-                        Family Only Mode
-                    </label>
-                </div>
+      {% csrf_token %}
+      <div class="form-group">
+        <label>
+          <input type="checkbox" name="friends_only" {% if preferences.friends_only %}checked{% endif %}>
+          Friends Only Mode
+        </label>
+      </div>
+      <div class="form-group">
+        <label>
+          <input type="checkbox" name="family_only" {% if preferences.family_only %}checked{% endif %}>
+          Family Only Mode
+        </label>
+      </div>
                 <div class="form-group">
                     <label>
                         <input type="checkbox" name="hide_sponsored" {% if preferences.hide_sponsored %}checked{% endif %}>
@@ -93,14 +93,14 @@
                         Hide Job Postings
                     </label>
                 </div>
-                
-                <div class="form-group">
+
+      <div class="form-group">
                     <label for="max_content_length">Max Content Length:</label>
                     <input type="number" name="max_content_length" id="max_content_length" value="{{ preferences.max_content_length }}" placeholder="No limit">
                     <small>Characters (leave blank for no limit)</small>
-                </div>
-                
-                <div class="form-group">
+      </div>
+
+      <div class="form-group">
                     <label for="interest_filter">Interests:</label>
                     <input type="text" name="interest_filter" id="interest_filter" placeholder="travel, food, tech" value="{{ preferences.interest_filter }}">
                 </div>
@@ -126,8 +126,8 @@
                         <label class="form-check-label" for="save-as-preset-toggle">
                             Save as Preset
                         </label>
-                    </div>
-                    
+      </div>
+
                     <div id="preset-options" class="mt-2" style="display: none;">
                         <div class="form-group">
                             <input type="text" name="preset_name" class="form-control form-control-sm" placeholder="Preset Name" required>
@@ -167,9 +167,9 @@
                         <input type="hidden" name="save_as_preset" value="1">
                     </div>
                 </div>
-            </form>
-        </div>
-        
+    </form>
+  </div>
+
         <div class="sidebar-section">
             <h3>Time Period</h3>
             <div class="time-filter">
@@ -290,7 +290,7 @@
 
         <div class="posts-container">
             {% if posts %}
-                {% for post in posts %}
+  {% for post in posts %}
                 <div class="post-card {% if post.is_sponsored %}sponsored{% endif %} {% if post.starred %}starred{% endif %}">
                     <div class="post-header">
                         <div class="post-user">
@@ -395,113 +395,287 @@
 
 {% block extra_styles %}
 <style>
-    .sentiment-score .large-number {
-        font-size: 2rem;
-        font-weight: bold;
+    .dashboard-container {
+        display: flex;
+        gap: 30px;
     }
     
-    .sentiment-distribution {
+    .sidebar {
+        width: 280px;
+        flex-shrink: 0;
+    }
+    
+    .sidebar-section {
+        background: #fff;
+        border-radius: var(--radius);
+        box-shadow: var(--shadow);
+        padding: 20px;
+        margin-bottom: 20px;
+    }
+    
+    .sidebar-section h3 {
+        font-size: 1.1rem;
+        margin-bottom: 15px;
+        padding-bottom: 8px;
+        border-bottom: 1px solid #ddd; /* Darker border */
+        color: #222; /* Darker heading */
+    }
+    
+    .form-group {
+        margin-bottom: 15px;
+    }
+    
+    .form-group label {
+        display: block;
+        margin-bottom: 5px;
+        color: #333; /* Darker label text */
+        font-weight: 500;
+    }
+    
+    .form-group input[type="text"],
+    .form-group input[type="number"] {
+        width: 100%;
+        padding: 8px;
+        border: 1px solid #ccc; /* Darker border */
+        border-radius: var(--radius);
+        font-size: 0.9rem;
+        color: #222; /* Darker input text */
+    }
+    
+    .form-group small {
+        display: block;
+        color: #444; /* Darker help text */
+        font-size: 0.8rem;
+        margin-top: 3px;
+    }
+    
+    .time-filter,
+    .platform-filter,
+    .sort-filter {
         display: flex;
         flex-direction: column;
-        gap: 5px;
-        margin-top: 10px;
+        gap: 10px;
     }
     
-    .sentiment-bar {
-        padding: 5px;
+    .time-filter a,
+    .platform-filter a,
+    .sort-filter a {
+        padding: 8px 12px;
+        background: #f8f9fa;
+        color: #333; /* Darker link text */
+        text-decoration: none;
+        border-radius: var(--radius);
+        transition: all 0.2s;
+        font-weight: 500;
+    }
+    
+    .time-filter a:hover,
+    .platform-filter a:hover,
+    .sort-filter a:hover {
+        background: #e9ecef;
+    }
+    
+    .time-filter a.active,
+    .platform-filter a.active,
+    .sort-filter a.active {
+        background: var(--primary);
         color: white;
-        border-radius: 3px;
-        text-align: center;
-        min-width: 30px;
     }
     
-    .sentiment-bar.positive {
-        background-color: #4CAF50;
+    .posts-section {
+        flex-grow: 1;
     }
     
-    .sentiment-bar.neutral {
-        background-color: #9E9E9E;
-    }
-    
-    .sentiment-bar.negative {
-        background-color: #F44336;
-    }
-    
-    .ml-insights {
+    .posts-header {
         display: flex;
-        flex-wrap: wrap;
-        gap: 8px;
-        margin: 10px 0;
-        font-size: 0.85rem;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 20px;
     }
     
-    .ml-tag {
+    .posts-header h2 {
+        font-size: 1.5rem;
+        margin: 0;
+        color: #222; /* Darker heading */
+    }
+    
+    .posts-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+        gap: 20px;
+    }
+    
+    .post-card {
+        background: #fff;
+        border-radius: var(--radius);
+        box-shadow: var(--shadow);
+        overflow: hidden;
+        transition: transform 0.2s, box-shadow 0.2s;
+    }
+    
+    .post-card:hover {
+        transform: translateY(-5px);
+        box-shadow: 0 6px 12px rgba(0, 0, 0, 0.1);
+    }
+    
+    .post-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        padding: 15px;
+        border-bottom: 1px solid #ddd; /* Darker border */
+    }
+    
+    .user-info {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+    }
+    
+    .user-name {
+        font-weight: 600;
+        color: #222; /* Darker text */
+    }
+    
+    .platform-tag {
+        background: #f0f2f5;
+        color: #333; /* Darker tag text */
         padding: 3px 8px;
         border-radius: 12px;
-        background-color: #f1f1f1;
-        display: inline-flex;
+        font-size: 0.75rem;
+        font-weight: 600;
+    }
+    
+    .post-content {
+        padding: 15px;
+        color: #222; /* Darker content text */
+        font-size: 0.95rem; /* Slightly larger */
+        line-height: 1.5;
+    }
+    
+    .truncate-3-lines {
+        display: -webkit-box;
+        -webkit-line-clamp: 3;
+        -webkit-box-orient: vertical;
+        overflow: hidden;
+    }
+    
+    .post-image {
+        max-height: 200px;
+        width: 100%;
+        object-fit: cover;
+    }
+    
+    .post-metrics {
+        display: flex;
+        padding: 10px 15px;
+        border-top: 1px solid #ddd; /* Darker border */
+        font-size: 0.85rem;
+        color: #444; /* Darker metrics text */
+    }
+    
+    .metric {
+        display: flex;
         align-items: center;
+        gap: 5px;
+        margin-right: 15px;
     }
     
-    .ml-tag .label {
-        font-weight: bold;
-        margin-right: 4px;
+    .post-badges {
+        padding: 0 15px 15px;
+        display: flex;
+        flex-wrap: wrap;
+        gap: 5px;
     }
     
-    .ml-tag.topic {
-        background-color: #E3F2FD;
-        color: #1565C0;
+    .post-footer {
+        padding: 10px 15px;
+        border-top: 1px solid #ddd; /* Darker border */
+        display: flex;
+        justify-content: space-between;
     }
     
-    .ml-tag.sentiment {
-        background-color: #F1F8E9;
-        color: #558B2F;
+    .ml-metrics {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 5px;
+        margin-bottom: 10px;
     }
     
-    .ml-tag.sentiment.positive {
-        background-color: #E8F5E9;
-        color: #2E7D32;
+    .ml-metric {
+        display: flex;
+        align-items: center;
+        gap: 5px;
+        background: #f0f2f5;
+        padding: 3px 8px;
+        border-radius: 12px;
+        font-size: 0.75rem;
+        color: #333; /* Darker metric text */
     }
     
-    .ml-tag.sentiment.negative {
-        background-color: #FFEBEE;
-        color: #C62828;
+    .pagination {
+        display: flex;
+        justify-content: center;
+        margin-top: 30px;
+        gap: 10px;
     }
     
-    .ml-tag.sentiment.neutral {
-        background-color: #ECEFF1;
-        color: #455A64;
+    .pagination a {
+        padding: 8px 15px;
+        background: #fff;
+        border-radius: var(--radius);
+        text-decoration: none;
+        color: var(--text);
+        transition: all 0.2s;
+        box-shadow: var(--shadow);
     }
     
-    .ml-tag.relevance {
-        background-color: #FFF8E1;
-        color: #FF8F00;
+    .pagination a:hover {
+        background: #f0f2f5;
     }
     
-    .ml-tag.engagement {
-        background-color: #E8EAF6;
-        color: #3949AB;
+    .pagination a.active {
+        background: var(--primary);
+        color: white;
     }
     
-    .topic-stats, .topic-badge {
-        margin-top: 10px;
+    .save-preset-section {
+        border-top: 1px solid #ddd; /* Darker border */
+        padding-top: 15px;
+        margin-top: 15px;
     }
     
-    .topic-badge {
-        display: inline-block;
-        padding: 5px 10px;
-        background-color: #E3F2FD;
-        color: #1565C0;
-        border-radius: 15px;
-        margin-right: 5px;
-        margin-bottom: 5px;
+    .preset-buttons {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 5px;
+        margin-bottom: 10px;
+    }
+    
+    .text-muted {
+        color: #444 !important; /* Darker muted text */
+    }
+    
+    .filter-presets h4 {
+        font-size: 1rem;
+        color: #333; /* Darker heading */
+    }
+    
+    /* Form styling */
+    .form-control {
+        color: #222; /* Darker input text */
+    }
+    
+    .form-check-label {
+        color: #333; /* Darker checkbox label */
     }
     
     .sub-option {
         margin-left: 20px;
         margin-top: 5px;
         padding: 5px;
-        border-left: 2px solid #eee;
+        border-left: 2px solid #ccc; /* Darker border */
+        color: #333; /* Darker option text */
     }
     
     .sub-option.hidden {
@@ -520,12 +694,12 @@
     
     #ml-status.success {
         background-color: #E8F5E9;
-        color: #2E7D32;
+        color: #2E7D32; /* Darker success text */
     }
     
     #ml-status.error {
         background-color: #FFEBEE;
-        color: #C62828;
+        color: #C62828; /* Darker error text */
     }
 </style>
 {% endblock %}

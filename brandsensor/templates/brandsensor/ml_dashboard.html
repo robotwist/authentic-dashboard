@@ -164,12 +164,14 @@
     
     .dashboard-header h1 {
         margin-bottom: 10px;
-        color: #333;
+        color: #222;
+        font-weight: 700;
     }
     
     .subtitle {
-        color: #666;
+        color: #444;
         margin-bottom: 20px;
+        font-weight: 500;
     }
     
     .ml-stats {
@@ -193,16 +195,24 @@
     .stat-value {
         font-size: 24px;
         font-weight: bold;
-        color: #2c3e50;
+        color: #222;
     }
     
     .stat-label {
         font-size: 14px;
-        color: #7f8c8d;
+        color: #444;
+        font-weight: 500;
     }
     
     .time-filter-container {
         margin: 20px 0;
+        text-align: center;
+    }
+    
+    .time-filter-container label {
+        font-weight: 600;
+        margin-right: 10px;
+        color: #333;
     }
     
     .time-filter {
@@ -213,29 +223,33 @@
     }
     
     .time-filter a {
-        padding: 8px 15px;
-        border-radius: 20px;
-        background: #f5f5f5;
+        padding: 8px 16px;
+        background: #f0f2f5;
         color: #333;
         text-decoration: none;
-        transition: all 0.2s;
+        border-radius: 20px;
+        font-weight: 500;
+    }
+    
+    .time-filter a:hover {
+        background: #e4e6e9;
     }
     
     .time-filter a.active {
-        background: #3498db;
+        background: var(--primary);
         color: white;
     }
     
     .charts-grid {
         display: grid;
-        grid-template-columns: 1fr 1fr;
-        grid-template-rows: auto;
+        grid-template-columns: repeat(2, 1fr);
+        grid-template-rows: repeat(3, auto);
         gap: 20px;
         margin-bottom: 30px;
     }
     
     .chart-container {
-        background: white;
+        background: #fff;
         border-radius: 8px;
         padding: 20px;
         box-shadow: 0 2px 4px rgba(0,0,0,0.1);
@@ -244,22 +258,44 @@
     .chart-container h3 {
         margin-top: 0;
         margin-bottom: 15px;
-        color: #2c3e50;
-        font-size: 18px;
+        text-align: center;
+        color: #222;
+        font-weight: 600;
+    }
+    
+    .sentiment-platform {
+        grid-column: 1;
+        grid-row: 1;
+    }
+    
+    .topic-dist {
+        grid-column: 2;
+        grid-row: 1;
+    }
+    
+    .engagement-dist {
+        grid-column: 1;
+        grid-row: 2;
+    }
+    
+    .toxicity-dist {
+        grid-column: 2;
+        grid-row: 2;
     }
     
     .sentiment-time {
         grid-column: 1 / span 2;
+        grid-row: 3;
     }
     
     .insights-grid {
         display: grid;
-        grid-template-columns: 1fr 1fr;
+        grid-template-columns: repeat(2, 1fr);
         gap: 20px;
     }
     
     .insight-section {
-        background: white;
+        background: #fff;
         border-radius: 8px;
         padding: 20px;
         box-shadow: 0 2px 4px rgba(0,0,0,0.1);
@@ -268,102 +304,106 @@
     .insight-section h3 {
         margin-top: 0;
         margin-bottom: 15px;
-        color: #2c3e50;
-        font-size: 18px;
+        color: #222;
+        font-weight: 600;
     }
     
     .posts-list {
         display: flex;
         flex-direction: column;
-        gap: 15px;
+        gap: 10px;
     }
     
     .post-card.mini {
-        border: 1px solid #eee;
-        border-radius: 6px;
-        padding: 10px;
+        background: #f8f9fa;
+        border-radius: 8px;
+        padding: 12px;
         position: relative;
-        transition: all 0.2s;
     }
     
-    .post-card.mini:hover {
-        box-shadow: 0 4px 8px rgba(0,0,0,0.1);
-    }
-    
-    .post-header {
+    .post-card.mini .post-header {
         display: flex;
         align-items: center;
+        gap: 8px;
         margin-bottom: 8px;
     }
     
     .platform-icon {
-        width: 20px;
-        height: 20px;
+        width: 24px;
+        height: 24px;
         border-radius: 50%;
-        margin-right: 8px;
-        background-color: #ddd;
+        background-size: contain;
+        background-position: center;
+        background-repeat: no-repeat;
     }
     
     .platform-icon.facebook {
-        background-color: #3b5998;
+        background-color: #1877F2;
     }
     
     .platform-icon.instagram {
-        background-color: #e1306c;
+        background: linear-gradient(45deg, #f09433 0%, #e6683c 25%, #dc2743 50%, #cc2366 75%, #bc1888 100%);
     }
     
     .platform-icon.linkedin {
-        background-color: #0077b5;
+        background-color: #0077B5;
     }
     
     .platform-icon.twitter {
-        background-color: #1da1f2;
+        background-color: #1DA1F2;
+    }
+    
+    .post-user {
+        font-weight: 600;
+        color: #333;
     }
     
     .post-sentiment, .post-engagement, .post-toxicity {
         position: absolute;
         top: 10px;
         right: 10px;
+        font-weight: bold;
     }
     
     .sentiment-score, .engagement-score, .toxicity-score {
-        padding: 4px 8px;
-        border-radius: 4px;
-        font-weight: bold;
+        padding: 3px 8px;
+        border-radius: 12px;
         font-size: 14px;
     }
     
     .sentiment-score.positive {
-        background-color: #e6f7e9;
-        color: #27ae60;
+        background: #E8F5E9;
+        color: #2E7D32;
     }
     
     .sentiment-score.negative {
-        background-color: #ffeaea;
-        color: #e74c3c;
+        background: #FFEBEE;
+        color: #C62828;
     }
     
     .engagement-score {
-        background-color: #e6f0ff;
-        color: #3498db;
+        background: #E3F2FD;
+        color: #0D47A1;
     }
     
     .toxicity-score {
-        background-color: #fff5e6;
-        color: #e67e22;
+        background: #FFF3E0;
+        color: #E65100;
     }
     
     .post-snippet {
         font-size: 14px;
-        color: #555;
-        margin-bottom: 10px;
+        margin: 10px 0;
         line-height: 1.4;
+        color: #222;
     }
     
     .view-post {
-        font-size: 12px;
-        color: #3498db;
+        display: inline-block;
+        margin-top: 5px;
+        color: var(--primary);
         text-decoration: none;
+        font-weight: 500;
     }
     
     .view-post:hover {
@@ -371,24 +411,31 @@
     }
     
     .no-data {
-        color: #7f8c8d;
+        padding: 20px;
+        text-align: center;
+        color: #666;
         font-style: italic;
-        font-size: 14px;
     }
     
     .ml-process-btn {
         margin-left: 20px;
     }
     
-    /* Responsive adjustments */
     @media (max-width: 768px) {
-        .charts-grid,
-        .insights-grid {
+        .charts-grid {
             grid-template-columns: 1fr;
         }
         
+        .sentiment-time, .topic-dist, .sentiment-platform, .engagement-dist, .toxicity-dist {
+            grid-column: 1;
+        }
+        
         .sentiment-time {
-            grid-column: auto;
+            grid-row: 5;
+        }
+        
+        .insights-grid {
+            grid-template-columns: 1fr;
         }
     }
 </style>

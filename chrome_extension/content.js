@@ -19,6 +19,67 @@ let connectionErrorCount = 0;
 const MAX_CONNECTION_ERRORS = 3;
 let lastConnectionError = null;
 
+// Deduplication system - store content fingerprints
+const FINGERPRINT_EXPIRATION = 24 * 60 * 60 * 1000; // 24 hours
+const MAX_CACHED_FINGERPRINTS = 500; // Maximum number of fingerprints to store
+
+// Function to generate a content fingerprint
+function generateFingerprint(platform, user, content) {
+  // Create a fingerprint using platform, user, and first 50 chars of content
+  // This helps identify the same post even if some details change
+  const contentSnippet = (content || "").substring(0, 50).trim();
+  return `${platform}:${user}:${contentSnippet}`;
+}
+
+// Function to check if content has already been processed
+function isContentDuplicate(platform, user, content) {
+  // Generate fingerprint
+  const fingerprint = generateFingerprint(platform, user, content);
+  
+  // Get stored fingerprints
+  return new Promise((resolve) => {
+    chrome.storage.local.get(['processedFingerprints'], function(result) {
+      const now = Date.now();
+      const fingerprints = result.processedFingerprints || {};
+      
+      // Check if this fingerprint exists and is still valid
+      if (fingerprints[fingerprint] && fingerprints[fingerprint] > now) {
+        console.log('Duplicate content detected, skipping collection');
+        resolve(true);
+      } else {
+        // Not a duplicate or expired
+        resolve(false);
+      }
+    });
+  });
+}
+
+// Function to record a fingerprint
+function recordFingerprint(platform, user, content) {
+  const fingerprint = generateFingerprint(platform, user, content);
+  
+  chrome.storage.local.get(['processedFingerprints'], function(result) {
+    const now = Date.now();
+    const expirationTime = now + FINGERPRINT_EXPIRATION;
+    let fingerprints = result.processedFingerprints || {};
+    
+    // Add or update this fingerprint
+    fingerprints[fingerprint] = expirationTime;
+    
+    // Clean up old fingerprints to avoid unlimited storage growth
+    const fingerprintEntries = Object.entries(fingerprints);
+    if (fingerprintEntries.length > MAX_CACHED_FINGERPRINTS) {
+      // Sort by expiration time, remove oldest ones
+      const sortedEntries = fingerprintEntries.sort((a, b) => a[1] - b[1]);
+      const entriesToKeep = sortedEntries.slice(-MAX_CACHED_FINGERPRINTS);
+      fingerprints = Object.fromEntries(entriesToKeep);
+    }
+    
+    // Store updated fingerprints
+    chrome.storage.local.set({processedFingerprints: fingerprints});
+  });
+}
+
 // Function to check server connection before collecting
 let lastServerCheckTime = 0;
 const SERVER_CHECK_COOLDOWN = 10000; // Check server at most every 10 seconds
@@ -68,71 +129,89 @@ function checkServerAvailability(callback) {
   });
 }
 
-// Modify the collectWithRateLimitProtection to check server first
-function collectWithRateLimitProtection(platform, collectionFunction) {
+// Modified collectWithRateLimitProtection to include deduplication
+async function collectWithRateLimitProtection(platform, collectionFunction) {
   // First check if server is available
-  checkServerAvailability(function(available) {
-    if (!available) {
-      console.log('Server unavailable. Collection skipped.');
-      return [];
-    }
-    
-    // Continue with original function if server is available
-    // Check if we're currently in a rate-limit backoff period
-    const currentTime = Date.now();
-    if (isRateLimited && currentTime < rateLimitResetTime) {
-      console.log(`Rate limit backoff active. Waiting ${Math.round((rateLimitResetTime - currentTime)/1000)}s before retrying.`);
-      return [];
-    }
-    
-    // Check if we're trying to collect too frequently
-    if (currentTime - lastCollectionTime < COLLECTION_COOLDOWN) {
-      console.log('Collection attempted too frequently. Skipping to prevent rate limiting.');
-      return [];
-    }
-    
-    // Update collection timestamp
-    lastCollectionTime = currentTime;
-    
-    try {
-      // Run the actual collection function
-      const results = collectionFunction();
-      
-      // If successful, reset any rate limit flags
-      isRateLimited = false;
-      connectionErrorCount = 0;
-      
-      return results;
-    } catch (error) {
-      // Check if this is a rate limit error (429)
-      if (error.message && error.message.includes('429')) {
-        console.warn('Rate limit detected. Activating backoff.');
-        isRateLimited = true;
-        rateLimitResetTime = currentTime + RATE_LIMIT_BACKOFF;
-        
-        // Show notification about rate limiting
-        chrome.runtime.sendMessage({
-          action: 'showNotification',
-          title: 'Rate Limit Detected',
-          message: `${platform} is rate limiting requests. Collection paused for 1 minute.`
-        });
-      } else {
-        // Handle other errors
-        connectionErrorCount++;
-        lastConnectionError = error.message;
-        console.error('Error in collection:', error);
-        
-        if (connectionErrorCount >= MAX_CONNECTION_ERRORS) {
-          chrome.runtime.sendMessage({
-            action: 'showNotification',
-            title: 'Connection Error',
-            message: `Error connecting to ${platform}. Please check your connection.`
-          });
-        }
+  return new Promise((resolve) => {
+    checkServerAvailability(async function(available) {
+      if (!available) {
+        console.log('Server unavailable. Collection skipped.');
+        resolve([]);
+        return;
       }
       
-      return [];
-    }
+      // Continue with original function if server is available
+      // Check if we're currently in a rate-limit backoff period
+      const currentTime = Date.now();
+      if (isRateLimited && currentTime < rateLimitResetTime) {
+        console.log(`Rate limit backoff active. Waiting ${Math.round((rateLimitResetTime - currentTime)/1000)}s before retrying.`);
+        resolve([]);
+        return;
+      }
+      
+      // Check if we're trying to collect too frequently
+      if (currentTime - lastCollectionTime < COLLECTION_COOLDOWN) {
+        console.log('Collection attempted too frequently. Skipping to prevent rate limiting.');
+        resolve([]);
+        return;
+      }
+      
+      // Update collection timestamp
+      lastCollectionTime = currentTime;
+      
+      try {
+        // Run the actual collection function
+        const results = collectionFunction();
+        
+        // Filter out duplicates using fingerprinting
+        const uniqueResults = [];
+        for (let post of results) {
+          const isDuplicate = await isContentDuplicate(post.platform, post.user, post.content);
+          if (!isDuplicate) {
+            uniqueResults.push(post);
+            // Record this content for future deduplication
+            recordFingerprint(post.platform, post.user, post.content);
+          }
+        }
+        
+        console.log(`Collected ${results.length} posts, ${uniqueResults.length} unique.`);
+        
+        // If successful, reset any rate limit flags
+        isRateLimited = false;
+        connectionErrorCount = 0;
+        
+        resolve(uniqueResults);
+      } catch (error) {
+        // Check if this is a rate limit error (429)
+        if (error.message && error.message.includes('429')) {
+          console.warn('Rate limit detected. Activating backoff.');
+          isRateLimited = true;
+          rateLimitResetTime = currentTime + RATE_LIMIT_BACKOFF;
+          
+          // Show notification about rate limiting
+          chrome.runtime.sendMessage({
+            action: 'showNotification',
+            title: 'Rate Limit Detected',
+            message: `${platform} is rate limiting requests. Collection paused for 1 minute.`
+          });
+        } else {
+          // Handle other errors
+          connectionErrorCount++;
+          lastConnectionError = error.message;
+          console.error('Error in collection:', error);
+          
+          if (connectionErrorCount >= MAX_CONNECTION_ERRORS) {
+            chrome.runtime.sendMessage({
+              action: 'showNotification',
+              title: 'Connection Error',
+              message: `Error connecting to ${platform}. Please check your connection.`
+            });
+          }
+        }
+        
+        resolve([]);
+      }
+    });
   });
 }
 
@@ -275,18 +354,22 @@ function collectFacebookPosts() {
     const userElement = el.querySelector('h4 span strong, h4 span a');
     const user = userElement?.innerText || "unknown";
     
-    // Check if it's sponsored content
-    const isSponsored = content.includes("Sponsored") || 
-                        el.innerHTML.includes("Sponsored") ||
-                        el.querySelector('a[href*="ads"]') !== null;
+    // Check if it's sponsored content - ensure boolean value
+    const isSponsored = Boolean(
+      content.includes("Sponsored") || 
+      el.innerHTML.includes("Sponsored") ||
+      el.querySelector('a[href*="ads"]') !== null
+    );
     
-    // Check for verified badge
-    const isVerified = el.querySelector('svg[aria-label*="Verified"]') !== null;
+    // Check for verified badge - ensure boolean value
+    const isVerified = Boolean(el.querySelector('svg[aria-label*="Verified"]') !== null);
     
-    // Try to determine friend status - this is a best guess
-    const isFriend = !isSponsored && 
-                     (el.querySelector('h4 a[href*="/friends/"]') !== null || 
-                      el.querySelector('[role="button"]:not([aria-label*="Like"])'));
+    // Try to determine friend status - ensure boolean value
+    const isFriend = Boolean(
+      !isSponsored && 
+      (el.querySelector('h4 a[href*="/friends/"]') !== null || 
+       el.querySelector('[role="button"]:not([aria-label*="Like"])'))
+    );
     
     // Extract timestamp
     let timestamp = '';
@@ -434,44 +517,6 @@ function collectFacebookPosts() {
     }
   });
 
-  // Get API key and send posts
-  chrome.storage.local.get(['apiKey'], function(result) {
-    const apiKey = result.apiKey || '8484e01c2e0b4d368eb9a0f9b89807ad'; // Default fallback API key
-    
-    posts.forEach(post => {
-      fetch("http://localhost:8000/api/process-ml/", {
-        method: "POST",
-        headers: { 
-          "Content-Type": "application/json",
-          "X-API-Key": apiKey
-        },
-        body: JSON.stringify(post)
-      })
-      .then(res => {
-        if (!res.ok) {
-          throw new Error(`HTTP error! Status: ${res.status}`);
-        }
-        return res.json();
-      })
-      .then(data => console.log("FB post saved:", data))
-      .catch(err => {
-        console.error("Error sending FB post:", err);
-        // Update connection error counters
-        connectionErrorCount++;
-        lastConnectionError = err.message;
-        
-        if (connectionErrorCount >= MAX_CONNECTION_ERRORS) {
-          chrome.runtime.sendMessage({
-            action: 'showNotification',
-            title: 'Connection Error',
-            message: `Error connecting to server: ${err.message}`
-          });
-        }
-      });
-    });
-  });
-  
-  console.log(`Collected ${posts.length} Facebook posts`);
   return posts;
 }
 
@@ -644,19 +689,32 @@ function collectLinkedInPosts() {
   // Get API key and send posts
   chrome.storage.local.get(['apiKey'], function(result) {
     const apiKey = result.apiKey || '8484e01c2e0b4d368eb9a0f9b89807ad'; // Default fallback API key
-    
-    posts.forEach(post => {
+
+  posts.forEach(post => {
+      // Ensure boolean fields are correctly formatted
+      const formattedPost = {
+        ...post,
+        is_friend: Boolean(post.is_friend),
+        is_family: Boolean(post.is_family),
+        verified: Boolean(post.verified),
+        is_sponsored: Boolean(post.is_sponsored),
+        is_job_post: Boolean(post.is_job_post)
+      };
+      
       fetch("http://localhost:8000/api/process-ml/", {
-        method: "POST",
+      method: "POST",
         headers: { 
           "Content-Type": "application/json",
           "X-API-Key": apiKey
         },
-        body: JSON.stringify(post)
-      })
+      body: JSON.stringify(formattedPost)
+    })
       .then(res => {
         if (!res.ok) {
-          throw new Error(`HTTP error! Status: ${res.status}`);
+          // Create more informative error message
+          const errorMessage = `HTTP error! Status: ${res.status}, URL: ${res.url}`;
+          console.error(errorMessage);
+          throw new Error(errorMessage);
         }
         return res.json();
       })
@@ -667,11 +725,23 @@ function collectLinkedInPosts() {
         connectionErrorCount++;
         lastConnectionError = err.message;
         
+        // Create user-friendly error message
+        let userMessage = "Error connecting to server. ";
+        if (err.message.includes("404")) {
+          userMessage += "API endpoint not found. Check server configuration.";
+        } else if (err.message.includes("401")) {
+          userMessage += "Authentication failed. Check your API key.";
+        } else if (err.message.includes("500")) {
+          userMessage += "Server error. Check Django logs for details.";
+        } else {
+          userMessage += err.message;
+        }
+        
         if (connectionErrorCount >= MAX_CONNECTION_ERRORS) {
           chrome.runtime.sendMessage({
             action: 'showNotification',
             title: 'Connection Error',
-            message: `Error connecting to server: ${err.message}`
+            message: userMessage
           });
         }
       });

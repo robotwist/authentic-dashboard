@@ -110,6 +110,15 @@ function sendPostsToAPI(posts, platform, settings) {
     let failureCount = 0;
     
     posts.forEach(post => {
+        // Ensure boolean fields are properly formatted as true booleans
+        // This fixes the issue with the API validation
+        if (post.is_friend !== undefined) post.is_friend = Boolean(post.is_friend);
+        if (post.is_family !== undefined) post.is_family = Boolean(post.is_family);
+        if (post.verified !== undefined) post.verified = Boolean(post.verified);
+        if (post.is_sponsored !== undefined) post.is_sponsored = Boolean(post.is_sponsored);
+        if (post.is_job_post !== undefined) post.is_job_post = Boolean(post.is_job_post);
+        
+        // First, send to ML processing endpoint
         fetch('http://localhost:8000/api/process-ml/', {
             method: 'POST',
             headers: {
@@ -119,14 +128,33 @@ function sendPostsToAPI(posts, platform, settings) {
             body: JSON.stringify(post)
         })
         .then(response => {
-            // Check for HTTP errors first
             if (!response.ok) {
-                throw new Error(`HTTP error! Status: ${response.status}`);
+                throw { response, error: new Error(`HTTP error in ML processing! Status: ${response.status}`) };
+            }
+            return response.json();
+        })
+        .then(mlData => {
+            console.log('ML processing successful:', mlData);
+            
+            // Now send to the post storage endpoint
+            return fetch('http://localhost:8000/api/post/', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-API-Key': apiKey
+                },
+                body: JSON.stringify(post)
+            });
+        })
+        .then(response => {
+            // Check for HTTP errors
+            if (!response.ok) {
+                throw { response, error: new Error(`HTTP error in post storage! Status: ${response.status}`) };
             }
             return response.json();
         })
         .then(data => {
-            if (data.status && (data.status === 'success' || data.status === 'duplicate post, skipped')) {
+            if (data.status && (data.status === 'post saved and processed' || data.status === 'duplicate post, skipped')) {
                 successCount++;
             } else {
                 failureCount++;
@@ -139,27 +167,43 @@ function sendPostsToAPI(posts, platform, settings) {
                 
                 // Show notification if enabled
                 if (settings.showNotifications) {
-                    chrome.notifications.create({
-                        type: 'basic',
-                        iconUrl: 'icon48.png',
-                        title: 'Authentic Dashboard',
-                        message: `Auto-scan: Collected ${successCount} posts from ${platform}.`
-                    });
+                    showNotification(
+                        'Authentic Dashboard', 
+                        `Auto-scan: Collected ${successCount} posts from ${platform}.`
+                    );
                 }
             }
         })
-        .catch(error => {
-            console.error('Error sending post to API:', error);
+        .catch(err => {
+            console.error('Error sending post to API:', err);
             failureCount++;
             
-            // Show notification about API error
-            if (settings.showNotifications && failureCount === 1) {
-                chrome.notifications.create({
-                    type: 'basic',
-                    iconUrl: 'icon48.png',
-                    title: 'API Connection Error',
-                    message: `Could not connect to the dashboard server. Please check if it's running.`
+            let errorObject = err.error || err;
+            let response = err.response;
+            
+            // Process the error
+            if (response) {
+                handleFetchError(errorObject, response).then(errorData => {
+                    console.error('API Error details:', errorData);
+                    
+                    // Show notification about API error
+                    if (settings.showNotifications && failureCount === 1) {
+                        showNotification(
+                            'API Connection Error',
+                            errorData.message || 'Could not connect to the dashboard server.',
+                            'error'
+                        );
+                    }
                 });
+            } else {
+                // Network error case
+                if (settings.showNotifications && failureCount === 1) {
+                    showNotification(
+                        'API Connection Error',
+                        `Could not connect to the dashboard server: ${errorObject.message}`,
+                        'error'
+                    );
+                }
             }
         });
     });
@@ -255,21 +299,92 @@ chrome.runtime.onMessage.addListener(function(message, sender, sendResponse) {
       })
       .then(response => {
         if (!response.ok) {
-          throw new Error(`HTTP error! Status: ${response.status}`);
+          throw { response, error: new Error(`HTTP error! Status: ${response.status}`) };
         }
         return response.json();
       })
       .then(data => {
         console.log('Backend connection check successful:', data);
-        sendResponse({status: 'connected', server: true});
+        sendResponse({status: 'connected', server: true, data});
       })
-      .catch(error => {
-        console.error('Backend connection check failed:', error);
-        sendResponse({status: 'disconnected', server: false, error: error.message});
+      .catch(err => {
+        let errorObject = err.error || err;
+        let response = err.response;
+        
+        if (response) {
+          // HTTP error
+          handleFetchError(errorObject, response).then(errorData => {
+            console.error('Backend connection check failed:', errorData);
+            sendResponse({
+              status: 'disconnected', 
+              server: false, 
+              error: errorData.message || 'Unknown error',
+              details: errorData
+            });
+          });
+        } else {
+          // Network error
+          console.error('Backend connection check failed:', errorObject);
+          sendResponse({
+            status: 'disconnected', 
+            server: false, 
+            error: errorObject.message || 'Network error',
+            details: { networkError: true }
+          });
+        }
       });
     });
     
     // Return true to indicate we will send the response asynchronously
     return true;
   }
-}); 
+});
+
+// Function to handle fetch errors with better error messages
+function handleFetchError(error, response) {
+  if (!response) {
+    // Network error (server unreachable)
+    return {
+      status: 'error',
+      message: 'Network error: Server unreachable. Check if the dashboard server is running.',
+      error: error.message
+    };
+  }
+  
+  // Try to parse the error response
+  return response.json()
+    .then(errorData => {
+      return {
+        status: 'error',
+        message: errorData.error || errorData.message || `HTTP Error: ${response.status}`,
+        statusCode: response.status,
+        error: errorData
+      };
+    })
+    .catch(() => {
+      // If we can't parse the JSON, just return the status
+      return {
+        status: 'error',
+        message: `HTTP Error: ${response.status}`,
+        statusCode: response.status
+      };
+    });
+}
+
+// Improved function to show notifications
+function showNotification(title, message, type = 'info') {
+  let iconPath = 'icon48.png';
+  
+  // Different icons for different notification types
+  if (type === 'error') {
+    title = title || 'Error';
+    iconPath = 'icon48.png'; // You could use a different icon for errors
+  }
+  
+  chrome.notifications.create({
+    type: 'basic',
+    iconUrl: iconPath,
+    title: title,
+    message: message
+  });
+} 

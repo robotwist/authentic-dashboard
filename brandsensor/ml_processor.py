@@ -149,14 +149,22 @@ def preprocess_text(text):
 def analyze_sentiment(text, use_lexicon=True):
     """
     Analyze the sentiment of the given text
-    Returns a score between -1 (negative) and 1 (positive)
+    Returns a dictionary with sentiment score and indicators
     """
     if not text:
-        return 0.0, 0, 0
+        return {
+            'sentiment_score': 0.0,
+            'positive_indicators': 0,
+            'negative_indicators': 0
+        }
     
-    # If the post already has a sentiment score, use that
+    # Check if text is a post object
     if hasattr(text, 'sentiment_score') and text.sentiment_score is not None:
-        return text.sentiment_score, text.positive_indicators, text.negative_indicators
+        return {
+            'sentiment_score': text.sentiment_score,
+            'positive_indicators': text.positive_indicators,
+            'negative_indicators': text.negative_indicators
+        }
     
     tokens = preprocess_text(text.lower())
     positive_count = 0
@@ -173,10 +181,15 @@ def analyze_sentiment(text, use_lexicon=True):
     # Calculate sentiment score
     total = positive_count + negative_count
     if total == 0:
-        return 0.0, 0, 0
+        sentiment_score = 0.0
+    else:
+        sentiment_score = (positive_count - negative_count) / total
     
-    sentiment_score = (positive_count - negative_count) / total
-    return sentiment_score, positive_count, negative_count
+    return {
+        'sentiment_score': sentiment_score,
+        'positive_indicators': positive_count,
+        'negative_indicators': negative_count
+    }
 
 def classify_topics(text):
     """
@@ -315,10 +328,10 @@ def process_post(post):
     
     # Analyze sentiment if not already done
     if post.sentiment_score is None:
-        sentiment_score, pos_count, neg_count = analyze_sentiment(post.content)
-        post.sentiment_score = sentiment_score
-        post.positive_indicators = pos_count
-        post.negative_indicators = neg_count
+        sentiment_result = analyze_sentiment(post.content)
+        post.sentiment_score = sentiment_result['sentiment_score']
+        post.positive_indicators = sentiment_result['positive_indicators']
+        post.negative_indicators = sentiment_result['negative_indicators']
     
     # Classify topics if not already done
     if not post.automated_category:

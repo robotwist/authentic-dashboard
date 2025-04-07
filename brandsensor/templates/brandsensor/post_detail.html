@@ -1,4 +1,5 @@
 {% extends "brandsensor/base.html" %}
+{% load custom_filters %}
 
 {% block title %}Post Details{% endblock %}
 
@@ -133,10 +134,10 @@
                             
                             {% if post.topic_vector %}
                             <div class="topic-distribution">
-                                {% for topic, score in post.topic_vector|json_parse|slice:":5"|sort_by:'1'|reverse %}
-                                <div class="topic-bar" style="width: {{ score|multiply:100 }}%;">
-                                    <span class="topic-name">{{ topic|title }}</span>
-                                    <span class="topic-score">{{ score|floatformat:2 }}</span>
+                                {% for topic_data in post.topic_vector|json_parse|sort_by:'1'|reverse|slice:":5" %}
+                                <div class="topic-bar topic-bar-{{ forloop.counter }}" data-width="{{ topic_data.1|multiply:100 }}">
+                                    <span class="topic-name">{{ topic_data.0|title }}</span>
+                                    <span class="topic-score">{{ topic_data.1|floatformat:2 }}</span>
                                 </div>
                                 {% endfor %}
                             </div>
@@ -195,7 +196,7 @@
                             <h4>Engagement Prediction</h4>
                             <div class="ml-primary-value">{{ post.engagement_prediction|floatformat:2 }}</div>
                             <div class="engagement-meter">
-                                <div class="meter-fill" style="width: {{ post.engagement_prediction|multiply:100 }}%;"></div>
+                                <div class="meter-fill engagement-fill" data-width="{{ post.engagement_prediction|multiply:100 }}"></div>
                             </div>
                             <div class="ml-explanation">
                                 <small>Predicted engagement based on content, length, and sentiment.</small>
@@ -208,7 +209,7 @@
                             <h4>Relevance to You</h4>
                             <div class="ml-primary-value">{{ post.relevance_score|floatformat:2 }}</div>
                             <div class="relevance-meter">
-                                <div class="meter-fill" style="width: {{ post.relevance_score|multiply:100 }}%;"></div>
+                                <div class="meter-fill relevance-fill" data-width="{{ post.relevance_score|multiply:100 }}"></div>
                             </div>
                             <div class="ml-explanation">
                                 <small>Based on your interests, connections, and preferences.</small>
@@ -337,6 +338,11 @@
 
 {% block extra_styles %}
 <style>
+    /* Base text color enhancement for better readability */
+    body {
+        color: #222; /* Darker base text color for the entire page */
+    }
+    
     .post-detail-card {
         background: #fff;
         border-radius: 8px;
@@ -351,14 +357,16 @@
         align-items: center;
         margin-bottom: 20px;
         padding-bottom: 10px;
-        border-bottom: 1px solid #eee;
+        border-bottom: 1px solid #ddd; /* Darker border */
     }
     
     .post-user {
         font-size: 1.1rem;
+        font-weight: 600; /* Make usernames bolder */
         display: flex;
         align-items: center;
         gap: 8px;
+        color: #222; /* Darker color */
     }
     
     .verified-badge {
@@ -367,13 +375,16 @@
     }
     
     .post-meta {
-        color: #666;
+        color: #444; /* Darker meta info */
         font-size: 0.9rem;
+        font-weight: 500; /* Slightly bolder */
     }
     
     .post-content {
         margin-bottom: 20px;
         line-height: 1.6;
+        color: #222; /* Darker post content */
+        font-size: 1.05rem; /* Slightly larger text */
     }
     
     .post-images {
@@ -396,7 +407,9 @@
     .attribute-section h3 {
         margin-bottom: 15px;
         padding-bottom: 5px;
-        border-bottom: 2px solid #f5f5f5;
+        border-bottom: 2px solid #e0e0e0; /* Darker section borders */
+        color: #111; /* Darker headings */
+        font-weight: 700;
     }
     
     .attributes-grid {
@@ -412,12 +425,13 @@
     
     .attribute .label {
         font-weight: bold;
-        color: #666;
+        color: #444; /* Darker label text */
         font-size: 0.9rem;
     }
     
     .attribute .value {
         font-size: 1.1rem;
+        color: #222; /* Darker value text */
     }
     
     .star-rating {
@@ -428,7 +442,7 @@
     .star {
         cursor: pointer;
         font-size: 1.5rem;
-        color: #ddd;
+        color: #bbb; /* Darker inactive stars */
     }
     
     .star.active {
@@ -440,7 +454,7 @@
         gap: 10px;
         margin-top: 20px;
         padding-top: 20px;
-        border-top: 1px solid #eee;
+        border-top: 1px solid #ddd; /* Darker border */
     }
     
     .similar-posts {
@@ -449,6 +463,7 @@
     
     .similar-posts h3 {
         margin-bottom: 15px;
+        color: #111; /* Darker header */
     }
     
     .similar-posts-grid {
@@ -471,7 +486,7 @@
         justify-content: space-between;
         margin-bottom: 10px;
         padding-bottom: 5px;
-        border-bottom: 1px solid #eee;
+        border-bottom: 1px solid #ddd; /* Darker border */
     }
     
     .similar-post-content {
@@ -482,6 +497,7 @@
         display: -webkit-box;
         -webkit-line-clamp: 3;
         -webkit-box-orient: vertical;
+        color: #222; /* Darker text */
     }
     
     .full-width {
@@ -506,11 +522,12 @@
         padding: 5px 10px;
         border-radius: 15px;
         font-size: 0.9rem;
+        color: #333; /* Darker tag text */
     }
     
     .tag.mention {
         background: #e1f5fe;
-        color: #0277bd;
+        color: #0457a7; /* Darker mention text */
     }
     
     .external-links {
@@ -519,6 +536,7 @@
     
     .external-links a {
         word-break: break-all;
+        color: #0366d6; /* Darker link color */
     }
     
     /* ML Insights Styles */
@@ -538,14 +556,16 @@
     
     .ml-insight h4 {
         margin-top: 0;
-        color: #555;
+        color: #333; /* Darker heading */
         margin-bottom: 10px;
+        font-weight: 600;
     }
     
     .ml-primary-value {
         font-size: 1.5rem;
         font-weight: bold;
         margin-bottom: 8px;
+        color: #222; /* Darker text */
     }
     
     .sentiment-value {
@@ -555,15 +575,15 @@
     }
     
     .sentiment-value.positive {
-        color: #4CAF50;
+        color: #2E7D32; /* Darker green */
     }
     
     .sentiment-value.negative {
-        color: #F44336;
+        color: #C62828; /* Darker red */
     }
     
     .sentiment-value.neutral {
-        color: #607D8B;
+        color: #455A64; /* Darker blue-grey */
     }
     
     .sentiment-label {
@@ -571,6 +591,7 @@
         background: rgba(0,0,0,0.05);
         padding: 2px 8px;
         border-radius: 10px;
+        color: #333; /* Darker label text */
     }
     
     .sentiment-details {
@@ -581,6 +602,14 @@
         font-size: 0.9rem;
     }
     
+    .sentiment-indicator .label {
+        color: #444; /* Darker indicator labels */
+    }
+    
+    .sentiment-indicator .value {
+        color: #222; /* Darker indicator values */
+    }
+    
     .toxicity-value {
         display: flex;
         align-items: center;
@@ -588,15 +617,15 @@
     }
     
     .toxicity-value.safe {
-        color: #4CAF50;
+        color: #2E7D32; /* Darker green */
     }
     
     .toxicity-value.moderate {
-        color: #FF9800;
+        color: #E65100; /* Darker orange */
     }
     
     .toxicity-value.toxic {
-        color: #F44336;
+        color: #C62828; /* Darker red */
     }
     
     .toxicity-label {
@@ -604,6 +633,7 @@
         background: rgba(0,0,0,0.05);
         padding: 2px 8px;
         border-radius: 10px;
+        color: #333; /* Darker label text */
     }
     
     .engagement-meter, .relevance-meter {
@@ -616,12 +646,13 @@
     
     .meter-fill {
         height: 100%;
-        background: #2196F3;
+        background: #1976D2; /* Darker blue */
         border-radius: 4px;
     }
     
     .ml-explanation {
-        color: #757575;
+        color: #444; /* Darker explanation text */
+        font-weight: 500; /* Make explanation text slightly bolder */
     }
     
     .topic-distribution {
@@ -632,11 +663,12 @@
         display: flex;
         justify-content: space-between;
         background: #E3F2FD;
-        color: #1565C0;
+        color: #0d47a1; /* Darker blue text */
         margin-bottom: 5px;
         padding: 3px 8px;
         border-radius: 4px;
         font-size: 0.9rem;
+        font-weight: 500; /* Make topic text bolder */
     }
     
     .prediction-logs {
@@ -650,15 +682,37 @@
     }
     
     .prediction-logs th, .prediction-logs td {
-        border: 1px solid #e0e0e0;
+        border: 1px solid #ccc; /* Darker table borders */
         padding: 8px;
         text-align: left;
+        color: #222; /* Darker table text */
     }
     
     .prediction-logs th {
-        background: #f5f5f5;
+        background: #f0f0f0; /* Darker header background */
+        color: #333; /* Darker header text */
+        font-weight: 600;
+    }
+    
+    /* Dynamic width styles applied via JavaScript */
+    .topic-bar, .meter-fill {
+        /* Base styles without width */
     }
 </style>
+<script>
+    /* Apply widths after page load to avoid template syntax issues */
+    document.addEventListener('DOMContentLoaded', function() {
+        // Apply topic bar widths
+        document.querySelectorAll('.topic-bar').forEach(function(bar) {
+            bar.style.width = bar.dataset.width + '%';
+        });
+        
+        // Apply meter fill widths
+        document.querySelectorAll('.meter-fill').forEach(function(meter) {
+            meter.style.width = meter.dataset.width + '%';
+        });
+    });
+</script>
 {% endblock %}
 
 {% block extra_scripts %}
