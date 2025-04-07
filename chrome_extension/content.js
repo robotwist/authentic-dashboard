@@ -215,6 +215,45 @@ async function collectWithRateLimitProtection(platform, collectionFunction) {
   });
 }
 
+// Add a function at the top of the file to handle post fingerprinting
+function generatePostFingerprint(platform, user, contentSnippet, timestamp) {
+  // Create a fingerprint based on platform, user, first 50 chars of content, and timestamp if available
+  const contentPart = contentSnippet ? contentSnippet.substring(0, 50).trim() : '';
+  return `${platform}_${user}_${contentPart}_${timestamp || ''}`;
+}
+
+function isPostAlreadyProcessed(fingerprint) {
+  return new Promise((resolve) => {
+    chrome.storage.local.get(['processedPosts'], function(result) {
+      const processedPosts = result.processedPosts || {};
+      resolve(processedPosts[fingerprint] === true);
+    });
+  });
+}
+
+function markPostAsProcessed(fingerprint) {
+  chrome.storage.local.get(['processedPosts'], function(result) {
+    const processedPosts = result.processedPosts || {};
+    
+    // Add the new fingerprint
+    processedPosts[fingerprint] = true;
+    
+    // Keep the size manageable by removing old entries if we have too many
+    const keys = Object.keys(processedPosts);
+    if (keys.length > 500) {
+      // Remove the oldest 100 entries
+      const keysToRemove = keys.slice(0, 100);
+      keysToRemove.forEach(key => {
+        delete processedPosts[key];
+      });
+    }
+    
+    // Save back to storage
+    chrome.storage.local.set({ processedPosts: processedPosts });
+  });
+}
+
+// Then modify the collectInstagramPosts function to use fingerprinting
 function collectInstagramPosts(dataPreferences) {
   // Default to all enabled if not specified
   const prefs = dataPreferences || {
@@ -229,6 +268,8 @@ function collectInstagramPosts(dataPreferences) {
   const posts = [];
   const postElements = document.querySelectorAll('article');
 
+  const processedPromises = [];
+  
   postElements.forEach((el) => {
     // Get content only if preference is enabled
     const content = prefs.collectContent ? (el.innerText || "") : "";
@@ -298,46 +339,62 @@ function collectInstagramPosts(dataPreferences) {
     }
 
     if (content.length > 0) {
-      // Build an object with only the enabled data fields
-      const post = {
-        platform: 'instagram',
-        collected_at: new Date().toISOString()
-      };
+      // Generate fingerprint for this post
+      const fingerprint = generatePostFingerprint('instagram', username, content, '');
       
-      // Only add fields based on preferences
-      if (prefs.collectContent) {
-        post.content = content;
-        post.content_length = content.length;
-      }
+      // Check if we've already processed this post
+      const processedPromise = isPostAlreadyProcessed(fingerprint).then(isProcessed => {
+        if (isProcessed) {
+          console.log(`Skipping already processed Instagram post: ${fingerprint}`);
+          return null; // Skip this post
+        }
+        
+        // Build an object with only the enabled data fields
+        const post = {
+          platform: 'instagram',
+          collected_at: new Date().toISOString()
+        };
+        
+        // Only add fields based on preferences
+        if (prefs.collectContent) {
+          post.content = content;
+          post.content_length = content.length;
+        }
+        
+        if (prefs.collectUsers) {
+          post.user = username;
+          post.verified = el.querySelector('header svg[aria-label="Verified"]') !== null;
+          post.is_friend = el.querySelector('header button')?.innerText.includes('Following') || false;
+          post.is_family = false; // Always needs user input
+        }
+        
+        if (prefs.collectEngagement) {
+          post.likes = likes;
+          post.comments = comments;
+        }
+        
+        if (prefs.collectHashtags) {
+          post.hashtags = hashtags.join(',');
+          post.mentions = mentions.join(',');
+          post.category = hashtags.join(',');
+        }
+        
+        if (prefs.collectLocalML) {
+          post.sentiment_score = sentimentScore;
+          post.manipulative_patterns = manipulativePatterns;
+        }
+        
+        // Mark this post as processed
+        markPostAsProcessed(fingerprint);
+        return post;
+      });
       
-      if (prefs.collectUsers) {
-        post.user = username;
-        post.verified = el.querySelector('header svg[aria-label="Verified"]') !== null;
-        post.is_friend = el.querySelector('header button')?.innerText.includes('Following') || false;
-        post.is_family = false; // Always needs user input
-      }
-      
-      if (prefs.collectEngagement) {
-        post.likes = likes;
-        post.comments = comments;
-      }
-      
-      if (prefs.collectHashtags) {
-        post.hashtags = hashtags.join(',');
-        post.mentions = mentions.join(',');
-        post.category = hashtags.join(',');
-      }
-      
-      if (prefs.collectLocalML) {
-        post.sentiment_score = sentimentScore;
-        post.manipulative_patterns = manipulativePatterns;
-      }
-      
-      posts.push(post);
+      processedPromises.push(processedPromise);
     }
   });
-
-  return posts;
+  
+  // Wait for all promise checks to complete and return only non-null posts
+  return Promise.all(processedPromises).then(posts => posts.filter(post => post !== null));
 }
 
 // Enhanced Facebook post collector
@@ -1151,7 +1208,6 @@ chrome.runtime.onMessage.addListener(function(request, sender, sendResponse) {
           return;
         }
         
-        let posts = [];
         const platform = request.platform;
         
         // Apply data preferences to collection
@@ -1164,19 +1220,32 @@ chrome.runtime.onMessage.addListener(function(request, sender, sendResponse) {
             collectLocalML: true
           };
         
-        // Collect posts based on platform
+        // Collect posts based on platform - handle async/promise based collection
+        let postsPromise;
+        
         if (platform === 'instagram') {
-          posts = collectInstagramPosts(dataPreferences);
+          postsPromise = collectInstagramPosts(dataPreferences);
         } else if (platform === 'facebook') {
-          posts = collectFacebookPosts(dataPreferences);
+          postsPromise = collectFacebookPosts(dataPreferences);
         } else if (platform === 'linkedin') {
-          posts = collectLinkedInPosts(dataPreferences);
+          postsPromise = collectLinkedInPosts(dataPreferences);
+        } else {
+          postsPromise = Promise.resolve([]);
         }
         
-        sendResponse({ 
-          success: true, 
-          posts: posts,
-          count: posts.length
+        // Handle the promise to get posts
+        Promise.resolve(postsPromise).then(posts => {
+          sendResponse({ 
+            success: true, 
+            posts: posts,
+            count: posts.length
+          });
+        }).catch(error => {
+          console.error('Error collecting posts:', error);
+          sendResponse({ 
+            success: false, 
+            error: error.message 
+          });
         });
       });
     } catch (error) {

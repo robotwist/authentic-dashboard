@@ -616,11 +616,19 @@ def mark_family(request, username, platform):
             connection.save()
         
         # Update existing posts from this user
-        SocialPost.objects.filter(
+        updated_count = SocialPost.objects.filter(
             user=request.user,
             original_user=username,
             platform=platform
         ).update(is_family=True)
+        
+        # Check if it's an AJAX request
+        if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
+            return JsonResponse({
+                'success': True,
+                'username': username,
+                'updated_posts': updated_count
+            })
     
     # Redirect back to referring page or dashboard
     next_url = request.POST.get('next', 'dashboard')
