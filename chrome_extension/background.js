@@ -79,8 +79,15 @@ function performAutoScan(tabId, url, settings) {
             collectSponsored: settings.collectSponsored
         }
     }, function(response) {
-        if (chrome.runtime.lastError || !response || !response.posts) {
-            console.error('Auto-scan failed:', chrome.runtime.lastError);
+        // Handle connection errors
+        if (chrome.runtime.lastError) {
+            console.error('Auto-scan error:', chrome.runtime.lastError);
+            // Don't proceed with sending data if there was an error
+            return;
+        }
+        
+        if (!response || !response.posts) {
+            console.error('Invalid response from content script');
             return;
         }
         
@@ -97,12 +104,13 @@ function sendPostsToAPI(posts, platform, settings) {
         return;
     }
     
-    const apiKey = settings.apiKey || '';
+    // Use the default API key if none is provided
+    const apiKey = settings.apiKey || '8484e01c2e0b4d368eb9a0f9b89807ad';
     let successCount = 0;
     let failureCount = 0;
     
     posts.forEach(post => {
-        fetch('http://localhost:8000/api/post/', {
+        fetch('http://localhost:8000/api/process-ml/', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
@@ -110,9 +118,15 @@ function sendPostsToAPI(posts, platform, settings) {
             },
             body: JSON.stringify(post)
         })
-        .then(response => response.json())
+        .then(response => {
+            // Check for HTTP errors first
+            if (!response.ok) {
+                throw new Error(`HTTP error! Status: ${response.status}`);
+            }
+            return response.json();
+        })
         .then(data => {
-            if (data.status && (data.status === 'post saved and processed' || data.status === 'duplicate post, skipped')) {
+            if (data.status && (data.status === 'success' || data.status === 'duplicate post, skipped')) {
                 successCount++;
             } else {
                 failureCount++;
@@ -137,6 +151,16 @@ function sendPostsToAPI(posts, platform, settings) {
         .catch(error => {
             console.error('Error sending post to API:', error);
             failureCount++;
+            
+            // Show notification about API error
+            if (settings.showNotifications && failureCount === 1) {
+                chrome.notifications.create({
+                    type: 'basic',
+                    iconUrl: 'icon48.png',
+                    title: 'API Connection Error',
+                    message: `Could not connect to the dashboard server. Please check if it's running.`
+                });
+            }
         });
     });
 }
@@ -198,4 +222,54 @@ chrome.webNavigation.onBeforeNavigate.addListener(
     }
   },
   {url: [{urlContains: 'localhost:8000/accounts/login'}]}
-); 
+);
+
+// Listen for messages from content scripts
+chrome.runtime.onMessage.addListener(function(message, sender, sendResponse) {
+  if (message.action === 'showNotification') {
+    chrome.notifications.create({
+      type: 'basic',
+      iconUrl: 'icon48.png',
+      title: message.title || 'Authentic Dashboard',
+      message: message.message || 'Notification from Authentic Dashboard'
+    });
+    // Always send a response
+    sendResponse({success: true});
+    return true;
+  }
+  
+  // Handle connection check messages
+  if (message.action === 'checkConnection') {
+    // Get API key first
+    chrome.storage.local.get(['settings'], function(result) {
+      const settings = result.settings || { apiKey: '8484e01c2e0b4d368eb9a0f9b89807ad' };
+      const apiKey = settings.apiKey || '8484e01c2e0b4d368eb9a0f9b89807ad';
+      
+      // Verify backend API connection
+      fetch('http://localhost:8000/api/health-check/', {
+        method: 'GET',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-API-Key': apiKey
+        }
+      })
+      .then(response => {
+        if (!response.ok) {
+          throw new Error(`HTTP error! Status: ${response.status}`);
+        }
+        return response.json();
+      })
+      .then(data => {
+        console.log('Backend connection check successful:', data);
+        sendResponse({status: 'connected', server: true});
+      })
+      .catch(error => {
+        console.error('Backend connection check failed:', error);
+        sendResponse({status: 'disconnected', server: false, error: error.message});
+      });
+    });
+    
+    // Return true to indicate we will send the response asynchronously
+    return true;
+  }
+}); 

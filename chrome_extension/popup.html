@@ -217,14 +217,168 @@
         .small-button:hover {
             background-color: #2980b9;
         }
+        
+        /* Tab styling */
+        .tab-container {
+            margin-top: 20px;
+            border-top: 1px solid #ddd;
+            padding-top: 15px;
+        }
+        
+        .tab-buttons {
+            display: flex;
+            border-bottom: 1px solid #ddd;
+        }
+        
+        .tab-button {
+            background-color: #f1f1f1;
+            border: none;
+            padding: 8px 16px;
+            font-size: 13px;
+            cursor: pointer;
+            transition: 0.3s;
+            border-radius: 4px 4px 0 0;
+            margin-bottom: -1px;
+            color: #666;
+        }
+        
+        .tab-button:hover {
+            background-color: #ddd;
+        }
+        
+        .tab-button.active {
+            background-color: white;
+            border: 1px solid #ddd;
+            border-bottom: 1px solid white;
+            color: #3498db;
+        }
+        
+        .tab-content {
+            display: none;
+            padding: 15px;
+            border: 1px solid #ddd;
+            border-top: none;
+            background-color: white;
+            margin-bottom: 15px;
+        }
+        
+        .tab-content.active {
+            display: block;
+        }
+        
+        /* Transparency panel */
+        .data-category {
+            margin-bottom: 15px;
+        }
+        
+        .data-category h4 {
+            margin: 5px 0;
+            font-size: 14px;
+            color: #2c3e50;
+        }
+        
+        .data-items {
+            margin-left: 15px;
+            font-size: 12px;
+            color: #7f8c8d;
+        }
+        
+        .data-control {
+            font-size: 12px;
+            margin-top: 5px;
+        }
+        
+        .data-control label {
+            display: flex;
+            align-items: center;
+        }
+        
+        .data-control input {
+            margin-right: 5px;
+        }
+        
+        .learn-more {
+            font-size: 11px;
+            color: #3498db;
+            text-decoration: underline;
+            cursor: pointer;
+            margin-left: 5px;
+        }
+        
+        /* Tooltip for explaining data usage */
+        .tooltip {
+            position: relative;
+            display: inline-block;
+            border-bottom: 1px dotted #3498db;
+            cursor: help;
+        }
+        
+        .tooltip .tooltiptext {
+            visibility: hidden;
+            width: 200px;
+            background-color: #555;
+            color: #fff;
+            text-align: center;
+            border-radius: 6px;
+            padding: 5px;
+            position: absolute;
+            z-index: 1;
+            bottom: 125%;
+            left: 50%;
+            margin-left: -100px;
+            opacity: 0;
+            transition: opacity 0.3s;
+            font-size: 11px;
+        }
+        
+        .tooltip:hover .tooltiptext {
+            visibility: visible;
+            opacity: 1;
+        }
+        
+        /* Connection warning styles */
+        .connection-warning {
+            background-color: #fcf8e3;
+            border: 1px solid #faebcc;
+            border-radius: 4px;
+            color: #8a6d3b;
+            margin-top: 10px;
+            margin-bottom: 10px;
+            padding: 10px;
+            display: none;
+        }
+        
+        .connection-warning p {
+            margin: 0 0 10px 0;
+            font-size: 13px;
+        }
+        
+        .retry-button {
+            background-color: #f0ad4e;
+            width: auto;
+            font-size: 12px;
+            padding: 5px 10px;
+            margin: 0;
+        }
+        
+        .retry-button:hover {
+            background-color: #ec971f;
+        }
+        
+        .header {
+            position: relative;
+        }
     </style>
 </head>
 <body>
-    <h1>Authentic Dashboard</h1>
-    <p class="description">Reclaim control of your social media experience</p>
+    <div class="header">
+        <h1>Authentic Dashboard</h1>
+        <div class="description">Empowering you to take control of your social media experience.</div>
+        <!-- Connection message container will be inserted here by JS -->
+    </div>
     
     <button id="scanButton">Scan Current Page</button>
-    <div id="status" class="status">Ready to scan.</div>
+    <div id="status" class="status">Checking connection status...</div>
     
     <div class="stats">
         <div class="stat-row">
@@ -245,45 +399,133 @@
         <!-- Recent scans will be inserted here -->
     </div>
     
-    <div class="settings">
-        <h3 style="font-size: 14px; margin-bottom: 10px;">Scanner Settings</h3>
-        
-        <div class="toggle-row">
-            <span class="toggle-label">Auto-scan on page load</span>
-            <label class="toggle">
-                <input type="checkbox" id="autoScan" checked>
-                <span class="slider"></span>
-            </label>
+    <div class="tab-container">
+        <div class="tab-buttons">
+            <button id="settingsTabBtn" class="tab-button active">Settings</button>
+            <button id="transparencyTabBtn" class="tab-button">Transparency</button>
+            <button id="insightsTabBtn" class="tab-button">Insights</button>
         </div>
         
-        <div class="toggle-row">
-            <span class="toggle-label">Advanced ML processing</span>
-            <label class="toggle">
-                <input type="checkbox" id="advancedML" checked>
-                <span class="slider"></span>
-            </label>
+        <!-- Settings Tab -->
+        <div id="settingsTab" class="tab-content active">
+            <h3 style="font-size: 14px; margin-bottom: 10px;">Scanner Settings</h3>
+            
+            <div class="toggle-row">
+                <span class="toggle-label">Auto-scan on page load</span>
+                <label class="toggle">
+                    <input type="checkbox" id="autoScan" checked>
+                    <span class="slider"></span>
+                </label>
+            </div>
+            
+            <div class="toggle-row">
+                <span class="toggle-label">Advanced ML processing</span>
+                <label class="toggle">
+                    <input type="checkbox" id="advancedML" checked>
+                    <span class="slider"></span>
+                </label>
+            </div>
+            
+            <div class="toggle-row">
+                <span class="toggle-label">Collect sponsored content</span>
+                <label class="toggle">
+                    <input type="checkbox" id="collectSponsored" checked>
+                    <span class="slider"></span>
+                </label>
+            </div>
+            
+            <div class="toggle-row">
+                <span class="toggle-label">Show notifications</span>
+                <label class="toggle">
+                    <input type="checkbox" id="showNotifications" checked>
+                    <span class="slider"></span>
+                </label>
+            </div>
+            
+            <div class="api-key-section">
+                <label for="apiKey">API Key:</label>
+                <input type="text" id="apiKey" class="api-key-input" placeholder="Enter your API key">
+                <button id="saveApiKey" class="small-button">Save</button>
+            </div>
         </div>
         
-        <div class="toggle-row">
-            <span class="toggle-label">Collect sponsored content</span>
-            <label class="toggle">
-                <input type="checkbox" id="collectSponsored" checked>
-                <span class="slider"></span>
-            </label>
+        <!-- Transparency Tab -->
+        <div id="transparencyTab" class="tab-content">
+            <h3 style="font-size: 14px; margin-bottom: 10px;">Data Collection Transparency</h3>
+            <p style="font-size: 12px; color: #7f8c8d; margin-bottom: 15px;">
+                Control exactly what data we collect to align with your preferences.
+            </p>
+            
+            <div class="data-category">
+                <h4>Post Content <span class="tooltip">ⓘ<span class="tooltiptext">Text content of posts from your feed</span></span></h4>
+                <div class="data-items">The main text of each post</div>
+                <div class="data-control">
+                    <label>
+                        <input type="checkbox" id="collectContent" checked>
+                        Collect post content
+                    </label>
+                </div>
+            </div>
+            
+            <div class="data-category">
+                <h4>Engagement Metrics <span class="tooltip">ⓘ<span class="tooltiptext">Like counts, comments, shares</span></span></h4>
+                <div class="data-items">Likes, comments, shares, reactions</div>
+                <div class="data-control">
+                    <label>
+                        <input type="checkbox" id="collectEngagement" checked>
+                        Collect engagement data
+                    </label>
+                </div>
+            </div>
+            
+            <div class="data-category">
+                <h4>User Identification <span class="tooltip">ⓘ<span class="tooltiptext">Who posted the content</span></span></h4>
+                <div class="data-items">Usernames of post authors</div>
+                <div class="data-control">
+                    <label>
+                        <input type="checkbox" id="collectUsers" checked>
+                        Collect user information
+                    </label>
+                </div>
+            </div>
+            
+            <div class="data-category">
+                <h4>Hashtags & Links <span class="tooltip">ⓘ<span class="tooltiptext">Categories and external resources</span></span></h4>
+                <div class="data-items">Hashtags and external links in posts</div>
+                <div class="data-control">
+                    <label>
+                        <input type="checkbox" id="collectHashtags" checked>
+                        Collect hashtags and links
+                    </label>
+                </div>
+            </div>
+            
+            <div class="data-category">
+                <h4>Local ML Analysis <span class="tooltip">ⓘ<span class="tooltiptext">Analysis performed in-browser</span></span></h4>
+                <div class="data-items">Sentiment, topics, bizfluencer score</div>
+                <div class="data-control">
+                    <label>
+                        <input type="checkbox" id="collectLocalML" checked>
+                        Perform local ML analysis
+                    </label>
+                </div>
+            </div>
+            
+            <button id="saveDataPreferences" class="small-button" style="width: 100%; margin-top: 10px;">Save Preferences</button>
         </div>
         
-        <div class="toggle-row">
-            <span class="toggle-label">Show notifications</span>
-            <label class="toggle">
-                <input type="checkbox" id="showNotifications" checked>
-                <span class="slider"></span>
-            </label>
-        </div>
-        
-        <div class="api-key-section">
-            <label for="apiKey">API Key:</label>
-            <input type="text" id="apiKey" class="api-key-input" placeholder="Enter your API key">
-            <button id="saveApiKey" class="small-button">Save</button>
+        <!-- Insights Tab -->
+        <div id="insightsTab" class="tab-content">
+            <h3 style="font-size: 14px; margin-bottom: 10px;">Your Feed Insights</h3>
+            <p style="font-size: 12px; color: #7f8c8d; margin-bottom: 15px;">
+                Real-time analysis of your current browsing session.
+            </p>
+            
+            <div id="currentPageInsights">
+                <div style="text-align: center; color: #95a5a6; font-size: 12px; padding: 20px;">
+                    Click "Scan Current Page" to see insights
+                </div>
+            </div>
         </div>
     </div>
     

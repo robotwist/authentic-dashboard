@@ -31,6 +31,11 @@ urlpatterns = [
     path('api/post-stats/', brandsensor_views.post_stats, name='post_stats'),
     path('api/feedback/', brandsensor_views.feedback, name='feedback'),
     
+    # Post detail and actions
+    path('post/<int:post_id>/', brandsensor_views.post_detail, name='post_detail'),
+    path('post/<int:post_id>/action/', brandsensor_views.post_action, name='post_action'),
+    path('mark-family/<str:username>/<str:platform>/', brandsensor_views.mark_family, name='mark_family'),
+    
     # API Log endpoints (compatibility with older extension versions)
     path('api/post/', brandsensor_views.api_log_post, name='api_post'),
     path('api/log/post/', brandsensor_views.api_log_post, name='api_log_post'),
@@ -38,6 +43,11 @@ urlpatterns = [
     
     # ML processing
     path('process-ml/', brandsensor_views.process_ml, name='process_ml'),
+    
+    # Added direct routes for the Chrome extension
+    path('api/health-check/', brandsensor_views.api_health_check, name='api_health_check'),
+    path('api/process-ml/', brandsensor_views.api_process_ml, name='process_ml_api'),
+    path('api/verify-key/', brandsensor_views.verify_api_key, name='verify_api_key'),
     
     # Filter preset URLs
     path('filter-presets/', brandsensor_views.filter_presets, name='filter_presets'),

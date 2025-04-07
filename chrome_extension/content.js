@@ -7,153 +7,257 @@
 // Human-centered design (satisfaction vs engagement)
 // Ethical technology principles
 
-function collectInstagramPosts() {
-  const posts = [];
+// Global throttling variables
+let lastCollectionTime = 0;
+const COLLECTION_COOLDOWN = 5000; // 5 seconds minimum between collections
+const RATE_LIMIT_BACKOFF = 60000; // 1 minute backoff if rate limited
+let isRateLimited = false;
+let rateLimitResetTime = 0;
 
-  // Instagram post containers
+// Add connection error handling
+let connectionErrorCount = 0;
+const MAX_CONNECTION_ERRORS = 3;
+let lastConnectionError = null;
+
+// Function to check server connection before collecting
+let lastServerCheckTime = 0;
+const SERVER_CHECK_COOLDOWN = 10000; // Check server at most every 10 seconds
+let isServerAvailable = false;
+
+// Function to check if server is available
+function checkServerAvailability(callback) {
+  const currentTime = Date.now();
+  
+  // Don't check too frequently
+  if (currentTime - lastServerCheckTime < SERVER_CHECK_COOLDOWN) {
+    callback(isServerAvailable);
+    return;
+  }
+  
+  // Update check timestamp
+  lastServerCheckTime = currentTime;
+  
+  // Get API key from storage
+  chrome.storage.local.get(['apiKey'], function(result) {
+    const apiKey = result.apiKey || '8484e01c2e0b4d368eb9a0f9b89807ad'; // Default fallback API key
+    
+    // Try to connect to health check endpoint
+    fetch('http://localhost:8000/api/health-check/', {
+      method: 'GET',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-API-Key': apiKey
+      }
+    })
+    .then(response => {
+      if (!response.ok) {
+        throw new Error(`HTTP error! Status: ${response.status}`);
+      }
+      return response.json();
+    })
+    .then(data => {
+      console.log('Server connection successful:', data);
+      isServerAvailable = true;
+      callback(true);
+    })
+    .catch(error => {
+      console.error('Server connection failed:', error);
+      isServerAvailable = false;
+      callback(false);
+    });
+  });
+}
+
+// Modify the collectWithRateLimitProtection to check server first
+function collectWithRateLimitProtection(platform, collectionFunction) {
+  // First check if server is available
+  checkServerAvailability(function(available) {
+    if (!available) {
+      console.log('Server unavailable. Collection skipped.');
+      return [];
+    }
+    
+    // Continue with original function if server is available
+    // Check if we're currently in a rate-limit backoff period
+    const currentTime = Date.now();
+    if (isRateLimited && currentTime < rateLimitResetTime) {
+      console.log(`Rate limit backoff active. Waiting ${Math.round((rateLimitResetTime - currentTime)/1000)}s before retrying.`);
+      return [];
+    }
+    
+    // Check if we're trying to collect too frequently
+    if (currentTime - lastCollectionTime < COLLECTION_COOLDOWN) {
+      console.log('Collection attempted too frequently. Skipping to prevent rate limiting.');
+      return [];
+    }
+    
+    // Update collection timestamp
+    lastCollectionTime = currentTime;
+    
+    try {
+      // Run the actual collection function
+      const results = collectionFunction();
+      
+      // If successful, reset any rate limit flags
+      isRateLimited = false;
+      connectionErrorCount = 0;
+      
+      return results;
+    } catch (error) {
+      // Check if this is a rate limit error (429)
+      if (error.message && error.message.includes('429')) {
+        console.warn('Rate limit detected. Activating backoff.');
+        isRateLimited = true;
+        rateLimitResetTime = currentTime + RATE_LIMIT_BACKOFF;
+        
+        // Show notification about rate limiting
+        chrome.runtime.sendMessage({
+          action: 'showNotification',
+          title: 'Rate Limit Detected',
+          message: `${platform} is rate limiting requests. Collection paused for 1 minute.`
+        });
+      } else {
+        // Handle other errors
+        connectionErrorCount++;
+        lastConnectionError = error.message;
+        console.error('Error in collection:', error);
+        
+        if (connectionErrorCount >= MAX_CONNECTION_ERRORS) {
+          chrome.runtime.sendMessage({
+            action: 'showNotification',
+            title: 'Connection Error',
+            message: `Error connecting to ${platform}. Please check your connection.`
+          });
+        }
+      }
+      
+      return [];
+    }
+  });
+}
+
+function collectInstagramPosts(dataPreferences) {
+  // Default to all enabled if not specified
+  const prefs = dataPreferences || {
+    collectContent: true,
+    collectEngagement: true,
+    collectUsers: true,
+    collectHashtags: true,
+    collectLocalML: true
+  };
+  
+  // Existing post collection code, but respect preferences
+  const posts = [];
   const postElements = document.querySelectorAll('article');
 
   postElements.forEach((el) => {
-    // Enhanced content extraction
-    const content = el.innerText || "";
-    const username = el.querySelector('header a')?.innerText || "unknown";
+    // Get content only if preference is enabled
+    const content = prefs.collectContent ? (el.innerText || "") : "";
     
-    // Look for verified badge
-    const isVerified = el.querySelector('header svg[aria-label="Verified"]') !== null;
+    // Get user only if preference is enabled
+    const username = prefs.collectUsers 
+      ? (el.querySelector('header a')?.innerText || "unknown") 
+      : "anonymous";
     
-    // Try to detect if this is from someone you follow
-    const isFollowed = el.querySelector('header button')?.innerText.includes('Following') || false;
-    
-    // Extract timestamps - if available
-    let timestamp = '';
-    const timeElement = el.querySelector('time');
-    if (timeElement && timeElement.dateTime) {
-      timestamp = timeElement.dateTime;
-    }
-    
-    // Detect engagement metrics
+    // Collect engagement data based on preference
     let likes = 0;
     let comments = 0;
     
-    // Look for like count
-    const likeElement = el.querySelector('section span');
-    if (likeElement && likeElement.innerText) {
-      const likeText = likeElement.innerText;
-      if (likeText.includes('like') || likeText.includes('heart')) {
-        // Extract first number from the text
-        const match = likeText.match(/\d+/);
-        if (match) likes = parseInt(match[0]);
+    if (prefs.collectEngagement) {
+      // Look for like count
+      const likeElement = el.querySelector('section span');
+      if (likeElement && likeElement.innerText) {
+        const likeText = likeElement.innerText;
+        if (likeText.includes('like') || likeText.includes('heart')) {
+          const match = likeText.match(/\d+/);
+          if (match) likes = parseInt(match[0]);
+        }
+      }
+      
+      // Look for comment count
+      const commentElement = el.querySelector('a[href*="comments"]');
+      if (commentElement && commentElement.innerText) {
+        const commentText = commentElement.innerText;
+        if (commentText.includes('comment')) {
+          const match = commentText.match(/\d+/);
+          if (match) comments = parseInt(match[0]);
+        }
       }
     }
     
-    // Look for comment count
-    const commentElement = el.querySelector('a[href*="comments"]');
-    if (commentElement && commentElement.innerText) {
-      const commentText = commentElement.innerText;
-      if (commentText.includes('comment')) {
-        const match = commentText.match(/\d+/);
-        if (match) comments = parseInt(match[0]);
-      }
-    }
-    
-    // Try to get image URLs (may not work due to lazy loading)
-    const imageUrls = [];
-    el.querySelectorAll('img').forEach(img => {
-      if (img.src && !img.src.includes('profile_pic') && !imageUrls.includes(img.src)) {
-        imageUrls.push(img.src);
-      }
-    });
-    
-    // Try to get hashtags and mentions
+    // Only collect hashtags if preference enabled
     const hashtags = [];
     const mentions = [];
     
-    // Extract hashtags
-    const hashtagMatches = content.match(/#[\w]+/g);
-    if (hashtagMatches) {
-      hashtagMatches.forEach(tag => {
-        if (!hashtags.includes(tag)) hashtags.push(tag);
-      });
+    if (prefs.collectHashtags) {
+      // Extract hashtags
+      const hashtagMatches = content.match(/#[\w]+/g);
+      if (hashtagMatches) {
+        hashtagMatches.forEach(tag => {
+          if (!hashtags.includes(tag)) hashtags.push(tag);
+        });
+      }
+      
+      // Extract mentions
+      const mentionMatches = content.match(/@[\w.]+/g);
+      if (mentionMatches) {
+        mentionMatches.forEach(mention => {
+          if (!mentions.includes(mention)) mentions.push(mention);
+        });
+      }
     }
     
-    // Extract mentions
-    const mentionMatches = content.match(/@[\w.]+/g);
-    if (mentionMatches) {
-      mentionMatches.forEach(mention => {
-        if (!mentions.includes(mention)) mentions.push(mention);
-      });
-    }
-    
-    // Simple sentiment analysis indicators
-    const sentimentIndicators = {
-      positive: ['love', 'happy', 'great', 'good', 'awesome', 'excellent', 'beautiful', 'amazing', 'perfect', 'joy', 'grateful', 'blessed', 'thank', 'exciting', 'fun', '😊', '❤️', '😍', '🥰', '😁', '👍'],
-      negative: ['sad', 'bad', 'hate', 'terrible', 'awful', 'horrible', 'disappointing', 'worst', 'never', 'angry', 'upset', 'unfortunately', 'unfair', 'broken', '😔', '😢', '😭', '😠', '👎', '💔']
-    };
-    
-    // Count sentiment indicators
-    let positiveCount = 0;
-    let negativeCount = 0;
-    
-    const lowerContent = content.toLowerCase();
-    
-    sentimentIndicators.positive.forEach(term => {
-      const regex = new RegExp(term, 'g');
-      const matches = lowerContent.match(regex);
-      if (matches) positiveCount += matches.length;
-    });
-    
-    sentimentIndicators.negative.forEach(term => {
-      const regex = new RegExp(term, 'g');
-      const matches = lowerContent.match(regex);
-      if (matches) negativeCount += matches.length;
-    });
-    
-    // Calculate a simple sentiment score (-1 to 1)
+    // Only do ML analysis if enabled
     let sentimentScore = 0;
-    const totalSentiment = positiveCount + negativeCount;
-    if (totalSentiment > 0) {
-      sentimentScore = (positiveCount - negativeCount) / totalSentiment;
+    let manipulativePatterns = [];
+    
+    if (prefs.collectLocalML && content) {
+      // Simple sentiment analysis
+      const mlAnalysis = analyzeContentWithML(content, 'instagram');
+      sentimentScore = mlAnalysis.sentiment_score;
+      manipulativePatterns = mlAnalysis.manipulative_patterns;
     }
 
     if (content.length > 0) {
-      posts.push({
-        content,
+      // Build an object with only the enabled data fields
+      const post = {
         platform: 'instagram',
-        user: username,
-        is_friend: isFollowed,
-        is_family: false,
-        category: hashtags.join(','),
-        verified: isVerified,
-        image_urls: imageUrls.slice(0, 3).join(','),
-        collected_at: new Date().toISOString(),
-        timestamp: timestamp,
-        likes: likes,
-        comments: comments,
-        mentions: mentions.join(','),
-        hashtags: hashtags.join(','),
-        sentiment_score: sentimentScore,
-        sentiment_indicators: {
-          positive: positiveCount,
-          negative: negativeCount
-        },
-        content_length: content.length
-      });
+        collected_at: new Date().toISOString()
+      };
+      
+      // Only add fields based on preferences
+      if (prefs.collectContent) {
+        post.content = content;
+        post.content_length = content.length;
+      }
+      
+      if (prefs.collectUsers) {
+        post.user = username;
+        post.verified = el.querySelector('header svg[aria-label="Verified"]') !== null;
+        post.is_friend = el.querySelector('header button')?.innerText.includes('Following') || false;
+        post.is_family = false; // Always needs user input
+      }
+      
+      if (prefs.collectEngagement) {
+        post.likes = likes;
+        post.comments = comments;
+      }
+      
+      if (prefs.collectHashtags) {
+        post.hashtags = hashtags.join(',');
+        post.mentions = mentions.join(',');
+        post.category = hashtags.join(',');
+      }
+      
+      if (prefs.collectLocalML) {
+        post.sentiment_score = sentimentScore;
+        post.manipulative_patterns = manipulativePatterns;
+      }
+      
+      posts.push(post);
     }
   });
 
-  // Send posts to backend
-  posts.forEach(post => {
-    fetch("http://localhost:8000/api/post/", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(post)
-    })
-    .then(res => res.json())
-    .then(data => console.log("Post saved:", data))
-    .catch(err => console.error("Error sending post:", err));
-  });
-  
-  console.log(`Collected ${posts.length} Instagram posts`);
   return posts;
 }
 
@@ -330,15 +434,41 @@ function collectFacebookPosts() {
     }
   });
 
-  posts.forEach(post => {
-    fetch("http://localhost:8000/api/post/", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(post)
-    })
-    .then(res => res.json())
-    .then(data => console.log("FB post saved:", data))
-    .catch(err => console.error("Error sending FB post:", err));
+  // Get API key and send posts
+  chrome.storage.local.get(['apiKey'], function(result) {
+    const apiKey = result.apiKey || '8484e01c2e0b4d368eb9a0f9b89807ad'; // Default fallback API key
+    
+    posts.forEach(post => {
+      fetch("http://localhost:8000/api/process-ml/", {
+        method: "POST",
+        headers: { 
+          "Content-Type": "application/json",
+          "X-API-Key": apiKey
+        },
+        body: JSON.stringify(post)
+      })
+      .then(res => {
+        if (!res.ok) {
+          throw new Error(`HTTP error! Status: ${res.status}`);
+        }
+        return res.json();
+      })
+      .then(data => console.log("FB post saved:", data))
+      .catch(err => {
+        console.error("Error sending FB post:", err);
+        // Update connection error counters
+        connectionErrorCount++;
+        lastConnectionError = err.message;
+        
+        if (connectionErrorCount >= MAX_CONNECTION_ERRORS) {
+          chrome.runtime.sendMessage({
+            action: 'showNotification',
+            title: 'Connection Error',
+            message: `Error connecting to server: ${err.message}`
+          });
+        }
+      });
+    });
   });
   
   console.log(`Collected ${posts.length} Facebook posts`);
@@ -511,15 +641,41 @@ function collectLinkedInPosts() {
     }
   });
   
-  posts.forEach(post => {
-    fetch("http://localhost:8000/api/post/", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(post)
-    })
-    .then(res => res.json())
-    .then(data => console.log("LinkedIn post saved:", data))
-    .catch(err => console.error("Error sending LinkedIn post:", err));
+  // Get API key and send posts
+  chrome.storage.local.get(['apiKey'], function(result) {
+    const apiKey = result.apiKey || '8484e01c2e0b4d368eb9a0f9b89807ad'; // Default fallback API key
+    
+    posts.forEach(post => {
+      fetch("http://localhost:8000/api/process-ml/", {
+        method: "POST",
+        headers: { 
+          "Content-Type": "application/json",
+          "X-API-Key": apiKey
+        },
+        body: JSON.stringify(post)
+      })
+      .then(res => {
+        if (!res.ok) {
+          throw new Error(`HTTP error! Status: ${res.status}`);
+        }
+        return res.json();
+      })
+      .then(data => console.log("LinkedIn post saved:", data))
+      .catch(err => {
+        console.error("Error sending LinkedIn post:", err);
+        // Update connection error counters
+        connectionErrorCount++;
+        lastConnectionError = err.message;
+        
+        if (connectionErrorCount >= MAX_CONNECTION_ERRORS) {
+          chrome.runtime.sendMessage({
+            action: 'showNotification',
+            title: 'Connection Error',
+            message: `Error connecting to server: ${err.message}`
+          });
+        }
+      });
+    });
   });
   
   console.log(`Collected ${posts.length} LinkedIn posts`);
@@ -551,14 +707,16 @@ function injectScanButton() {
   scanButton.addEventListener('click', () => {
     // Detect which platform we're on and run the appropriate collector
     const url = window.location.href;
+    let posts = [];
+    
     if (url.includes('instagram.com')) {
-      const posts = collectInstagramPosts();
+      posts = collectWithRateLimitProtection('Instagram', () => collectInstagramPosts());
       alert(`Scanned ${posts.length} Instagram posts!`);
     } else if (url.includes('facebook.com')) {
-      const posts = collectFacebookPosts();
+      posts = collectWithRateLimitProtection('Facebook', () => collectFacebookPosts());
       alert(`Scanned ${posts.length} Facebook posts!`);
     } else if (url.includes('linkedin.com')) {
-      const posts = collectLinkedInPosts();
+      posts = collectWithRateLimitProtection('LinkedIn', () => collectLinkedInPosts());
       alert(`Scanned ${posts.length} LinkedIn posts!`);
     } else {
       alert('Not on a supported social platform.');
@@ -569,16 +727,29 @@ function injectScanButton() {
   document.body.appendChild(buttonContainer);
 }
 
-// Run scan on page load
-window.addEventListener("load", () => {
+// Send a message to background script on load to check connection
+chrome.runtime.sendMessage({ action: 'checkConnection' }, function(response) {
+  if (chrome.runtime.lastError) {
+    console.error('Extension connection error:', chrome.runtime.lastError);
+    // Don't try to auto-collect on page load if we have connection issues
+    return;
+  }
+  
+  // If we get here, the connection is good
   // Auto-detect platform and run appropriate collector
   const url = window.location.href;
   if (url.includes('instagram.com')) {
-    collectInstagramPosts();
+    setTimeout(() => {
+      collectWithRateLimitProtection('Instagram', () => collectInstagramPosts());
+    }, 1500);
   } else if (url.includes('facebook.com')) {
-    collectFacebookPosts();
+    setTimeout(() => {
+      collectWithRateLimitProtection('Facebook', () => collectFacebookPosts());
+    }, 1500);
   } else if (url.includes('linkedin.com')) {
-    collectLinkedInPosts();
+    setTimeout(() => {
+      collectWithRateLimitProtection('LinkedIn', () => collectLinkedInPosts());
+    }, 1500);
   }
   
   // Add scan button for manual refresh
@@ -595,16 +766,132 @@ window.addEventListener('scroll', function() {
   isScrolling = setTimeout(function() {
     const url = window.location.href;
     if (url.includes('instagram.com')) {
-      collectInstagramPosts();
+      collectWithRateLimitProtection('Instagram', () => collectInstagramPosts());
     } else if (url.includes('facebook.com')) {
-      collectFacebookPosts();
+      collectWithRateLimitProtection('Facebook', () => collectFacebookPosts());
     } else if (url.includes('linkedin.com')) {
-      collectLinkedInPosts();
+      collectWithRateLimitProtection('LinkedIn', () => collectLinkedInPosts());
     }
   }, 300);
 }, false);
 
-// Enhanced ML detection capabilities
+// Educational component for manipulative patterns
+const MANIPULATIVE_PATTERNS = {
+  'urgency': {
+    description: 'Creates artificial time pressure to drive quick decisions',
+    examples: ['Limited time only', 'Ending soon', 'Last chance', 'Don\'t miss out', 'Act now'],
+    impact: 'Bypasses rational decision-making, creates anxiety'
+  },
+  'scarcity': {
+    description: 'Suggests limited availability to increase perceived value',
+    examples: ['Only 3 left', 'Limited stock', 'While supplies last', 'Exclusive offer', 'Rare opportunity'],
+    impact: 'Triggers fear of missing out (FOMO), creates competitive urgency'
+  },
+  'social_proof': {
+    description: 'Uses popularity to validate choices and encourage conformity',
+    examples: ['Thousands of satisfied customers', 'Best-selling', 'Join millions', 'Everyone\'s talking about'],
+    impact: 'Creates herd mentality, outsources critical thinking to the crowd'
+  },
+  'authority': {
+    description: 'Uses perceived expertise or status to establish credibility',
+    examples: ['Expert approved', 'Doctor recommended', 'Scientifically proven', 'Official partner'],
+    impact: 'Bypasses skepticism, borrows trustworthiness'
+  },
+  'emotional_manipulation': {
+    description: 'Triggers strong emotions to override rational thinking',
+    examples: ['Heartbreaking', 'Shocking', 'Outrageous', 'You won\'t believe', 'Faith in humanity restored'],
+    impact: 'Hijacks emotional responses, creates engagement through outrage or sentimentality'
+  },
+  'false_dichotomy': {
+    description: 'Presents only two options when more exist',
+    examples: ['Either you\'re with us or against us', 'The only solution', 'There is no alternative'],
+    impact: 'Eliminates nuance, forces black-and-white thinking'
+  },
+  'information_gap': {
+    description: 'Creates curiosity by promising unknown information',
+    examples: ['You won\'t believe what happens next', 'The secret to', 'What they don\'t want you to know'],
+    impact: 'Exploits curiosity, often delivers disappointing content'
+  },
+  'bizfluencer': {
+    description: 'Corporate jargon that signals belonging but lacks substance',
+    examples: ['Synergy', 'Leverage', 'Paradigm shift', 'Disrupt', 'Circle back', 'Deep dive'],
+    impact: 'Creates illusion of expertise, masks lack of specific information'
+  }
+};
+
+// Function to detect manipulative patterns in content
+function detectManipulativePatterns(text) {
+  if (!text) return [];
+  
+  const detectedPatterns = [];
+  const lowerText = text.toLowerCase();
+  
+  // Check for each pattern
+  Object.entries(MANIPULATIVE_PATTERNS).forEach(([patternKey, patternData]) => {
+    let found = false;
+    
+    // Check each example phrase
+    patternData.examples.forEach(example => {
+      if (lowerText.includes(example.toLowerCase())) {
+        found = true;
+      }
+    });
+    
+    // For bizfluencer, check more thoroughly
+    if (patternKey === 'bizfluencer' && !found) {
+      const bizfluencerWords = ['synergy', 'disrupt', 'innovate', 'leverage', 'pivot', 'growth hacking', 
+        'thought leader', 'paradigm shift', 'bleeding edge', 'best practices', 'scalable'];
+      
+      bizfluencerWords.forEach(word => {
+        if (lowerText.includes(word.toLowerCase())) {
+          found = true;
+        }
+      });
+    }
+    
+    if (found) {
+      detectedPatterns.push({
+        type: patternKey,
+        info: patternData
+      });
+    }
+  });
+  
+  return detectedPatterns;
+}
+
+// Function to get educational insights for detected patterns
+function getEducationalInsights(patterns) {
+  if (!patterns || patterns.length === 0) {
+    return {
+      html: '<p>No manipulative patterns detected in this content.</p>',
+      count: 0
+    };
+  }
+  
+  let html = `<div class="manipulation-insights">
+    <h4>Detected Patterns (${patterns.length})</h4>
+    <ul>`;
+  
+  patterns.forEach(pattern => {
+    html += `
+      <li>
+        <strong>${pattern.type.replace('_', ' ').toUpperCase()}</strong>
+        <p>${pattern.info.description}</p>
+        <p><em>Impact: ${pattern.info.impact}</em></p>
+      </li>
+    `;
+  });
+  
+  html += '</ul></div>';
+  
+  return {
+    html: html,
+    count: patterns.length
+  };
+}
+
+// Add educational insights to the ML analysis
 function analyzeContentWithML(text, platform) {
     const result = {
         sentiment_score: 0,
@@ -612,12 +899,16 @@ function analyzeContentWithML(text, platform) {
         toxicity_score: 0,
         engagement_prediction: 0,
         automated_category: '',
-        bizfluencer_score: 0
+        bizfluencer_score: 0,
+        manipulative_patterns: []
     };
     
     if (!text || text.length < 3) {
         return result;
     }
+    
+    // Detect manipulative patterns
+    result.manipulative_patterns = detectManipulativePatterns(text);
     
     // Simplified sentiment analysis
     const positiveWords = [
@@ -742,273 +1033,6 @@ function analyzeContentWithML(text, platform) {
     return result;
 }
 
-// Update the Instagram posts collection with ML analysis
-function collectInstagramPosts() {
-    // ... existing code ...
-    
-    // Enhanced data collection
-    const posts = document.querySelectorAll('article');
-    const results = [];
-    
-    posts.forEach(post => {
-        try {
-            const contentEl = post.querySelector('div[data-testid="post-content"] > div > span, div._a9zs > span');
-            const content = contentEl ? contentEl.innerText : "";
-            
-            const userEl = post.querySelector('div._aacl._aacs._aact._aacx._aada a, header a');
-            const username = userEl ? userEl.innerText : "unknown";
-            
-            const isVerified = post.querySelector('div._aacl._aacs._aact._aacx._aada span[title="Verified"]') !== null;
-            
-            // Extract likes, comments, timestamp
-            const likesEl = post.querySelector('span.x1lliihq, section._ae5m button._abl-');
-            const likes = likesEl ? parseInt(likesEl.innerText) || 0 : 0;
-            
-            const commentsEl = post.querySelector('a.x1i10hfl span, div._ae2s span');
-            const comments = commentsEl ? parseInt(commentsEl.innerText) || 0 : 0;
-            
-            const timeEl = post.querySelector('time');
-            const timestamp = timeEl ? timeEl.getAttribute('datetime') : "";
-            
-            // Extract hashtags
-            const hashtags = [];
-            const hashtagEls = post.querySelectorAll('a[href*="explore/tags"]');
-            hashtagEls.forEach(tag => {
-                hashtags.push(tag.innerText);
-            });
-            
-            // Check for image URLs
-            const imageEls = post.querySelectorAll('img._aagt, img._aagz');
-            const imageUrls = [];
-            imageEls.forEach(img => {
-                if (img.src) imageUrls.push(img.src);
-            });
-            
-            // Extract mentions
-            const mentions = [];
-            const mentionEls = post.querySelectorAll('a[href*="instagram.com/"][href*="people_mentioned_in_caption"]');
-            mentionEls.forEach(mention => {
-                mentions.push(mention.innerText);
-            });
-            
-            // Check if the post is sponsored
-            const isSponsored = post.innerText.toLowerCase().includes('sponsored') || 
-                               post.innerText.toLowerCase().includes('paid partnership');
-            
-            // Enhanced data with ML analysis
-            const mlAnalysis = analyzeContentWithML(content, 'instagram');
-            
-            results.push({
-                platform: 'instagram',
-                user: username,
-                content: content,
-                verified: isVerified,
-                is_friend: false, // To be determined by the backend
-                is_family: false, // To be determined by the backend
-                category: hashtags.join(', '),
-                image_urls: imageUrls.join(', '),
-                likes: likes,
-                comments: comments,
-                timestamp: timestamp,
-                hashtags: hashtags.join(', '),
-                mentions: mentions.join(', '),
-                is_sponsored: isSponsored,
-                content_length: content.length,
-                sentiment_score: mlAnalysis.sentiment_score,
-                sentiment_indicators: mlAnalysis.sentiment_indicators,
-                toxicity_score: mlAnalysis.toxicity_score,
-                automated_category: mlAnalysis.automated_category,
-                engagement_prediction: mlAnalysis.engagement_prediction
-            });
-        } catch (e) {
-            console.error("Error collecting Instagram post:", e);
-        }
-    });
-    
-    return results;
-}
-
-// Update the Facebook posts collection with ML analysis
-function collectFacebookPosts() {
-    // ... existing code ...
-    
-    // Enhanced data collection
-    const posts = document.querySelectorAll('div[role="article"]');
-    const results = [];
-    
-    posts.forEach(post => {
-        try {
-            // Skip posts that are clearly not user content
-            if (post.querySelector('[data-ad-preview="message"]') || 
-                post.innerText.includes('Suggested for you')) {
-                return;
-            }
-            
-            const contentEl = post.querySelector('div[data-ad-comet-preview="message"], div.xdj266r');
-            const content = contentEl ? contentEl.innerText : "";
-            
-            const userEl = post.querySelector('h4 a, strong');
-            const username = userEl ? userEl.innerText : "unknown";
-            
-            const isVerified = post.querySelector('svg[aria-label="Verified"]') !== null;
-            
-            // Extract reaction counts
-            const likesEl = post.querySelector('span[aria-label*="reactions"], span.x16hj40l');
-            const likes = likesEl ? parseFacebookCount(likesEl.innerText) : 0;
-            
-            const commentsEl = post.querySelector('span[aria-label*="comment"], span.x1jchvi3');
-            const comments = commentsEl ? parseFacebookCount(commentsEl.innerText) : 0;
-            
-            const sharesEl = post.querySelector('span[aria-label*="share"], span.x1jchvi3:last-child');
-            const shares = sharesEl ? parseFacebookCount(sharesEl.innerText) : 0;
-            
-            // Extract timestamp
-            const timeEl = post.querySelector('a[aria-label*="day"], a[aria-label*="hour"], span.x4k7w5x a');
-            const timestamp = timeEl ? new Date().toISOString() : "";
-            
-            // Check for image URLs
-            const imageEls = post.querySelectorAll('img.x1ey2m1c, img.xz74otr');
-            const imageUrls = [];
-            imageEls.forEach(img => {
-                if (img.src && !img.src.includes('emoji')) imageUrls.push(img.src);
-            });
-            
-            // Extract hashtags
-            const hashtags = extractHashtags(content);
-            
-            // Extract external links
-            const linkEls = post.querySelectorAll('a[href*="l.facebook.com"]');
-            const externalLinks = [];
-            linkEls.forEach(link => {
-                if (link.href) externalLinks.push(link.href);
-            });
-            
-            // Check if the post is sponsored
-            const isSponsored = post.innerText.toLowerCase().includes('sponsored') || 
-                                post.innerText.toLowerCase().includes('suggested');
-            
-            // Enhanced data with ML analysis
-            const mlAnalysis = analyzeContentWithML(content, 'facebook');
-            
-            results.push({
-                platform: 'facebook',
-                user: username,
-                content: content,
-                verified: isVerified,
-                is_friend: false, // To be determined by the backend
-                is_family: false, // To be determined by the backend
-                category: hashtags.join(', '),
-                image_urls: imageUrls.join(', '),
-                likes: likes,
-                comments: comments,
-                shares: shares,
-                timestamp: timestamp,
-                hashtags: hashtags.join(', '),
-                external_links: externalLinks.join(', '),
-                is_sponsored: isSponsored,
-                content_length: content.length,
-                sentiment_score: mlAnalysis.sentiment_score,
-                sentiment_indicators: mlAnalysis.sentiment_indicators,
-                toxicity_score: mlAnalysis.toxicity_score,
-                automated_category: mlAnalysis.automated_category,
-                engagement_prediction: mlAnalysis.engagement_prediction
-            });
-        } catch (e) {
-            console.error("Error collecting Facebook post:", e);
-        }
-    });
-    
-    return results;
-}
-
-// Update the LinkedIn posts collection with ML analysis
-function collectLinkedInPosts() {
-    // ... existing code ...
-    
-    // Enhanced data collection
-    const posts = document.querySelectorAll('.feed-shared-update-v2');
-    const results = [];
-    
-    posts.forEach(post => {
-        try {
-            const contentEl = post.querySelector('.feed-shared-update-v2__description-text');
-            const content = contentEl ? contentEl.innerText : "";
-            
-            const userEl = post.querySelector('.feed-shared-actor__name');
-            const username = userEl ? userEl.innerText : "unknown";
-            
-            const isVerified = post.querySelector('.feed-shared-actor__verification-icon') !== null;
-            
-            // Extract social actions
-            const likesEl = post.querySelector('.feed-shared-social-action-bar__action-count, .social-details-social-counts__reactions-count');
-            const likes = likesEl ? parseInt(likesEl.innerText) || 0 : 0;
-            
-            const commentsEl = post.querySelector('.feed-shared-social-action-bar__comment-count, .social-details-social-counts__comments');
-            const comments = commentsEl ? parseInt(commentsEl.innerText) || 0 : 0;
-            
-            // Extract hashtags
-            const hashtags = extractHashtags(content);
-            
-            // Check for image URLs
-            const imageEls = post.querySelectorAll('img.feed-shared-image__image, img.ivm-view-attr__img--centered');
-            const imageUrls = [];
-            imageEls.forEach(img => {
-                if (img.src) imageUrls.push(img.src);
-            });
-            
-            // Check if post is a job post
-            const isJobPost = content.toLowerCase().includes('hiring') ||
-                              content.toLowerCase().includes('job opening') ||
-                              content.toLowerCase().includes('position available') ||
-                              post.innerText.toLowerCase().includes('applications welcome');
-            
-            // Get connection degree
-            let connectionDegree = null;
-            const degreeText = post.innerText;
-            if (degreeText.includes('1st')) {
-                connectionDegree = 1;
-            } else if (degreeText.includes('2nd')) {
-                connectionDegree = 2;
-            } else if (degreeText.includes('3rd')) {
-                connectionDegree = 3;
-            }
-            
-            // Enhanced data with ML analysis
-            const mlAnalysis = analyzeContentWithML(content, 'linkedin');
-            
-            results.push({
-                platform: 'linkedin',
-                user: username,
-                content: content,
-                verified: isVerified,
-                is_friend: connectionDegree === 1,
-                is_family: false,
-                category: hashtags.join(', '),
-                image_urls: imageUrls.join(', '),
-                likes: likes,
-                comments: comments,
-                shares: 0, // LinkedIn doesn't easily expose share counts
-                timestamp: new Date().toISOString(),
-                hashtags: hashtags.join(', '),
-                is_sponsored: post.innerText.toLowerCase().includes('promoted'),
-                is_job_post: isJobPost,
-                content_length: content.length,
-                connection_degree: connectionDegree,
-                bizfluencer_score: mlAnalysis.bizfluencer_score,
-                sentiment_score: mlAnalysis.sentiment_score,
-                sentiment_indicators: mlAnalysis.sentiment_indicators,
-                toxicity_score: mlAnalysis.toxicity_score,
-                automated_category: mlAnalysis.automated_category,
-                engagement_prediction: mlAnalysis.engagement_prediction
-            });
-        } catch (e) {
-            console.error("Error collecting LinkedIn post:", e);
-        }
-    });
-    
-    return results;
-}
-
 // Helper functions
 
 // Extract hashtags from content
@@ -1042,3 +1066,117 @@ function parseFacebookCount(countText) {
         return 0;
     }
 }
+
+// Modified message listener to respond with success: true
+chrome.runtime.onMessage.addListener(function(request, sender, sendResponse) {
+  if (request.action === 'collectPosts') {
+    try {
+      // Check server first
+      checkServerAvailability(function(available) {
+        if (!available) {
+          sendResponse({ 
+            success: false, 
+            message: 'Server unavailable. Cannot collect posts.' 
+          });
+          return;
+        }
+        
+        let posts = [];
+        const platform = request.platform;
+        
+        // Apply data preferences to collection
+        const dataPreferences = request.settings && request.settings.dataPreferences ? 
+          request.settings.dataPreferences : {
+            collectContent: true,
+            collectEngagement: true,
+            collectUsers: true,
+            collectHashtags: true,
+            collectLocalML: true
+          };
+        
+        // Collect posts based on platform
+        if (platform === 'instagram') {
+          posts = collectInstagramPosts(dataPreferences);
+        } else if (platform === 'facebook') {
+          posts = collectFacebookPosts(dataPreferences);
+        } else if (platform === 'linkedin') {
+          posts = collectLinkedInPosts(dataPreferences);
+        }
+        
+        sendResponse({ 
+          success: true, 
+          posts: posts,
+          count: posts.length
+        });
+      });
+    } catch (error) {
+      console.error('Error in collect posts handler:', error);
+      sendResponse({ 
+        success: false, 
+        error: error.message 
+      });
+    }
+    
+    // Return true to indicate we'll send a response asynchronously
+    return true;
+  }
+});
+
+// Function to handle messaging errors with retry logic
+function sendMessageWithRetry(message, retries = 3) {
+  return new Promise((resolve, reject) => {
+    try {
+      chrome.runtime.sendMessage(message, function(response) {
+        if (chrome.runtime.lastError) {
+          console.error('Message error:', chrome.runtime.lastError);
+          if (retries > 0) {
+            setTimeout(() => {
+              sendMessageWithRetry(message, retries - 1)
+                .then(resolve)
+                .catch(reject);
+            }, 500);
+          } else {
+            reject(chrome.runtime.lastError);
+          }
+        } else {
+          resolve(response);
+        }
+      });
+    } catch (error) {
+      console.error('Exception in sendMessage:', error);
+      reject(error);
+    }
+  });
+}
+
+// Replace the original window.addEventListener load with our retry-enabled version
+window.addEventListener("load", () => {
+  // Using the retry-enabled message sending
+  sendMessageWithRetry({ action: 'checkConnection' })
+    .then(() => {
+      // Rest of your code for platform detection and collection
+      // Auto-detect platform and run appropriate collector with delay
+      const url = window.location.href;
+      if (url.includes('instagram.com')) {
+        setTimeout(() => {
+          collectWithRateLimitProtection('Instagram', () => collectInstagramPosts());
+        }, 1500);
+      } else if (url.includes('facebook.com')) {
+        setTimeout(() => {
+          collectWithRateLimitProtection('Facebook', () => collectFacebookPosts());
+        }, 1500);
+      } else if (url.includes('linkedin.com')) {
+        setTimeout(() => {
+          collectWithRateLimitProtection('LinkedIn', () => collectLinkedInPosts());
+        }, 1500);
+      }
+      
+      // Add scan button for manual refresh
+      injectScanButton();
+    })
+    .catch(error => {
+      console.error('Failed to establish connection:', error);
+      // Still try to inject the scan button for manual operation
+      injectScanButton();
+    });
+});

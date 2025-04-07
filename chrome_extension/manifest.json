@@ -22,7 +22,7 @@
       "*://*.instagram.com/*",
       "*://*.facebook.com/*",
       "*://*.linkedin.com/*",
-      "*://localhost:8000/*"
+      "http://localhost:8000/*"
     ],
     "content_scripts": [
       {

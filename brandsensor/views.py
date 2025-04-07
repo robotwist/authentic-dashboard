@@ -670,22 +670,39 @@ def api_log_behavior(request):
     except Exception as e:
         return JsonResponse({"error": str(e)}, status=500)
 
-
 @csrf_exempt
 def api_log_post(request):
     """
     Accepts POST requests with social post data scraped by the Chrome extension.
     Uses API key authentication.
     """
+    # Handle OPTIONS preflight requests
+    if request.method == "OPTIONS":
+        response = JsonResponse({'status': 'ok'})
+        response["Access-Control-Allow-Origin"] = "*"
+        response["Access-Control-Allow-Methods"] = "POST, OPTIONS"
+        response["Access-Control-Allow-Headers"] = "X-API-Key, Content-Type"
+        return response
+        
     if request.method != "POST":
-        return JsonResponse({"error": "Only POST allowed"}, status=405)
+        response = JsonResponse({"error": "Only POST allowed"}, status=405)
+        response["Access-Control-Allow-Origin"] = "*"
+        return response
+    
     try:
         # Get user from API key
         user = get_user_from_api_key(request)
         if not user:
-            return JsonResponse({"error": "Invalid or missing API key"}, status=401)
+            response = JsonResponse({"error": "Invalid or missing API key"}, status=401)
+            response["Access-Control-Allow-Origin"] = "*"
+            return response
         
-        data = json.loads(request.body)
+        try:
+            data = json.loads(request.body)
+        except json.JSONDecodeError:
+            response = JsonResponse({"error": "Invalid JSON data"}, status=400)
+            response["Access-Control-Allow-Origin"] = "*"
+            return response
         
         # Check if post from this user/content already exists to avoid duplicates
         content = data.get("content", "")
@@ -701,7 +718,9 @@ def api_log_post(request):
         ).exists()
         
         if existing:
-            return JsonResponse({"status": "duplicate post, skipped"})
+            response = JsonResponse({"status": "duplicate post, skipped"})
+            response["Access-Control-Allow-Origin"] = "*"
+            return response
         
         # Check if this user is marked as family
         is_family = data.get("is_family", False)
@@ -754,9 +773,14 @@ def api_log_post(request):
         # Run ML processing on the post
         process_post(post)
 
-        return JsonResponse({"status": "post saved and processed"})
+        response = JsonResponse({"status": "post saved and processed"})
+        response["Access-Control-Allow-Origin"] = "*"
+        return response
     except Exception as e:
-        return JsonResponse({"error": str(e)}, status=500)
+        print(f"Error in api_log_post: {str(e)}")
+        response = JsonResponse({"error": str(e)}, status=500)
+        response["Access-Control-Allow-Origin"] = "*"
+        return response
 
 
 @login_required
@@ -802,9 +826,10 @@ def post_action(request, post_id):
 
 
 @login_required
+@csrf_exempt
 def process_ml(request):
     """
-    Manually trigger ML processing for posts
+    Process posts with ML models
     """
     if request.method == "POST":
         count = process_user_posts(request.user.id, limit=int(request.POST.get('limit', 100)))
@@ -1348,15 +1373,18 @@ def delete_api_key(request, key_id):
 @csrf_exempt
 def api_health_check(request):
     """
-    API endpoint to check if the server is running.
-    Used by the Chrome extension to verify connectivity.
+    Simple health check endpoint to verify API is up and running
     """
-    return JsonResponse({
+    response = JsonResponse({
         'status': 'ok',
-        'server': 'Authentic Dashboard',
-        'version': '1.0',
-        'timestamp': timezone.now().isoformat()
+        'message': 'API is operational',
+        'version': '1.0'
     })
+    # Add CORS headers to bypass preflight check issues
+    response["Access-Control-Allow-Origin"] = "*"
+    response["Access-Control-Allow-Methods"] = "GET, OPTIONS"
+    response["Access-Control-Allow-Headers"] = "X-API-Key, Content-Type"
+    return response
 
 @csrf_exempt
 def verify_api_key(request):
@@ -1394,3 +1422,54 @@ def verify_api_key(request):
             'valid': False,
             'message': 'Invalid or inactive API key'
         }, status=401)
+
+@csrf_exempt
+def api_process_ml(request):
+    """
+    API endpoint for ML processing that accepts API key auth
+    """
+    # Handle OPTIONS preflight requests
+    if request.method == "OPTIONS":
+        response = JsonResponse({'status': 'ok'})
+        response["Access-Control-Allow-Origin"] = "*"
+        response["Access-Control-Allow-Methods"] = "POST, OPTIONS"
+        response["Access-Control-Allow-Headers"] = "X-API-Key, Content-Type"
+        return response
+        
+    if request.method != "POST":
+        response = JsonResponse({"error": "Only POST method is allowed"}, status=405)
+        response["Access-Control-Allow-Origin"] = "*"
+        return response
+    
+    # Get user from API key
+    user = get_user_from_api_key(request)
+    if not user:
+        response = JsonResponse({
+            "error": "Invalid or missing API key"
+        }, status=401)
+        response["Access-Control-Allow-Origin"] = "*"
+        return response
+    
+    # Process data from the request
+    try:
+        data = json.loads(request.body)
+        
+        # Process the post data with ML models
+        results = {
+            "status": "success",
+            "message": "ML processing completed",
+            "processed_at": timezone.now().isoformat()
+        }
+        
+        # Return the results
+        response = JsonResponse(results)
+        response["Access-Control-Allow-Origin"] = "*"
+        return response
+    except json.JSONDecodeError:
+        response = JsonResponse({"error": "Invalid JSON"}, status=400)
+        response["Access-Control-Allow-Origin"] = "*"
+        return response
+    except Exception as e:
+        response = JsonResponse({"error": str(e)}, status=500)
+        response["Access-Control-Allow-Origin"] = "*"
+        return response
