@@ -138,7 +138,7 @@ function checkBackendConnection() {
         const apiKey = settings.apiKey || '8484e01c2e0b4d368eb9a0f9b89807ad'; // Use our default key
         
         // First try a direct API call to avoid Chrome message passing issues
-        fetch('http://localhost:8000/api/health-check/', {
+        fetch('http://127.0.0.1:8080/api/health-check/', {
             method: 'GET',
             headers: {
                 'Content-Type': 'application/json',
@@ -538,7 +538,7 @@ function sendPostsToAPI(posts, platform, callback) {
         let failureCount = 0;
         
         posts.forEach(post => {
-            fetch('http://localhost:8000/api/process-ml/', {
+            fetch('http://127.0.0.1:8080/api/process-ml/', {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
@@ -708,7 +708,7 @@ function openDashboard() {
         const apiKey = settings.apiKey || '';
         
         // Create URL with API key if available
-        let dashboardUrl = 'http://localhost:8000/dashboard/';
+        let dashboardUrl = 'http://127.0.0.1:8080/dashboard/';
         if (apiKey) {
             dashboardUrl += `?api_key=${encodeURIComponent(apiKey)}`;
         }
@@ -745,7 +745,7 @@ function openMLDashboard() {
         const apiKey = settings.apiKey || '';
         
         // Create URL with API key if available
-        let mlDashboardUrl = 'http://localhost:8000/ml-dashboard/';
+        let mlDashboardUrl = 'http://127.0.0.1:8080/ml-dashboard/';
         if (apiKey) {
             mlDashboardUrl += `?api_key=${encodeURIComponent(apiKey)}`;
         }
@@ -782,7 +782,7 @@ function troubleshootDashboardAccess() {
         const apiKey = settings.apiKey || '8484e01c2e0b4d368eb9a0f9b89807ad'; // Use our default key
         
         // Check if the Django server is running
-        fetch('http://localhost:8000/api/health-check/', { 
+        fetch('http://127.0.0.1:8080/api/health-check/', { 
             method: 'GET',
             headers: {
                 'Content-Type': 'application/json',
@@ -804,7 +804,7 @@ function troubleshootDashboardAccess() {
             }
             
             // Check if API key is valid
-            fetch('http://localhost:8000/api/health-check/', {
+            fetch('http://127.0.0.1:8080/api/health-check/', {
                 method: 'GET',
                 headers: {
                     'Content-Type': 'application/json',
@@ -831,4 +831,257 @@ function troubleshootDashboardAccess() {
         });
     });
   }
+
+// Add auto-scanning settings section to the settings page
+function addAutoScanSettings() {
+  const settingsContainer = document.getElementById('settings-container');
+  if (!settingsContainer) return;
+  
+  // Create auto-scan settings section
+  const autoScanSection = document.createElement('div');
+  autoScanSection.classList.add('settings-section');
+  
+  const sectionHeader = document.createElement('h3');
+  sectionHeader.textContent = 'Auto-Scanning Settings';
+  
+  const description = document.createElement('p');
+  description.textContent = 'Auto-scanning collects posts from social media sites at regular intervals to keep your dashboard up-to-date without manual browsing.';
+  description.style.fontSize = '14px';
+  description.style.color = '#666';
+  description.style.marginBottom = '15px';
+  
+  autoScanSection.appendChild(sectionHeader);
+  autoScanSection.appendChild(description);
+  
+  // Create enable/disable toggle
+  const enableToggleContainer = document.createElement('div');
+  enableToggleContainer.classList.add('setting-item');
+  
+  const enableLabel = document.createElement('label');
+  enableLabel.textContent = 'Enable Auto-Scanning';
+  enableLabel.style.display = 'flex';
+  enableLabel.style.justifyContent = 'space-between';
+  enableLabel.style.alignItems = 'center';
+  enableLabel.style.fontWeight = 'bold';
+  
+  const enableToggle = document.createElement('input');
+  enableToggle.type = 'checkbox';
+  enableToggle.id = 'autoScanEnabled';
+  
+  // Load current setting
+  chrome.storage.local.get(['autoScanEnabled'], function(result) {
+    enableToggle.checked = result.autoScanEnabled !== false;
+  });
+  
+  // Save setting when changed
+  enableToggle.addEventListener('change', function() {
+    chrome.storage.local.set({ autoScanEnabled: enableToggle.checked });
+    
+    // Send message to content script to update auto-scanning
+    chrome.tabs.query({ active: true, currentWindow: true }, function(tabs) {
+      if (tabs[0]) {
+        chrome.tabs.sendMessage(tabs[0].id, {
+          action: enableToggle.checked ? 'startAutoScanning' : 'stopAutoScanning'
+        });
+      }
+    });
+    
+    // Update UI based on auto-scanning state
+    intervalSelect.disabled = !enableToggle.checked;
+  });
+  
+  enableLabel.appendChild(enableToggle);
+  enableToggleContainer.appendChild(enableLabel);
+  autoScanSection.appendChild(enableToggleContainer);
+  
+  // Add interval selection
+  const intervalContainer = document.createElement('div');
+  intervalContainer.classList.add('setting-item');
+  intervalContainer.style.marginTop = '15px';
+  
+  const intervalLabel = document.createElement('label');
+  intervalLabel.textContent = 'Scanning Interval';
+  intervalLabel.style.display = 'block';
+  intervalLabel.style.marginBottom = '5px';
+  intervalLabel.style.fontWeight = 'bold';
+  
+  const intervalDescription = document.createElement('p');
+  intervalDescription.textContent = 'How often should auto-scanning collect new posts?';
+  intervalDescription.style.fontSize = '14px';
+  intervalDescription.style.color = '#666';
+  intervalDescription.style.margin = '0 0 10px 0';
+  
+  const intervalSelect = document.createElement('select');
+  intervalSelect.id = 'autoScanInterval';
+  intervalSelect.style.width = '100%';
+  intervalSelect.style.padding = '8px';
+  intervalSelect.style.borderRadius = '4px';
+  intervalSelect.style.border = '1px solid #ccc';
+  
+  // Add interval options
+  const intervals = [
+    { value: 2, label: '2 minutes (more frequent updates, higher resource usage)' },
+    { value: 5, label: '5 minutes (recommended)' },
+    { value: 10, label: '10 minutes' },
+    { value: 15, label: '15 minutes' },
+    { value: 30, label: '30 minutes (less frequent updates, lower resource usage)' }
+  ];
+  
+  intervals.forEach(interval => {
+    const option = document.createElement('option');
+    option.value = interval.value;
+    option.textContent = interval.label;
+    intervalSelect.appendChild(option);
+  });
+  
+  // Load current interval setting
+  chrome.storage.local.get(['autoScanInterval'], function(result) {
+    // Default to 5 minutes if not set
+    const defaultInterval = 5;
+    const interval = result.autoScanInterval || defaultInterval;
+    
+    // Find and select the matching option
+    for (let i = 0; i < intervalSelect.options.length; i++) {
+      if (parseInt(intervalSelect.options[i].value) === interval) {
+        intervalSelect.selectedIndex = i;
+        break;
+      }
+    }
+  });
+  
+  // Update interval when changed
+  intervalSelect.addEventListener('change', function() {
+    const interval = parseInt(intervalSelect.value);
+    chrome.storage.local.set({ autoScanInterval: interval });
+    
+    // Send message to content script to update interval
+    chrome.tabs.query({ active: true, currentWindow: true }, function(tabs) {
+      if (tabs[0]) {
+        chrome.tabs.sendMessage(tabs[0].id, {
+          action: 'updateAutoScanInterval',
+          interval: interval
+        });
+      }
+    });
+  });
+  
+  intervalContainer.appendChild(intervalLabel);
+  intervalContainer.appendChild(intervalDescription);
+  intervalContainer.appendChild(intervalSelect);
+  
+  // Disable interval selector if auto-scanning is disabled
+  chrome.storage.local.get(['autoScanEnabled'], function(result) {
+    intervalSelect.disabled = result.autoScanEnabled === false;
+  });
+  
+  autoScanSection.appendChild(intervalContainer);
+  
+  // Add status information
+  const statusContainer = document.createElement('div');
+  statusContainer.classList.add('setting-item');
+  statusContainer.style.marginTop = '20px';
+  statusContainer.style.backgroundColor = '#f5f5f5';
+  statusContainer.style.padding = '10px';
+  statusContainer.style.borderRadius = '4px';
+  
+  const statusTitle = document.createElement('div');
+  statusTitle.textContent = 'Auto-Scanning Status';
+  statusTitle.style.fontWeight = 'bold';
+  statusTitle.style.marginBottom = '5px';
+  
+  const statusContent = document.createElement('div');
+  statusContent.id = 'autoScanStatus';
+  statusContent.textContent = 'Checking status...';
+  
+  // Get current status from active tab
+  chrome.tabs.query({ active: true, currentWindow: true }, function(tabs) {
+    if (tabs[0]) {
+      chrome.tabs.sendMessage(tabs[0].id, { action: 'getAutoScanStatus' }, function(response) {
+        if (chrome.runtime.lastError) {
+          // Communication error
+          statusContent.textContent = 'Status unavailable on this page';
+          return;
+        }
+        
+        if (response && response.status) {
+          statusContent.textContent = response.status;
+        } else {
+          statusContent.textContent = 'Not running on this page';
+        }
+      });
+    } else {
+      statusContent.textContent = 'No active tab detected';
+    }
+  });
+  
+  const refreshStatus = document.createElement('button');
+  refreshStatus.textContent = 'Refresh Status';
+  refreshStatus.style.marginTop = '5px';
+  refreshStatus.style.padding = '5px 10px';
+  refreshStatus.style.border = 'none';
+  refreshStatus.style.borderRadius = '4px';
+  refreshStatus.style.backgroundColor = '#4CAF50';
+  refreshStatus.style.color = 'white';
+  refreshStatus.style.cursor = 'pointer';
+  
+  refreshStatus.addEventListener('click', function() {
+    // Get updated status from active tab
+    statusContent.textContent = 'Refreshing...';
+    
+    chrome.tabs.query({ active: true, currentWindow: true }, function(tabs) {
+      if (tabs[0]) {
+        chrome.tabs.sendMessage(tabs[0].id, { action: 'getAutoScanStatus' }, function(response) {
+          if (chrome.runtime.lastError) {
+            statusContent.textContent = 'Status unavailable on this page';
+            return;
+          }
+          
+          if (response && response.status) {
+            statusContent.textContent = response.status;
+          } else {
+            statusContent.textContent = 'Not running on this page';
+          }
+        });
+      } else {
+        statusContent.textContent = 'No active tab detected';
+      }
+    });
+  });
+  
+  statusContainer.appendChild(statusTitle);
+  statusContainer.appendChild(statusContent);
+  statusContainer.appendChild(refreshStatus);
+  
+  autoScanSection.appendChild(statusContainer);
+  
+  // Add a separator
+  const separator = document.createElement('hr');
+  separator.style.margin = '20px 0';
+  separator.style.border = '0';
+  separator.style.height = '1px';
+  separator.style.backgroundColor = '#ddd';
+  
+  // Add section to settings
+  settingsContainer.appendChild(separator);
+  settingsContainer.appendChild(autoScanSection);
+}
+
+// Extend the existing setupSettingsPage function
+const originalSetupSettingsPage = window.setupSettingsPage || function() {};
+window.setupSettingsPage = function() {
+  originalSetupSettingsPage();
+  addAutoScanSettings();
+};
+
+// Add message handling for auto-scan status updates
+chrome.runtime.onMessage.addListener(function(message, sender, sendResponse) {
+  if (message.action === 'updateAutoScanStatus') {
+    const statusElement = document.getElementById('autoScanStatus');
+    if (statusElement) {
+      statusElement.textContent = message.status;
+    }
+  }
+  
+  return true;
+});
   

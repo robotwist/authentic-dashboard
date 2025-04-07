@@ -23,6 +23,15 @@ let lastConnectionError = null;
 const FINGERPRINT_EXPIRATION = 24 * 60 * 60 * 1000; // 24 hours
 const MAX_CACHED_FINGERPRINTS = 500; // Maximum number of fingerprints to store
 
+// Global variables for auto-scanning functionality
+let autoScanEnabled = true;
+let autoScanInterval = 5 * 60 * 1000; // 5 minutes by default
+let autoScanTimer = null;
+let lastAutoScanTime = 0;
+let autoScanningActive = false;
+let consecutiveScanFailures = 0;
+const MAX_SCAN_FAILURES = 3;
+
 // Function to generate a content fingerprint
 function generateFingerprint(platform, user, content) {
   // Create a fingerprint using platform, user, and first 50 chars of content
@@ -98,12 +107,20 @@ function checkServerAvailability(callback) {
   // Update check timestamp
   lastServerCheckTime = currentTime;
   
-  // Get API key from storage
-  chrome.storage.local.get(['apiKey'], function(result) {
+  // Get API endpoint and key from storage
+  chrome.storage.local.get(['apiEndpoint', 'apiKey', 'apiAvailable'], function(result) {
+    // If we have a recent API check result, use that
+    if (result.apiAvailable !== undefined) {
+      isServerAvailable = result.apiAvailable;
+      callback(isServerAvailable);
+      return;
+    }
+    
+    const apiEndpoint = result.apiEndpoint || 'http://127.0.0.1:8080';
     const apiKey = result.apiKey || '8484e01c2e0b4d368eb9a0f9b89807ad'; // Default fallback API key
     
     // Try to connect to health check endpoint
-    fetch('http://localhost:8000/api/health-check/', {
+    fetch(`${apiEndpoint}/api/health-check/`, {
       method: 'GET',
       headers: {
         'Content-Type': 'application/json',
@@ -119,11 +136,33 @@ function checkServerAvailability(callback) {
     .then(data => {
       console.log('Server connection successful:', data);
       isServerAvailable = true;
+      
+      // Store API status
+      chrome.storage.local.set({
+        apiAvailable: true,
+        apiLastCheck: Date.now(),
+        apiStatus: 'connected'
+      });
+      
       callback(true);
     })
     .catch(error => {
       console.error('Server connection failed:', error);
       isServerAvailable = false;
+      
+      // Store API status
+      chrome.storage.local.set({
+        apiAvailable: false,
+        apiLastCheck: Date.now(),
+        apiStatus: 'error',
+        apiError: error.toString()
+      });
+      
+      // Notify background script to try alternative endpoints
+      chrome.runtime.sendMessage({
+        action: 'checkAPIEndpoint'
+      });
+      
       callback(false);
     });
   });
@@ -269,7 +308,7 @@ function collectInstagramPosts(dataPreferences) {
   const postElements = document.querySelectorAll('article');
 
   const processedPromises = [];
-  
+
   postElements.forEach((el) => {
     // Get content only if preference is enabled
     const content = prefs.collectContent ? (el.innerText || "") : "";
@@ -278,6 +317,27 @@ function collectInstagramPosts(dataPreferences) {
     const username = prefs.collectUsers 
       ? (el.querySelector('header a')?.innerText || "unknown") 
       : "anonymous";
+    
+    // Enhanced friend detection logic
+    let isFriend = false;
+    if (prefs.collectUsers) {
+      // Check for following status in buttons
+      const followButton = el.querySelector('header button');
+      if (followButton) {
+        const buttonText = followButton.innerText.toLowerCase();
+        isFriend = buttonText.includes('following') || 
+                  buttonText.includes('unfollow') ||
+                  buttonText.includes('requested');
+      }
+      
+      // Also check for follow status text
+      if (!isFriend) {
+        const headerText = el.querySelector('header').innerText.toLowerCase();
+        isFriend = headerText.includes('following') || 
+                  headerText.includes('follows you') ||
+                  headerText.includes('mutual');
+      }
+    }
     
     // Collect engagement data based on preference
     let likes = 0;
@@ -351,7 +411,7 @@ function collectInstagramPosts(dataPreferences) {
         
         // Build an object with only the enabled data fields
         const post = {
-          platform: 'instagram',
+        platform: 'instagram',
           collected_at: new Date().toISOString()
         };
         
@@ -364,7 +424,7 @@ function collectInstagramPosts(dataPreferences) {
         if (prefs.collectUsers) {
           post.user = username;
           post.verified = el.querySelector('header svg[aria-label="Verified"]') !== null;
-          post.is_friend = el.querySelector('header button')?.innerText.includes('Following') || false;
+          post.is_friend = Boolean(isFriend);
           post.is_family = false; // Always needs user input
         }
         
@@ -421,12 +481,20 @@ function collectFacebookPosts() {
     // Check for verified badge - ensure boolean value
     const isVerified = Boolean(el.querySelector('svg[aria-label*="Verified"]') !== null);
     
-    // Try to determine friend status - ensure boolean value
-    const isFriend = Boolean(
-      !isSponsored && 
-      (el.querySelector('h4 a[href*="/friends/"]') !== null || 
-       el.querySelector('[role="button"]:not([aria-label*="Like"])'))
-    );
+    // Enhanced friend detection logic
+    let isFriend = false;
+    
+    // Check for friend indicators
+    if (!isSponsored) {
+      // Look for friend-specific elements
+      const hasFriendLink = el.querySelector('h4 a[href*="/friends/"]') !== null;
+      const hasReactButton = el.querySelector('[role="button"]:not([aria-label*="Like"])') !== null;
+      const hasAuthorLink = el.querySelector('a[role="link"][tabindex="0"]') !== null;
+      const hasCommentOption = el.querySelector('[aria-label*="comment"], [aria-label*="Comment"]') !== null;
+      
+      // Consider a post as from a friend if it has friend indicators and is not sponsored
+      isFriend = Boolean(hasFriendLink || (hasAuthorLink && hasCommentOption && hasReactButton));
+    }
     
     // Extract timestamp
     let timestamp = '';
@@ -594,16 +662,42 @@ function collectLinkedInPosts() {
     // Check for verified badge (Premium)
     const isVerified = el.querySelector('.premium-icon') !== null;
     
-    // Determine connection status (1st, 2nd, 3rd)
+    // Enhanced connection status detection (1st, 2nd, 3rd)
     let connectionDegree = 0;
+    let isFriend = false;
+    
     const connectionElement = el.querySelector('.feed-shared-actor__sub-description');
     if (connectionElement) {
-      if (connectionElement.innerText.includes('1st')) {
+      const connectionText = connectionElement.innerText;
+      
+      // Check for 1st-degree connection indicators
+      if (connectionText.includes('1st')) {
         connectionDegree = 1;
-      } else if (connectionElement.innerText.includes('2nd')) {
+        isFriend = true;
+      } else if (connectionText.includes('2nd')) {
         connectionDegree = 2;
-      } else if (connectionElement.innerText.includes('3rd')) {
+      } else if (connectionText.includes('3rd')) {
         connectionDegree = 3;
+      }
+      
+      // Additional check for connections you follow
+      if (!isFriend && (
+          connectionText.includes('Following') || 
+          connectionText.includes('You follow') ||
+          el.querySelector('.feed-shared-actor__follow-button') !== null
+      )) {
+        isFriend = true;
+      }
+    }
+    
+    // Fallback check for connected status
+    if (!isFriend) {
+      const followButton = el.querySelector('.feed-shared-actor__follow-button');
+      if (followButton && (
+        followButton.innerText.includes('Following') || 
+        followButton.innerText.includes('Connected')
+      )) {
+        isFriend = true;
       }
     }
     
@@ -723,7 +817,7 @@ function collectLinkedInPosts() {
         content,
         platform: 'linkedin',
         user: user,
-        is_friend: connectionDegree === 1,  // 1st connections are "friends"
+        is_friend: isFriend,  // 1st connections and followed accounts are "friends"
         is_family: false,
         category: hashtags.join(','),
         verified: isVerified,
@@ -758,7 +852,7 @@ function collectLinkedInPosts() {
         is_job_post: Boolean(post.is_job_post)
       };
       
-      fetch("http://localhost:8000/api/process-ml/", {
+      fetch("http://127.0.0.1:8080/api/process-ml/", {
       method: "POST",
         headers: { 
           "Content-Type": "application/json",
@@ -1319,3 +1413,465 @@ window.addEventListener("load", () => {
       injectScanButton();
     });
 });
+
+// Function to start the auto-scanning process
+function startAutoScanning() {
+  // Check if auto-scanning is already active
+  if (autoScanningActive) {
+    console.log("Auto-scanning is already active");
+    return;
+  }
+  
+  // Clear any existing timer just in case
+  if (autoScanTimer) {
+    clearInterval(autoScanTimer);
+  }
+  
+  console.log(`Starting auto-scanning with interval of ${autoScanInterval/1000} seconds`);
+  
+  autoScanningActive = true;
+  
+  // Run initial scan immediately
+  performAutoScan();
+  
+  // Set up recurring timer for scanning
+  autoScanTimer = setInterval(performAutoScan, autoScanInterval);
+  
+  // Add visual indicator for auto-scanning
+  showAutoScanIndicator();
+}
+
+// Function to stop auto-scanning
+function stopAutoScanning() {
+  if (autoScanTimer) {
+    clearInterval(autoScanTimer);
+    autoScanTimer = null;
+  }
+  
+  autoScanningActive = false;
+  console.log("Auto-scanning stopped");
+  
+  // Remove visual indicator
+  const indicator = document.getElementById('authentic-autoscan-indicator');
+  if (indicator) {
+    indicator.remove();
+  }
+}
+
+// Function to actually perform the auto-scan
+function performAutoScan() {
+  // Don't scan if disabled
+  if (!autoScanEnabled) {
+    console.log("Auto-scanning is disabled, skipping scan");
+    return;
+  }
+  
+  // Don't scan if the user is inactive (tab not visible)
+  if (document.hidden) {
+    console.log("Page not visible, skipping auto-scan");
+    return;
+  }
+  
+  // Check cooldown period
+  const currentTime = Date.now();
+  if (currentTime - lastAutoScanTime < autoScanInterval * 0.5) {
+    console.log("Auto-scan cooldown period active, skipping scan");
+    return;
+  }
+  
+  console.log("Performing auto-scan...");
+  lastAutoScanTime = currentTime;
+  
+  // Detect which platform we're on
+  const url = window.location.href;
+  
+  // Store the scroll position so we can restore it later
+  const scrollPosition = window.scrollY;
+  
+  // Add a flashing effect to the indicator to show scanning is in progress
+  const indicator = document.getElementById('authentic-autoscan-indicator');
+  if (indicator) {
+    indicator.classList.add('scanning');
+  }
+  
+  // Helper function to restore state after scanning
+  const finishScan = (success, posts = []) => {
+    // Restore scroll position
+    window.scrollTo(0, scrollPosition);
+    
+    // Update indicator
+    if (indicator) {
+      indicator.classList.remove('scanning');
+      
+      if (success) {
+        indicator.classList.add('success');
+        setTimeout(() => {
+          indicator.classList.remove('success');
+        }, 2000);
+        
+        // Reset failure counter on success
+        consecutiveScanFailures = 0;
+        
+        // Notify background script if posts were found
+        if (posts.length > 0) {
+          let platform = 'Unknown';
+          if (url.includes('instagram.com')) platform = 'Instagram';
+          else if (url.includes('facebook.com')) platform = 'Facebook';
+          else if (url.includes('linkedin.com')) platform = 'LinkedIn';
+          
+          chrome.runtime.sendMessage({
+            action: 'autoScanComplete',
+            postsFound: posts.length,
+            platform: platform
+          });
+        }
+      } else {
+        indicator.classList.add('failure');
+        setTimeout(() => {
+          indicator.classList.remove('failure');
+        }, 2000);
+        
+        // Increment failure counter
+        consecutiveScanFailures++;
+        
+        // If too many consecutive failures, stop auto-scanning
+        if (consecutiveScanFailures >= MAX_SCAN_FAILURES) {
+          console.error("Too many auto-scan failures, disabling auto-scan");
+          stopAutoScanning();
+          
+          // Show notification to user
+          chrome.runtime.sendMessage({
+            action: 'showNotification',
+            title: 'Auto-Scanning Disabled',
+            message: 'Auto-scanning has been disabled due to multiple failures. You can re-enable it from the extension popup.'
+          });
+        }
+      }
+    }
+  };
+  
+  // First check if server is available
+  checkServerAvailability(function(available) {
+    if (!available) {
+      console.error("Server not available, skipping auto-scan");
+      finishScan(false);
+      return;
+    }
+    
+    // Perform platform-specific scan
+    let scanPromise;
+    
+    try {
+      if (url.includes('instagram.com')) {
+        // Scroll down a bit to load more content
+        window.scrollTo(0, window.innerHeight * 2);
+        
+        setTimeout(() => {
+          scanPromise = collectWithRateLimitProtection('Instagram', () => collectInstagramPosts());
+          scanPromise.then(posts => {
+            console.log(`Auto-scanned ${posts.length} Instagram posts`);
+            finishScan(true, posts);
+          }).catch(error => {
+            console.error("Error during Instagram auto-scan:", error);
+            finishScan(false);
+          });
+        }, 1000); // Wait for content to load after scrolling
+      } 
+      else if (url.includes('facebook.com')) {
+        // Scroll down a bit to load more content
+        window.scrollTo(0, window.innerHeight * 2);
+        
+        setTimeout(() => {
+          scanPromise = collectWithRateLimitProtection('Facebook', () => collectFacebookPosts());
+          scanPromise.then(posts => {
+            console.log(`Auto-scanned ${posts.length} Facebook posts`);
+            finishScan(true, posts);
+          }).catch(error => {
+            console.error("Error during Facebook auto-scan:", error);
+            finishScan(false);
+          });
+        }, 1000); // Wait for content to load after scrolling
+      } 
+      else if (url.includes('linkedin.com')) {
+        // Scroll down a bit to load more content
+        window.scrollTo(0, window.innerHeight * 2);
+        
+        setTimeout(() => {
+          scanPromise = collectWithRateLimitProtection('LinkedIn', () => collectLinkedInPosts());
+          scanPromise.then(posts => {
+            console.log(`Auto-scanned ${posts.length} LinkedIn posts`);
+            finishScan(true, posts);
+          }).catch(error => {
+            console.error("Error during LinkedIn auto-scan:", error);
+            finishScan(false);
+          });
+        }, 1000); // Wait for content to load after scrolling
+      }
+      else {
+        console.log("Not on a supported social platform for auto-scanning");
+        finishScan(false);
+      }
+    } catch (error) {
+      console.error("Error during auto-scan:", error);
+      finishScan(false);
+    }
+  });
+}
+
+// Function to show a visual indicator for auto-scanning
+function showAutoScanIndicator() {
+  // Don't add multiple indicators
+  if (document.getElementById('authentic-autoscan-indicator')) return;
+  
+  const indicatorContainer = document.createElement('div');
+  indicatorContainer.id = 'authentic-autoscan-indicator';
+  indicatorContainer.style.position = 'fixed';
+  indicatorContainer.style.bottom = '80px';
+  indicatorContainer.style.right = '20px';
+  indicatorContainer.style.zIndex = '9999';
+  indicatorContainer.style.backgroundColor = 'rgba(0, 0, 0, 0.7)';
+  indicatorContainer.style.color = 'white';
+  indicatorContainer.style.padding = '5px 10px';
+  indicatorContainer.style.borderRadius = '4px';
+  indicatorContainer.style.fontSize = '12px';
+  indicatorContainer.style.transition = 'background-color 0.3s';
+  indicatorContainer.style.cursor = 'pointer';
+  indicatorContainer.style.display = 'flex';
+  indicatorContainer.style.alignItems = 'center';
+  indicatorContainer.style.gap = '5px';
+  
+  // Add a small icon
+  const icon = document.createElement('div');
+  icon.innerHTML = '🔄';
+  icon.style.display = 'inline-block';
+  
+  // Add text
+  const text = document.createElement('span');
+  text.innerText = 'Auto-Scanning Active';
+  
+  // Add a toggle switch
+  const toggleSwitch = document.createElement('div');
+  toggleSwitch.style.width = '30px';
+  toggleSwitch.style.height = '16px';
+  toggleSwitch.style.backgroundColor = '#4CAF50';
+  toggleSwitch.style.borderRadius = '8px';
+  toggleSwitch.style.position = 'relative';
+  toggleSwitch.style.marginLeft = '10px';
+  toggleSwitch.style.cursor = 'pointer';
+  
+  const toggleSlider = document.createElement('div');
+  toggleSlider.style.width = '12px';
+  toggleSlider.style.height = '12px';
+  toggleSlider.style.backgroundColor = 'white';
+  toggleSlider.style.borderRadius = '50%';
+  toggleSlider.style.position = 'absolute';
+  toggleSlider.style.top = '2px';
+  toggleSlider.style.right = '2px';
+  toggleSlider.style.transition = 'all 0.3s';
+  
+  toggleSwitch.appendChild(toggleSlider);
+  
+  // Add click event to toggle auto-scanning
+  toggleSwitch.addEventListener('click', function() {
+    autoScanEnabled = !autoScanEnabled;
+    
+    if (autoScanEnabled) {
+      toggleSwitch.style.backgroundColor = '#4CAF50';
+      toggleSlider.style.right = '2px';
+      toggleSlider.style.left = 'auto';
+      text.innerText = 'Auto-Scanning Active';
+    } else {
+      toggleSwitch.style.backgroundColor = '#ccc';
+      toggleSlider.style.right = 'auto';
+      toggleSlider.style.left = '2px';
+      text.innerText = 'Auto-Scanning Paused';
+    }
+  });
+  
+  // Add a close button
+  const closeButton = document.createElement('div');
+  closeButton.innerHTML = '✕';
+  closeButton.style.marginLeft = '10px';
+  closeButton.style.cursor = 'pointer';
+  closeButton.style.fontSize = '14px';
+  closeButton.style.opacity = '0.7';
+  closeButton.style.transition = 'opacity 0.3s';
+  
+  closeButton.addEventListener('mouseover', function() {
+    closeButton.style.opacity = '1';
+  });
+  
+  closeButton.addEventListener('mouseout', function() {
+    closeButton.style.opacity = '0.7';
+  });
+  
+  closeButton.addEventListener('click', function(e) {
+    e.stopPropagation();
+    stopAutoScanning();
+  });
+  
+  indicatorContainer.appendChild(icon);
+  indicatorContainer.appendChild(text);
+  indicatorContainer.appendChild(toggleSwitch);
+  indicatorContainer.appendChild(closeButton);
+  
+  // Add styles for scanning animation
+  const style = document.createElement('style');
+  style.textContent = `
+    #authentic-autoscan-indicator.scanning {
+      animation: authentic-pulse 1s infinite;
+    }
+    #authentic-autoscan-indicator.success {
+      background-color: rgba(76, 175, 80, 0.8) !important;
+    }
+    #authentic-autoscan-indicator.failure {
+      background-color: rgba(255, 76, 76, 0.8) !important;
+    }
+    @keyframes authentic-pulse {
+      0% { opacity: 0.7; }
+      50% { opacity: 1; }
+      100% { opacity: 0.7; }
+    }
+  `;
+  document.head.appendChild(style);
+  
+  document.body.appendChild(indicatorContainer);
+}
+
+// Modify the existing functionality to include auto-scanning
+document.addEventListener('DOMContentLoaded', function() {
+  // Check if auto-scanning is enabled in settings
+  chrome.storage.local.get(['autoScanEnabled', 'autoScanInterval'], function(result) {
+    // Default to enabled if not set
+    autoScanEnabled = result.autoScanEnabled !== false;
+    
+    // Use custom interval if set, otherwise default to 5 minutes
+    if (result.autoScanInterval) {
+      autoScanInterval = result.autoScanInterval * 1000; // Convert to milliseconds
+    }
+    
+    // Start auto-scanning if enabled
+    if (autoScanEnabled) {
+      // Delay the first scan to allow page to fully load
+      setTimeout(startAutoScanning, 5000);
+    }
+  });
+});
+
+// Add message listener for auto-scanning controls
+chrome.runtime.onMessage.addListener(function(message, sender, sendResponse) {
+  // Handle auto-scanning messages
+  if (message.action === 'startAutoScanning') {
+    if (!autoScanningActive) {
+      startAutoScanning();
+      sendResponse({ success: true, message: 'Auto-scanning started' });
+    } else {
+      sendResponse({ success: false, message: 'Auto-scanning already active' });
+    }
+    return true;
+  }
+  
+  if (message.action === 'stopAutoScanning') {
+    if (autoScanningActive) {
+      stopAutoScanning();
+      sendResponse({ success: true, message: 'Auto-scanning stopped' });
+    } else {
+      sendResponse({ success: false, message: 'Auto-scanning not active' });
+    }
+    return true;
+  }
+  
+  if (message.action === 'updateAutoScanInterval') {
+    if (message.interval) {
+      // Update interval setting
+      autoScanInterval = message.interval * 1000; // Convert to milliseconds
+      
+      // If auto-scanning is active, restart with new interval
+      if (autoScanningActive) {
+        stopAutoScanning();
+        startAutoScanning();
+      }
+      
+      sendResponse({ success: true, message: `Interval updated to ${message.interval} minutes` });
+    } else {
+      sendResponse({ success: false, message: 'Invalid interval' });
+    }
+    return true;
+  }
+  
+  if (message.action === 'getAutoScanStatus') {
+    // Return information about auto-scanning status
+    const url = window.location.href;
+    let platformSupported = false;
+    
+    if (url.includes('instagram.com') || url.includes('facebook.com') || url.includes('linkedin.com')) {
+      platformSupported = true;
+    }
+    
+    let status = '';
+    
+    if (!platformSupported) {
+      status = 'Auto-scanning not supported on this site';
+    } else if (autoScanningActive) {
+      const nextScan = lastAutoScanTime + autoScanInterval - Date.now();
+      const minutesRemaining = Math.max(0, Math.floor(nextScan / 60000));
+      const secondsRemaining = Math.max(0, Math.floor((nextScan % 60000) / 1000));
+      
+      status = `Active - Next scan in ${minutesRemaining}m ${secondsRemaining}s`;
+      
+      if (!autoScanEnabled) {
+        status = 'Paused - Toggle enabled to resume';
+      }
+    } else {
+      status = 'Inactive - Enable in settings to start';
+    }
+    
+    sendResponse({
+      status: status,
+      active: autoScanningActive,
+      enabled: autoScanEnabled,
+      platformSupported: platformSupported,
+      interval: autoScanInterval / 1000,
+      nextScan: lastAutoScanTime + autoScanInterval
+    });
+    
+    return true;
+  }
+  
+  if (message.action === 'performManualScan') {
+    // Manually trigger a scan
+    performAutoScan();
+    sendResponse({ success: true, message: 'Manual scan initiated' });
+    return true;
+  }
+});
+
+// Update the auto-scan indicator status every second
+function updateAutoScanIndicator() {
+  const indicator = document.getElementById('authentic-autoscan-indicator');
+  if (!indicator || !autoScanningActive) return;
+  
+  const textElement = indicator.querySelector('span');
+  if (!textElement) return;
+  
+  // Calculate time until next scan
+  const nextScan = lastAutoScanTime + autoScanInterval - Date.now();
+  const minutesRemaining = Math.max(0, Math.floor(nextScan / 60000));
+  const secondsRemaining = Math.max(0, Math.floor((nextScan % 60000) / 1000));
+  
+  if (autoScanEnabled) {
+    textElement.innerText = `Auto-Scanning: Next in ${minutesRemaining}m ${secondsRemaining}s`;
+  } else {
+    textElement.innerText = 'Auto-Scanning Paused';
+  }
+  
+  // Schedule the next update
+  setTimeout(updateAutoScanIndicator, 1000);
+}
+
+// Start the indicator updater when the indicator is shown
+const originalShowAutoScanIndicator = showAutoScanIndicator;
+showAutoScanIndicator = function() {
+  originalShowAutoScanIndicator();
+  updateAutoScanIndicator();
+};

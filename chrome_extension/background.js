@@ -49,7 +49,7 @@ chrome.runtime.onInstalled.addListener(function(details) {
         
         // Open onboarding page
         chrome.tabs.create({
-            url: 'http://localhost:8000/onboarding/'
+            url: 'http://127.0.0.1:8080/onboarding/'
         });
     }
 });
@@ -119,7 +119,7 @@ function sendPostsToAPI(posts, platform, settings) {
         if (post.is_job_post !== undefined) post.is_job_post = Boolean(post.is_job_post);
         
         // First, send to ML processing endpoint
-        fetch('http://localhost:8000/api/process-ml/', {
+        fetch('http://127.0.0.1:8080/api/process-ml/', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
@@ -137,7 +137,7 @@ function sendPostsToAPI(posts, platform, settings) {
             console.log('ML processing successful:', mlData);
             
             // Now send to the post storage endpoint
-            return fetch('http://localhost:8000/api/post/', {
+            return fetch('http://127.0.0.1:8080/api/post/', {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
@@ -273,69 +273,50 @@ chrome.runtime.onMessage.addListener(function(message, sender, sendResponse) {
   if (message.action === 'showNotification') {
     chrome.notifications.create({
       type: 'basic',
-      iconUrl: 'icon48.png',
+      iconUrl: 'icon128.png',
       title: message.title || 'Authentic Dashboard',
-      message: message.message || 'Notification from Authentic Dashboard'
+      message: message.message || 'Notification from Authentic Dashboard',
+      priority: 1
     });
-    // Always send a response
-    sendResponse({success: true});
+    
     return true;
   }
   
-  // Handle connection check messages
-  if (message.action === 'checkConnection') {
-    // Get API key first
-    chrome.storage.local.get(['settings'], function(result) {
-      const settings = result.settings || { apiKey: '8484e01c2e0b4d368eb9a0f9b89807ad' };
-      const apiKey = settings.apiKey || '8484e01c2e0b4d368eb9a0f9b89807ad';
-      
-      // Verify backend API connection
-      fetch('http://localhost:8000/api/health-check/', {
-        method: 'GET',
-        headers: {
-          'Content-Type': 'application/json',
-          'X-API-Key': apiKey
-        }
-      })
-      .then(response => {
-        if (!response.ok) {
-          throw { response, error: new Error(`HTTP error! Status: ${response.status}`) };
-        }
-        return response.json();
-      })
-      .then(data => {
-        console.log('Backend connection check successful:', data);
-        sendResponse({status: 'connected', server: true, data});
-      })
-      .catch(err => {
-        let errorObject = err.error || err;
-        let response = err.response;
-        
-        if (response) {
-          // HTTP error
-          handleFetchError(errorObject, response).then(errorData => {
-            console.error('Backend connection check failed:', errorData);
-            sendResponse({
-              status: 'disconnected', 
-              server: false, 
-              error: errorData.message || 'Unknown error',
-              details: errorData
-            });
-          });
-        } else {
-          // Network error
-          console.error('Backend connection check failed:', errorObject);
-          sendResponse({
-            status: 'disconnected', 
-            server: false, 
-            error: errorObject.message || 'Network error',
-            details: { networkError: true }
-          });
-        }
+  // Handle API endpoint check request
+  if (message.action === 'checkAPIEndpoint') {
+    checkAPIEndpoint();
+    return true;
+  }
+  
+  // Handle successful auto-scan completion
+  if (message.action === 'autoScanComplete') {
+    // Only show notification if significant number of posts were found
+    if (message.postsFound && message.postsFound >= 3) {
+      chrome.notifications.create({
+        type: 'basic',
+        iconUrl: 'icon128.png',
+        title: 'Auto-Scan Complete',
+        message: `Found ${message.postsFound} new posts on ${message.platform}`,
+        priority: 1
       });
-    });
+    }
     
-    // Return true to indicate we will send the response asynchronously
+    // Update badge with count
+    if (sender.tab) {
+      chrome.action.setBadgeText({
+        text: message.postsFound.toString(),
+        tabId: sender.tab.id
+      });
+      
+      // Clear badge after 5 seconds
+      setTimeout(() => {
+        chrome.action.setBadgeText({
+          text: '',
+          tabId: sender.tab.id
+        });
+      }, 5000);
+    }
+    
     return true;
   }
 });
@@ -387,4 +368,157 @@ function showNotification(title, message, type = 'info') {
     title: title,
     message: message
   });
-} 
+}
+
+// Enhanced API endpoint check
+function checkAPIEndpoint() {
+  // Get the configured API endpoint
+  chrome.storage.local.get(['apiEndpoint', 'apiKey'], function(result) {
+    const apiEndpoint = result.apiEndpoint || 'http://127.0.0.1:8080';
+    const apiKey = result.apiKey || '8484e01c2e0b4d368eb9a0f9b89807ad'; // Default fallback API key
+    
+    // Try to connect to health check endpoint
+    fetch(`${apiEndpoint}/api/health-check/`, {
+      method: 'GET',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-API-Key': apiKey
+      }
+    })
+    .then(response => {
+      if (!response.ok) {
+        throw new Error(`HTTP error! Status: ${response.status}`);
+      }
+      return response.json();
+    })
+    .then(data => {
+      console.log('API endpoint is available:', data);
+      
+      // Store API connection status
+      chrome.storage.local.set({
+        apiAvailable: true,
+        apiLastCheck: Date.now(),
+        apiStatus: 'connected',
+        apiError: null
+      });
+      
+      // Update any open popups with this information
+      chrome.runtime.sendMessage({
+        action: 'apiStatusUpdate',
+        status: 'connected',
+        message: 'API connection successful'
+      });
+    })
+    .catch(error => {
+      console.error('API endpoint is unavailable:', error);
+      
+      // Store API connection status
+      chrome.storage.local.set({
+        apiAvailable: false,
+        apiLastCheck: Date.now(),
+        apiStatus: 'error',
+        apiError: error.toString()
+      });
+      
+      // Update any open popups with this information
+      chrome.runtime.sendMessage({
+        action: 'apiStatusUpdate',
+        status: 'error',
+        message: `API connection error: ${error.toString()}`
+      });
+      
+      // Check if we need to update the API endpoint
+      const currentEndpoint = apiEndpoint;
+      
+      // Attempt with alternative endpoints
+      const alternativeEndpoints = [
+        'http://127.0.0.1:8080',
+        'http://localhost:8080',
+        'http://127.0.0.1:8000',
+        'http://localhost:8000'
+      ];
+      
+      // Find the current endpoint in the list or add it
+      if (!alternativeEndpoints.includes(currentEndpoint)) {
+        alternativeEndpoints.unshift(currentEndpoint);
+      }
+      
+      // Try each endpoint sequentially
+      tryNextEndpoint(alternativeEndpoints, 0, apiKey);
+    });
+  });
+}
+
+// Helper function to try alternative endpoints
+function tryNextEndpoint(endpoints, index, apiKey) {
+  // Stop if we've tried all endpoints
+  if (index >= endpoints.length) {
+    console.error('All API endpoints failed');
+    return;
+  }
+  
+  const endpoint = endpoints[index];
+  
+  // Skip the current endpoint (we already tried it)
+  if (index === 0) {
+    tryNextEndpoint(endpoints, index + 1, apiKey);
+    return;
+  }
+  
+  console.log(`Trying alternative endpoint: ${endpoint}`);
+  
+  // Try to connect to health check endpoint
+  fetch(`${endpoint}/api/health-check/`, {
+    method: 'GET',
+    headers: {
+      'Content-Type': 'application/json',
+      'X-API-Key': apiKey
+    }
+  })
+  .then(response => {
+    if (!response.ok) {
+      throw new Error(`HTTP error! Status: ${response.status}`);
+    }
+    return response.json();
+  })
+  .then(data => {
+    console.log('Alternative API endpoint is available:', data);
+    
+    // Store the working endpoint
+    chrome.storage.local.set({
+      apiEndpoint: endpoint,
+      apiAvailable: true,
+      apiLastCheck: Date.now(),
+      apiStatus: 'connected',
+      apiError: null
+    });
+    
+    // Update any open popups with this information
+    chrome.runtime.sendMessage({
+      action: 'apiStatusUpdate',
+      status: 'connected',
+      message: `Connected to alternative endpoint: ${endpoint}`
+    });
+    
+    // Show notification about the endpoint change
+    chrome.notifications.create({
+      type: 'basic',
+      iconUrl: 'icon128.png',
+      title: 'API Endpoint Updated',
+      message: `Switched to working endpoint: ${endpoint}`,
+      priority: 1
+    });
+  })
+  .catch(error => {
+    console.error(`Alternative endpoint ${endpoint} failed:`, error);
+    
+    // Try the next endpoint
+    tryNextEndpoint(endpoints, index + 1, apiKey);
+  });
+}
+
+// Run API endpoint check every 5 minutes
+setInterval(checkAPIEndpoint, 5 * 60 * 1000);
+
+// Also run it on startup
+checkAPIEndpoint(); 
