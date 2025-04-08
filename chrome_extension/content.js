@@ -96,83 +96,75 @@ let isServerAvailable = false;
 
 // Function to check if server is available
 function checkServerAvailability(callback) {
-  const currentTime = Date.now();
-  
-  // Don't check too frequently
-  if (currentTime - lastServerCheckTime < SERVER_CHECK_COOLDOWN) {
-    callback(isServerAvailable);
-    return;
-  }
-  
-  // Update check timestamp
-  lastServerCheckTime = currentTime;
-  
-  // Get API endpoint and key from storage
-  chrome.storage.local.get(['apiEndpoint', 'apiKey', 'apiAvailable'], function(result) {
-    // If we have a recent API check result, use that
-    if (result.apiAvailable !== undefined) {
-      isServerAvailable = result.apiAvailable;
-      callback(isServerAvailable);
-      return;
-    }
-    
-    const apiEndpoint = result.apiEndpoint || 'http://127.0.0.1:8080';
-    const apiKey = result.apiKey || '8484e01c2e0b4d368eb9a0f9b89807ad'; // Default fallback API key
-    
-    // Try to connect to health check endpoint
-    fetch(`${apiEndpoint}/api/health-check/`, {
-      method: 'GET',
-      headers: {
-        'Content-Type': 'application/json',
-        'X-API-Key': apiKey
-      }
-    })
-    .then(response => {
-      if (!response.ok) {
-        throw new Error(`HTTP error! Status: ${response.status}`);
-      }
-      return response.json();
-    })
-    .then(data => {
-      console.log('Server connection successful:', data);
-      isServerAvailable = true;
-      
-      // Store API status
-      chrome.storage.local.set({
-        apiAvailable: true,
-        apiLastCheck: Date.now(),
-        apiStatus: 'connected'
-      });
-      
-      callback(true);
-    })
-    .catch(error => {
-      console.error('Server connection failed:', error);
-      isServerAvailable = false;
-      
-      // Store API status
-      chrome.storage.local.set({
-        apiAvailable: false,
-        apiLastCheck: Date.now(),
-        apiStatus: 'error',
-        apiError: error.toString()
-      });
-      
-      // Notify background script to try alternative endpoints
-      chrome.runtime.sendMessage({
-        action: 'checkAPIEndpoint'
-      });
-      
-      callback(false);
+    // Log when we're checking the server availability
+    console.log("Checking server availability...");
+
+    // Check if we already have a cached result that's not too old
+    chrome.storage.local.get(['apiAvailable', 'apiLastCheck', 'apiEndpoint', 'apiKey'], function(result) {
+        const now = Date.now();
+        const lastCheck = result.apiLastCheck || 0;
+        const fiveMinutesAgo = now - (5 * 60 * 1000); // 5 minutes in milliseconds
+        
+        // If we checked recently and have a result, use the cached result
+        if (lastCheck > fiveMinutesAgo && result.apiAvailable !== undefined) {
+            console.log("Using cached API availability result:", result.apiAvailable);
+            callback(result.apiAvailable, result.apiEndpoint, result.apiKey);
+            return;
+        }
+        
+        // Otherwise, check the server
+        const apiEndpoint = result.apiEndpoint || 'http://localhost:8000';
+        const apiKey = result.apiKey;
+        
+        console.log("Testing connection to API endpoint:", apiEndpoint);
+        
+        fetch(`${apiEndpoint}/api/health-check/`, {
+            method: 'GET',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-API-Key': apiKey || ''
+            }
+        })
+        .then(response => {
+            const available = response.ok;
+            
+            // Store the result and timestamp
+            chrome.storage.local.set({
+                apiAvailable: available,
+                apiLastCheck: now,
+                apiEndpoint: apiEndpoint
+            }, function() {
+                console.log(`Server available: ${available}`);
+                callback(available, apiEndpoint, apiKey);
+            });
+        })
+        .catch(error => {
+            console.error("Error checking server:", error);
+            
+            // Store the result and timestamp
+            chrome.storage.local.set({
+                apiAvailable: false,
+                apiLastCheck: now
+            }, function() {
+                console.log("Server unavailable due to error");
+                
+                // Notify the background script to check alternative endpoints
+                chrome.runtime.sendMessage({
+                    action: 'checkAPIEndpoint',
+                    error: error.message
+                });
+                
+                callback(false, apiEndpoint, apiKey);
+            });
+        });
     });
-  });
 }
 
 // Modified collectWithRateLimitProtection to include deduplication
 async function collectWithRateLimitProtection(platform, collectionFunction) {
   // First check if server is available
   return new Promise((resolve) => {
-    checkServerAvailability(async function(available) {
+    checkServerAvailability(async function(available, apiEndpoint, apiKey) {
       if (!available) {
         console.log('Server unavailable. Collection skipped.');
         resolve([]);
@@ -1293,7 +1285,7 @@ chrome.runtime.onMessage.addListener(function(request, sender, sendResponse) {
   if (request.action === 'collectPosts') {
     try {
       // Check server first
-      checkServerAvailability(function(available) {
+      checkServerAvailability(function(available, apiEndpoint, apiKey) {
         if (!available) {
           sendResponse({ 
             success: false, 
@@ -1551,7 +1543,7 @@ function performAutoScan() {
   };
   
   // First check if server is available
-  checkServerAvailability(function(available) {
+  checkServerAvailability(function(available, apiEndpoint, apiKey) {
     if (!available) {
       console.error("Server not available, skipping auto-scan");
       finishScan(false);

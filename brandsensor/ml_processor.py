@@ -27,6 +27,7 @@ from datetime import datetime
 from django.utils import timezone
 from django.db.models import Avg
 from .models import SocialPost, MLModel, MLPredictionLog, UserPreference
+from django.db.utils import IntegrityError
 
 # Try to import numpy, but fallback to basic calculations if not available
 try:
@@ -351,8 +352,22 @@ def process_post(post):
     if post.relevance_score is None:
         post.relevance_score = calculate_relevance(post, post.user_id)
     
-    # Save the updated post
-    post.save()
+    # Save the updated post with error handling for duplicate content
+    try:
+        post.save()
+    except IntegrityError as e:
+        # Log the error but continue processing other posts
+        print(f"IntegrityError processing post: {str(e)}")
+        # If this is a duplicate post, try to find the existing post and return that
+        if 'unique constraint' in str(e).lower() and post.content_hash:
+            try:
+                existing_post = SocialPost.objects.get(
+                    user_id=post.user_id, 
+                    content_hash=post.content_hash
+                )
+                return existing_post
+            except SocialPost.DoesNotExist:
+                pass
     
     return post
 
@@ -369,8 +384,12 @@ def process_unprocessed_posts(limit=100):
     
     processed_count = 0
     for post in unprocessed_posts:
-        process_post(post)
-        processed_count += 1
+        try:
+            process_post(post)
+            processed_count += 1
+        except Exception as e:
+            # Log the error but continue with other posts
+            print(f"Error processing post {post.id}: {str(e)}")
     
     return processed_count
 
@@ -382,7 +401,14 @@ def process_user_posts(user_id, limit=100):
     
     processed_count = 0
     for post in unprocessed_posts:
-        process_post(post)
-        processed_count += 1
+        try:
+            process_post(post)
+            processed_count += 1
+        except IntegrityError as e:
+            # Log the error but continue with other posts
+            print(f"IntegrityError processing post {post.id}: {str(e)}")
+        except Exception as e:
+            # Log the error but continue with other posts
+            print(f"Error processing post {post.id}: {str(e)}")
     
     return processed_count 

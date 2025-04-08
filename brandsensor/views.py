@@ -13,6 +13,7 @@ import uuid
 import secrets
 import string
 import hashlib
+from django.db.utils import IntegrityError
 
 from .models import SocialPost, UserPreference, Brand, BehaviorLog, SocialConnection, MLModel, MLPredictionLog, APIKey, FilterPreset
 from .ml_processor import process_post, process_user_posts
@@ -208,8 +209,12 @@ def dashboard(request):
         except FilterPreset.DoesNotExist:
             pass  # Ignore invalid presets
     
-    # Process unprocessed posts for this user
-    process_user_posts(request.user.id, limit=50)
+    # Process unprocessed posts for this user - wrap in try/except to catch IntegrityError
+    try:
+        process_user_posts(request.user.id, limit=50)
+    except IntegrityError as e:
+        # Log the error but continue - the duplicate has been handled
+        print(f"IntegrityError in dashboard: {str(e)}")
     
     # Set default time filter (last 30 days if not specified)
     days_filter = request.GET.get('days', '30')
@@ -444,6 +449,7 @@ def toggle_mode(request):
         preferences.bizfluencer_filter = 'bizfluencer_filter' in request.POST
         preferences.high_sentiment_only = 'high_sentiment_only' in request.POST
         preferences.hide_job_posts = 'hide_job_posts' in request.POST
+        preferences.filter_sexual_content = 'filter_sexual_content' in request.POST
         
         # Get numeric values
         try:
@@ -877,8 +883,19 @@ def ml_dashboard(request):
     
     since_date = timezone.now() - datetime.timedelta(days=days_ago)
     
-    # Process any unprocessed posts
-    process_user_posts(request.user.id, limit=100)
+    # Process any unprocessed posts - wrap in try/except to catch IntegrityError
+    try:
+        process_user_posts(request.user.id, limit=100)
+    except IntegrityError as e:
+        # Log the error but continue - the duplicate has been handled
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.warning(f"IntegrityError in ml_dashboard: {str(e)}")
+    except Exception as e:
+        # Handle any other exceptions that might occur
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.error(f"Error processing posts in ml_dashboard: {str(e)}")
     
     # Get ML-processed posts
     ml_posts = SocialPost.objects.filter(
@@ -887,6 +904,17 @@ def ml_dashboard(request):
         sentiment_score__isnull=False,
         automated_category__isnull=False
     ).order_by('-created_at')
+    
+    # Check if we have any ML-processed posts
+    if ml_posts.count() == 0:
+        # If no ML-processed posts, show a basic template
+        context = {
+            'ml_posts_count': 0,
+            'total_posts_count': SocialPost.objects.filter(user=request.user).count(),
+            'no_ml_data': True,
+            'days_filter': days_filter,
+        }
+        return render(request, "brandsensor/ml_dashboard.html", context)
     
     # Get sentiment statistics by platform
     sentiment_by_platform = (
@@ -1108,52 +1136,86 @@ def collect_posts(request):
         # Create statistics counters
         new_count = 0
         updated_count = 0
+        duplicate_count = 0
         
         # Process each post
         for post_data in posts:
+            content = post_data.get('content', '')
+            if not content:
+                continue  # Skip posts with no content
+                
             # Check if post already exists by platform_id
             platform_id = post_data.get('platform_id')
             if not platform_id:
                 # Generate a unique ID if not provided
                 platform_id = str(uuid.uuid4())
-                
-            existing_post = SocialPost.objects.filter(platform_id=platform_id, user=user).first()
+            
+            # Create hash for content to detect duplicates
+            content_to_hash = f"{platform}:{content}"
+            content_hash = hashlib.md5(content_to_hash.encode('utf-8')).hexdigest()
+            
+            # Check for duplicates either by platform_id or content_hash
+            existing_post = None
+            if platform_id:
+                existing_post = SocialPost.objects.filter(platform_id=platform_id, user=user).first()
+            
+            # If not found by platform_id, check by content_hash
+            if not existing_post:
+                existing_post = SocialPost.objects.filter(content_hash=content_hash, user=user).first()
             
             if existing_post:
-                # Update existing post
-                existing_post.content = post_data.get('content', existing_post.content)
-                existing_post.original_user = post_data.get('original_user', existing_post.original_user)
-                existing_post.engagement_count = post_data.get('engagement_count', existing_post.engagement_count)
-                existing_post.is_sponsored = post_data.get('is_sponsored', existing_post.is_sponsored)
-                existing_post.verified = post_data.get('verified', existing_post.verified)
-                existing_post.timestamp = post_data.get('timestamp', existing_post.timestamp)
-                existing_post.is_friend = post_data.get('is_friend', existing_post.is_friend)
-                existing_post.is_family = post_data.get('is_family', existing_post.is_family)
-                existing_post.save()
-                updated_count += 1
+                # Update existing post with any new information
+                was_updated = False
+                
+                # Only update fields that are provided and different
+                for field in ['original_user', 'engagement_count', 'is_sponsored', 
+                             'verified', 'timestamp', 'is_friend', 'is_family']:
+                    if field in post_data and getattr(existing_post, field) != post_data[field]:
+                        setattr(existing_post, field, post_data[field])
+                        was_updated = True
+                
+                # Only update content if it's different and we want to overwrite
+                if content != existing_post.content and post_data.get('overwrite_content', False):
+                    existing_post.content = content
+                    was_updated = True
+                
+                if was_updated:
+                    # Track update timestamp
+                    existing_post.collected_at = timezone.now()
+                    existing_post.save()
+                    updated_count += 1
+                else:
+                    duplicate_count += 1
             else:
-                # Create new post
-                SocialPost.objects.create(
-                    user=user,
-                    platform=platform,
-                    platform_id=platform_id,
-                    content=post_data.get('content', ''),
-                    original_user=post_data.get('original_user', ''),
-                    engagement_count=post_data.get('engagement_count', 0),
-                    is_sponsored=post_data.get('is_sponsored', False),
-                    verified=post_data.get('verified', False),
-                    timestamp=post_data.get('timestamp'),
-                    is_friend=post_data.get('is_friend', False),
-                    is_family=post_data.get('is_family', False)
-                )
-                new_count += 1
+                # Create new post with the content hash
+                try:
+                    SocialPost.objects.create(
+                        user=user,
+                        platform=platform,
+                        platform_id=platform_id,
+                        content_hash=content_hash,
+                        content=content,
+                        original_user=post_data.get('original_user', ''),
+                        engagement_count=post_data.get('engagement_count', 0),
+                        is_sponsored=post_data.get('is_sponsored', False),
+                        verified=post_data.get('verified', False),
+                        timestamp=post_data.get('timestamp'),
+                        is_friend=post_data.get('is_friend', False),
+                        is_family=post_data.get('is_family', False),
+                        collected_at=timezone.now()
+                    )
+                    new_count += 1
+                except IntegrityError:
+                    # This handles the rare case where a duplicate was created between our check and save
+                    duplicate_count += 1
         
         # Log the activity
         BehaviorLog.objects.create(
             user=user,
-            action='collect_posts',
+            behavior_type='collect_posts',
             platform=platform,
-            details=f"Collected {new_count} new posts and updated {updated_count} existing posts"
+            count=new_count + updated_count,
+            details=f"Collected {new_count} new posts, updated {updated_count}, and skipped {duplicate_count} duplicates"
         )
         
         # Process ML for new posts in the background
@@ -1165,11 +1227,15 @@ def collect_posts(request):
             'status': 'success',
             'new_posts': new_count,
             'updated_posts': updated_count,
-            'message': f"Successfully collected {new_count} new posts and updated {updated_count} existing posts"
+            'duplicate_posts': duplicate_count,
+            'message': f"Successfully collected {new_count} new posts, updated {updated_count}, and skipped {duplicate_count} duplicates"
         })
     except json.JSONDecodeError:
         return JsonResponse({'status': 'error', 'message': 'Invalid JSON data'}, status=400)
     except Exception as e:
+        import traceback
+        error_details = traceback.format_exc()
+        print(f"Error in collect_posts: {error_details}")
         return JsonResponse({'status': 'error', 'message': str(e)}, status=500)
 
 @csrf_exempt

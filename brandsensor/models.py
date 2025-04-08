@@ -1,6 +1,7 @@
 from django.db import models
 from django.contrib.auth.models import User
 import json
+import hashlib
 from django.utils import timezone
 
 
@@ -19,16 +20,40 @@ class BehaviorLog(models.Model):
         ('tracker', 'Tracker'),
         ('urgency', 'Urgency Message'),
         ('buzzwords', 'Buzzwords'),
+        # Additional action types used in views
+        ('collect_posts', 'Collect Posts'),
+        ('update_preferences', 'Update Preferences'),
+        ('feedback_category', 'Feedback Category'),
+        ('feedback_sentiment', 'Feedback Sentiment'),
+        ('feedback_relevance', 'Feedback Relevance'),
+        ('feedback_hide', 'Feedback Hide'),
+        ('feedback_star', 'Feedback Star'),
+        ('delete_api_key', 'Delete API Key'),
     ]
 
-    brand = models.ForeignKey(Brand, on_delete=models.CASCADE)
+    brand = models.ForeignKey(Brand, on_delete=models.CASCADE, null=True, blank=True)
     user = models.ForeignKey(User, on_delete=models.CASCADE)
     behavior_type = models.CharField(max_length=50, choices=BEHAVIOR_TYPES)
-    count = models.IntegerField()
+    count = models.IntegerField(default=1)
     created_at = models.DateTimeField(auto_now_add=True)
+    
+    # Additional fields for app action logging
+    platform = models.CharField(max_length=20, blank=True, null=True)
+    action = models.CharField(max_length=50, blank=True, null=True)  # For backward compatibility
+    details = models.TextField(blank=True, null=True)  # Additional information
 
     def __str__(self):
-        return f"{self.brand.name} - {self.behavior_type} ({self.count})"
+        if self.brand:
+            return f"{self.brand.name} - {self.behavior_type} ({self.count})"
+        return f"{self.user.username} - {self.behavior_type} - {self.details or ''}"
+        
+    def save(self, *args, **kwargs):
+        # For backward compatibility: if action is provided but behavior_type is not,
+        # copy action to behavior_type
+        if self.action and not self.behavior_type:
+            self.behavior_type = self.action
+        
+        super().save(*args, **kwargs)
 
 
 class UserPreference(models.Model):
@@ -48,6 +73,7 @@ class UserPreference(models.Model):
     sentiment_threshold = models.FloatField(default=0.2)  # Threshold for positive content
     hide_job_posts = models.BooleanField(default=False)  # Hide job postings
     max_content_length = models.IntegerField(default=2000, null=True, blank=True)  # Max post length to show
+    filter_sexual_content = models.BooleanField(default=False)  # Filter out sexual content
 
     def __str__(self):
         return f"Preferences for {self.user.username}"
@@ -63,7 +89,9 @@ class SocialPost(models.Model):
 
     user = models.ForeignKey(User, on_delete=models.CASCADE)
     content = models.TextField()
+    content_hash = models.CharField(max_length=64, blank=True, null=True, db_index=True)  # Hash of content for duplicate detection
     platform = models.CharField(max_length=20, choices=PLATFORM_CHOICES)
+    platform_id = models.CharField(max_length=100, blank=True, null=True)  # Unique identifier from the platform
     original_user = models.CharField(max_length=100, default="unknown")  # The actual username from the platform
     is_friend = models.BooleanField(default=False)
     is_family = models.BooleanField(default=False)
@@ -77,6 +105,7 @@ class SocialPost(models.Model):
     likes = models.IntegerField(default=0)
     comments = models.IntegerField(default=0)
     shares = models.IntegerField(default=0)
+    engagement_count = models.IntegerField(default=0)  # Total engagement (sum of likes, comments, shares)
     rating = models.IntegerField(default=0)  # User's custom rating/score
     starred = models.BooleanField(default=False)  # User can star important posts
     hidden = models.BooleanField(default=False)  # Allow users to hide specific posts
@@ -103,6 +132,10 @@ class SocialPost(models.Model):
     automated_category = models.CharField(max_length=100, blank=True)  # AI-detected category
     topic_vector = models.TextField(blank=True)  # JSON serialized topic vector
     
+    # User feedback and corrections
+    user_category = models.CharField(max_length=100, blank=True)  # User-corrected category
+    user_sentiment = models.FloatField(null=True, blank=True)  # User-provided sentiment
+    
     # Predictions and inferences (filled by ML pipeline)
     engagement_prediction = models.FloatField(null=True, blank=True)  # Predicted engagement score
     relevance_score = models.FloatField(null=True, blank=True)  # Relevance to user interests
@@ -112,6 +145,12 @@ class SocialPost(models.Model):
         return f"{self.original_user} - {self.platform} post"
     
     def save(self, *args, **kwargs):
+        # Generate content hash if not provided
+        if not self.content_hash and self.content:
+            # Create a hash from the content and platform info to identify duplicates
+            content_to_hash = f"{self.platform}:{self.content}"
+            self.content_hash = hashlib.md5(content_to_hash.encode('utf-8')).hexdigest()
+        
         # Process sentiment indicators if provided
         if not self.pk and hasattr(self, 'sentiment_indicators') and self.sentiment_indicators:
             if isinstance(self.sentiment_indicators, str):
@@ -143,6 +182,13 @@ class SocialPost(models.Model):
             models.Index(fields=['bizfluencer_score']),
             models.Index(fields=['is_sponsored']),
             models.Index(fields=['is_job_post']),
+            models.Index(fields=['content_hash']),
+        ]
+        constraints = [
+            models.UniqueConstraint(
+                fields=['user', 'content_hash'],
+                name='unique_content_per_user'
+            ),
         ]
 
 
@@ -234,6 +280,7 @@ class FilterPreset(models.Model):
     sentiment_threshold = models.FloatField(default=0.2)
     hide_job_posts = models.BooleanField(default=False)
     max_content_length = models.IntegerField(default=2000, null=True, blank=True)
+    filter_sexual_content = models.BooleanField(default=False)  # Filter out sexual content
     
     # Additional metadata
     icon = models.CharField(max_length=50, default='filter')  # Font Awesome icon name
@@ -261,6 +308,7 @@ class FilterPreset(models.Model):
         preferences.sentiment_threshold = self.sentiment_threshold
         preferences.hide_job_posts = self.hide_job_posts
         preferences.max_content_length = self.max_content_length
+        preferences.filter_sexual_content = self.filter_sexual_content
         
         return preferences
     

@@ -1,1 +1,13 @@
 .qodo
+venv/
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.env
+.Python
+*.sqlite3
+db.sqlite3
+.DS_Store
+.idea/
+.vscode/

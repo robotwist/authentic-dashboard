@@ -138,7 +138,7 @@ function checkBackendConnection() {
         const apiKey = settings.apiKey || '8484e01c2e0b4d368eb9a0f9b89807ad'; // Use our default key
         
         // First try a direct API call to avoid Chrome message passing issues
-        fetch('http://127.0.0.1:8080/api/health-check/', {
+        fetch('http://localhost:8000/api/health-check/', {
             method: 'GET',
             headers: {
                 'Content-Type': 'application/json',
@@ -538,7 +538,7 @@ function sendPostsToAPI(posts, platform, callback) {
         let failureCount = 0;
         
         posts.forEach(post => {
-            fetch('http://127.0.0.1:8080/api/process-ml/', {
+            fetch('http://localhost:8000/api/process-ml/', {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
@@ -702,75 +702,17 @@ function updateAPIKey() {
 
 // Function to open dashboard with proper auth handling
 function openDashboard() {
-    // Get the API key to help with authentication
-    chrome.storage.local.get(['settings'], function(result) {
-        const settings = result.settings || DEFAULT_SETTINGS;
-        const apiKey = settings.apiKey || '';
-        
-        // Create URL with API key if available
-        let dashboardUrl = 'http://127.0.0.1:8080/dashboard/';
-        if (apiKey) {
-            dashboardUrl += `?api_key=${encodeURIComponent(apiKey)}`;
-        }
-        
-        // Track dashboard opening attempts
-        const openAttempt = {
-            type: 'dashboard',
-            timestamp: new Date().toISOString()
-        };
-        
-        // Store the attempt to potentially handle errors later
-        chrome.storage.local.get(['dashboardAttempts'], function(data) {
-            const attempts = data.dashboardAttempts || [];
-            attempts.unshift(openAttempt);
-            
-            // Keep only the last 5 attempts
-            if (attempts.length > 5) {
-                attempts.pop();
-            }
-            
-            chrome.storage.local.set({ dashboardAttempts: attempts });
-            
-            // Open the dashboard
-            chrome.tabs.create({url: dashboardUrl});
-        });
+    chrome.storage.local.get(['apiEndpoint'], function(result) {
+        let dashboardUrl = `${result.apiEndpoint || 'http://localhost:8000'}/dashboard/`;
+        chrome.tabs.create({ url: dashboardUrl });
     });
 }
 
 // Function to open ML dashboard with proper auth handling
 function openMLDashboard() {
-    // Get the API key to help with authentication
-    chrome.storage.local.get(['settings'], function(result) {
-        const settings = result.settings || DEFAULT_SETTINGS;
-        const apiKey = settings.apiKey || '';
-        
-        // Create URL with API key if available
-        let mlDashboardUrl = 'http://127.0.0.1:8080/ml-dashboard/';
-        if (apiKey) {
-            mlDashboardUrl += `?api_key=${encodeURIComponent(apiKey)}`;
-        }
-        
-        // Track dashboard opening attempts
-        const openAttempt = {
-            type: 'ml-dashboard',
-            timestamp: new Date().toISOString()
-        };
-        
-        // Store the attempt to potentially handle errors later
-        chrome.storage.local.get(['dashboardAttempts'], function(data) {
-            const attempts = data.dashboardAttempts || [];
-            attempts.unshift(openAttempt);
-            
-            // Keep only the last 5 attempts
-            if (attempts.length > 5) {
-                attempts.pop();
-            }
-            
-            chrome.storage.local.set({ dashboardAttempts: attempts });
-            
-            // Open the dashboard
-            chrome.tabs.create({url: mlDashboardUrl});
-        });
+    chrome.storage.local.get(['apiEndpoint'], function(result) {
+        let mlDashboardUrl = `${result.apiEndpoint || 'http://localhost:8000'}/ml-dashboard/`;
+        chrome.tabs.create({ url: mlDashboardUrl });
     });
 }
 
@@ -782,7 +724,7 @@ function troubleshootDashboardAccess() {
         const apiKey = settings.apiKey || '8484e01c2e0b4d368eb9a0f9b89807ad'; // Use our default key
         
         // Check if the Django server is running
-        fetch('http://127.0.0.1:8080/api/health-check/', { 
+        fetch('http://localhost:8000/api/health-check/', { 
             method: 'GET',
             headers: {
                 'Content-Type': 'application/json',
@@ -804,7 +746,7 @@ function troubleshootDashboardAccess() {
             }
             
             // Check if API key is valid
-            fetch('http://127.0.0.1:8080/api/health-check/', {
+            fetch('http://localhost:8000/api/health-check/', {
                 method: 'GET',
                 headers: {
                     'Content-Type': 'application/json',

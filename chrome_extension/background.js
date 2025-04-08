@@ -372,149 +372,127 @@ function showNotification(title, message, type = 'info') {
 
 // Enhanced API endpoint check
 function checkAPIEndpoint() {
-  // Get the configured API endpoint
-  chrome.storage.local.get(['apiEndpoint', 'apiKey'], function(result) {
-    const apiEndpoint = result.apiEndpoint || 'http://127.0.0.1:8080';
-    const apiKey = result.apiKey || '8484e01c2e0b4d368eb9a0f9b89807ad'; // Default fallback API key
+    console.log("Checking API endpoint availability...");
     
-    // Try to connect to health check endpoint
-    fetch(`${apiEndpoint}/api/health-check/`, {
-      method: 'GET',
-      headers: {
-        'Content-Type': 'application/json',
-        'X-API-Key': apiKey
-      }
-    })
-    .then(response => {
-      if (!response.ok) {
-        throw new Error(`HTTP error! Status: ${response.status}`);
-      }
-      return response.json();
-    })
-    .then(data => {
-      console.log('API endpoint is available:', data);
-      
-      // Store API connection status
-      chrome.storage.local.set({
-        apiAvailable: true,
-        apiLastCheck: Date.now(),
-        apiStatus: 'connected',
-        apiError: null
-      });
-      
-      // Update any open popups with this information
-      chrome.runtime.sendMessage({
-        action: 'apiStatusUpdate',
-        status: 'connected',
-        message: 'API connection successful'
-      });
-    })
-    .catch(error => {
-      console.error('API endpoint is unavailable:', error);
-      
-      // Store API connection status
-      chrome.storage.local.set({
-        apiAvailable: false,
-        apiLastCheck: Date.now(),
-        apiStatus: 'error',
-        apiError: error.toString()
-      });
-      
-      // Update any open popups with this information
-      chrome.runtime.sendMessage({
-        action: 'apiStatusUpdate',
-        status: 'error',
-        message: `API connection error: ${error.toString()}`
-      });
-      
-      // Check if we need to update the API endpoint
-      const currentEndpoint = apiEndpoint;
-      
-      // Attempt with alternative endpoints
-      const alternativeEndpoints = [
-        'http://127.0.0.1:8080',
-        'http://localhost:8080',
-        'http://127.0.0.1:8000',
-        'http://localhost:8000'
-      ];
-      
-      // Find the current endpoint in the list or add it
-      if (!alternativeEndpoints.includes(currentEndpoint)) {
-        alternativeEndpoints.unshift(currentEndpoint);
-      }
-      
-      // Try each endpoint sequentially
-      tryNextEndpoint(alternativeEndpoints, 0, apiKey);
-    });
-  });
-}
+    chrome.storage.local.get(['apiEndpoint', 'apiKey'], function(result) {
+        const apiEndpoint = result.apiEndpoint || 'http://localhost:8000';
+        const apiKey = result.apiKey || '';
+        
+        console.log("Testing API endpoint:", apiEndpoint);
+        
+        fetch(`${apiEndpoint}/api/health-check/`, {
+            method: 'GET',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-API-Key': apiKey
+            }
+        })
+        .then(response => {
+            if (response.ok) {
+                return response.json();
+            }
+            throw new Error("API server not available");
+        })
+        .then(data => {
+            console.log("API server available:", data);
+            
+            // Store API status
+            chrome.storage.local.set({
+                apiAvailable: true,
+                apiLastCheck: Date.now(),
+                apiEndpoint: apiEndpoint
+            });
+            
+            // Update badge to green
+            chrome.action.setBadgeBackgroundColor({ color: '#4CAF50' });
+            chrome.action.setBadgeText({ text: '✓' });
+            
+            setTimeout(() => {
+                chrome.action.setBadgeText({ text: '' });
+            }, 5000);
+        })
+        .catch(error => {
+            console.error("API server not available:", error);
+            
+            // Try alternative endpoints
+            const currentEndpoint = apiEndpoint;
+            const alternativeEndpoints = [
+                'http://localhost:8000',
+                'http://127.0.0.1:8000',
+                'http://0.0.0.0:8000'
+            ];
 
-// Helper function to try alternative endpoints
-function tryNextEndpoint(endpoints, index, apiKey) {
-  // Stop if we've tried all endpoints
-  if (index >= endpoints.length) {
-    console.error('All API endpoints failed');
-    return;
-  }
-  
-  const endpoint = endpoints[index];
-  
-  // Skip the current endpoint (we already tried it)
-  if (index === 0) {
-    tryNextEndpoint(endpoints, index + 1, apiKey);
-    return;
-  }
-  
-  console.log(`Trying alternative endpoint: ${endpoint}`);
-  
-  // Try to connect to health check endpoint
-  fetch(`${endpoint}/api/health-check/`, {
-    method: 'GET',
-    headers: {
-      'Content-Type': 'application/json',
-      'X-API-Key': apiKey
-    }
-  })
-  .then(response => {
-    if (!response.ok) {
-      throw new Error(`HTTP error! Status: ${response.status}`);
-    }
-    return response.json();
-  })
-  .then(data => {
-    console.log('Alternative API endpoint is available:', data);
-    
-    // Store the working endpoint
-    chrome.storage.local.set({
-      apiEndpoint: endpoint,
-      apiAvailable: true,
-      apiLastCheck: Date.now(),
-      apiStatus: 'connected',
-      apiError: null
+            // Function to try the next endpoint
+            const tryNextEndpoint = (index) => {
+                if (index >= alternativeEndpoints.length) {
+                    // If all alternatives fail, update status
+                    chrome.storage.local.set({
+                        apiAvailable: false,
+                        apiLastCheck: Date.now()
+                    });
+                    
+                    // Update badge to red
+                    chrome.action.setBadgeBackgroundColor({ color: '#F44336' });
+                    chrome.action.setBadgeText({ text: '!' });
+                    
+                    return;
+                }
+                
+                const endpoint = alternativeEndpoints[index];
+                
+                // Skip current endpoint
+                if (endpoint === currentEndpoint) {
+                    tryNextEndpoint(index + 1);
+                    return;
+                }
+                
+                console.log(`Trying alternative endpoint: ${endpoint}`);
+                
+                fetch(`${endpoint}/api/health-check/`, {
+                    method: 'GET'
+                })
+                .then(response => {
+                    if (response.ok) {
+                        console.log(`Alternative endpoint available: ${endpoint}`);
+                        
+                        // Store the working endpoint
+                        chrome.storage.local.set({
+                            apiAvailable: true,
+                            apiLastCheck: Date.now(),
+                            apiEndpoint: endpoint,
+                            apiAutoDetected: true
+                        });
+                        
+                        // Update badge
+                        chrome.action.setBadgeBackgroundColor({ color: '#FFC107' });
+                        chrome.action.setBadgeText({ text: '✓' });
+                        
+                        setTimeout(() => {
+                            chrome.action.setBadgeText({ text: '' });
+                        }, 5000);
+                        
+                        // Notify user that we found an alternative endpoint
+                        chrome.notifications.create({
+                            type: 'basic',
+                            iconUrl: 'icon128.png',
+                            title: 'API Endpoint Changed',
+                            message: `Connected to alternative endpoint: ${endpoint}`
+                        });
+                    } else {
+                        // Try next endpoint
+                        tryNextEndpoint(index + 1);
+                    }
+                })
+                .catch(() => {
+                    // Try next endpoint
+                    tryNextEndpoint(index + 1);
+                });
+            };
+            
+            // Start trying alternatives
+            tryNextEndpoint(0);
+        });
     });
-    
-    // Update any open popups with this information
-    chrome.runtime.sendMessage({
-      action: 'apiStatusUpdate',
-      status: 'connected',
-      message: `Connected to alternative endpoint: ${endpoint}`
-    });
-    
-    // Show notification about the endpoint change
-    chrome.notifications.create({
-      type: 'basic',
-      iconUrl: 'icon128.png',
-      title: 'API Endpoint Updated',
-      message: `Switched to working endpoint: ${endpoint}`,
-      priority: 1
-    });
-  })
-  .catch(error => {
-    console.error(`Alternative endpoint ${endpoint} failed:`, error);
-    
-    // Try the next endpoint
-    tryNextEndpoint(endpoints, index + 1, apiKey);
-  });
 }
 
 // Run API endpoint check every 5 minutes

@@ -1,0 +1,262 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Authentic Dashboard Extension Test</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            line-height: 1.6;
+        }
+        h1 {
+            color: #4a6ee0;
+            border-bottom: 2px solid #eee;
+            padding-bottom: 10px;
+        }
+        .card {
+            border: 1px solid #ddd;
+            border-radius: 8px;
+            padding: 16px;
+            margin-bottom: 20px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        button {
+            background-color: #4a6ee0;
+            color: white;
+            border: none;
+            padding: 8px 16px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 14px;
+        }
+        button:hover {
+            background-color: #3a5bc0;
+        }
+        .result {
+            background-color: #f5f5f5;
+            padding: 10px;
+            border-radius: 4px;
+            white-space: pre-wrap;
+            font-family: monospace;
+            max-height: 200px;
+            overflow-y: auto;
+        }
+        .success { color: green; }
+        .error { color: red; }
+        .warning { color: orange; }
+    </style>
+</head>
+<body>
+    <h1>Authentic Dashboard Extension Test</h1>
+    
+    <div class="card">
+        <h2>Extension Connection Test</h2>
+        <p>This page tests if the extension's background service is running correctly.</p>
+        <button id="testConnection">Test Connection</button>
+        <div id="connectionResult" class="result" style="margin-top: 10px;"></div>
+    </div>
+    
+    <div class="card">
+        <h2>API Endpoint Test</h2>
+        <p>Tests if the extension can connect to the API endpoint.</p>
+        <div>
+            <label for="apiEndpoint">API Endpoint:</label>
+            <input type="text" id="apiEndpoint" value="http://127.0.0.1:8000" style="width: 250px;">
+        </div>
+        <button id="testApiEndpoint" style="margin-top: 10px;">Test API Connection</button>
+        <div id="apiResult" class="result" style="margin-top: 10px;"></div>
+    </div>
+    
+    <div class="card">
+        <h2>Storage Test</h2>
+        <p>Tests if the extension can access its storage.</p>
+        <button id="testStorage">Test Storage</button>
+        <div id="storageResult" class="result" style="margin-top: 10px;"></div>
+    </div>
+    
+    <div class="card">
+        <h2>Run Full Diagnostics</h2>
+        <p>Runs a comprehensive diagnostic check on the extension's functionality.</p>
+        <button id="runDiagnostics">Run Diagnostics</button>
+        <div id="diagnosticsResult" class="result" style="margin-top: 10px;"></div>
+    </div>
+    
+    <script>
+        // Connection test
+        document.getElementById('testConnection').addEventListener('click', function() {
+            const resultDiv = document.getElementById('connectionResult');
+            resultDiv.innerHTML = "Testing connection to extension background service...";
+            
+            try {
+                chrome.runtime.sendMessage({ action: 'ping', source: 'test.html' }, function(response) {
+                    if (chrome.runtime.lastError) {
+                        resultDiv.innerHTML = `<span class="error">❌ ERROR: ${chrome.runtime.lastError.message}</span>`;
+                        if (chrome.runtime.lastError.message.includes('receiving end does not exist')) {
+                            resultDiv.innerHTML += `<br><br><span class="warning">This suggests the background script is not running properly. Make sure the extension is properly installed and enabled.</span>`;
+                        }
+                    } else if (response && response.action === 'pong') {
+                        resultDiv.innerHTML = `<span class="success">✅ SUCCESS: Connected to extension background service!</span><br>`;
+                        resultDiv.innerHTML += `Response source: ${response.source}<br>`;
+                        resultDiv.innerHTML += `Response time: ${new Date(response.timestamp).toLocaleTimeString()}`;
+                    } else {
+                        resultDiv.innerHTML = `<span class="warning">⚠️ WARNING: Received unexpected response:</span><br>${JSON.stringify(response, null, 2)}`;
+                    }
+                });
+            } catch (error) {
+                resultDiv.innerHTML = `<span class="error">❌ EXCEPTION: ${error.message}</span>`;
+            }
+        });
+        
+        // API test
+        document.getElementById('testApiEndpoint').addEventListener('click', function() {
+            const apiEndpoint = document.getElementById('apiEndpoint').value;
+            const resultDiv = document.getElementById('apiResult');
+            resultDiv.innerHTML = `Testing connection to API endpoint: ${apiEndpoint}...`;
+            
+            try {
+                fetch(`${apiEndpoint}/api/health-check/`, {
+                    method: 'GET',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-API-Key': '8484e01c2e0b4d368eb9a0f9b89807ad' // Default key
+                    }
+                })
+                .then(response => {
+                    if (!response.ok) {
+                        throw new Error(`HTTP error! Status: ${response.status}`);
+                    }
+                    return response.json();
+                })
+                .then(data => {
+                    resultDiv.innerHTML = `<span class="success">✅ SUCCESS: Connected to API endpoint!</span><br>`;
+                    resultDiv.innerHTML += `Response: ${JSON.stringify(data, null, 2)}`;
+                    
+                    // Update the API endpoint in extension storage
+                    chrome.storage.local.set({ apiEndpoint: apiEndpoint }, function() {
+                        if (chrome.runtime.lastError) {
+                            resultDiv.innerHTML += `<br><span class="error">Failed to save endpoint to extension storage: ${chrome.runtime.lastError.message}</span>`;
+                        } else {
+                            resultDiv.innerHTML += `<br><span class="success">API endpoint saved to extension storage.</span>`;
+                        }
+                    });
+                })
+                .catch(error => {
+                    resultDiv.innerHTML = `<span class="error">❌ ERROR: ${error.message}</span>`;
+                });
+            } catch (error) {
+                resultDiv.innerHTML = `<span class="error">❌ EXCEPTION: ${error.message}</span>`;
+            }
+        });
+        
+        // Storage test
+        document.getElementById('testStorage').addEventListener('click', function() {
+            const resultDiv = document.getElementById('storageResult');
+            resultDiv.innerHTML = "Testing extension storage access...";
+            
+            try {
+                const testData = { 
+                    test: "value-" + Date.now(),
+                    timestamp: Date.now()
+                };
+                
+                chrome.storage.local.set(testData, function() {
+                    if (chrome.runtime.lastError) {
+                        resultDiv.innerHTML = `<span class="error">❌ ERROR writing to storage: ${chrome.runtime.lastError.message}</span>`;
+                    } else {
+                        resultDiv.innerHTML = `<span class="success">✅ Successfully wrote to storage</span><br>`;
+                        resultDiv.innerHTML += `Data written: ${JSON.stringify(testData, null, 2)}<br><br>`;
+                        
+                        // Now read it back
+                        chrome.storage.local.get(['test', 'timestamp'], function(result) {
+                            if (chrome.runtime.lastError) {
+                                resultDiv.innerHTML += `<span class="error">❌ ERROR reading from storage: ${chrome.runtime.lastError.message}</span>`;
+                            } else if (result.test === testData.test) {
+                                resultDiv.innerHTML += `<span class="success">✅ Successfully read from storage</span><br>`;
+                                resultDiv.innerHTML += `Data read: ${JSON.stringify(result, null, 2)}`;
+                            } else {
+                                resultDiv.innerHTML += `<span class="warning">⚠️ Data read doesn't match what was written</span><br>`;
+                                resultDiv.innerHTML += `Expected: ${JSON.stringify(testData, null, 2)}<br>`;
+                                resultDiv.innerHTML += `Actual: ${JSON.stringify(result, null, 2)}`;
+                            }
+                        });
+                    }
+                });
+            } catch (error) {
+                resultDiv.innerHTML = `<span class="error">❌ EXCEPTION: ${error.message}</span>`;
+            }
+        });
+        
+        // Full diagnostics
+        document.getElementById('runDiagnostics').addEventListener('click', function() {
+            const resultDiv = document.getElementById('diagnosticsResult');
+            resultDiv.innerHTML = "Running full diagnostics...\n\n";
+            
+            // Create a wrapper for console.log to capture output
+            const originalLog = console.log;
+            const originalError = console.error;
+            const originalWarn = console.warn;
+            
+            console.log = function() {
+                // Call the original console.log
+                originalLog.apply(console, arguments);
+                // Add to our output
+                const args = Array.from(arguments).join(' ');
+                resultDiv.innerHTML += args + '\n';
+            };
+            
+            console.error = function() {
+                // Call the original console.error
+                originalError.apply(console, arguments);
+                // Add to our output with error styling
+                const args = Array.from(arguments).join(' ');
+                resultDiv.innerHTML += `<span class="error">${args}</span>\n`;
+            };
+            
+            console.warn = function() {
+                // Call the original console.warn
+                originalWarn.apply(console, arguments);
+                // Add to our output with warning styling
+                const args = Array.from(arguments).join(' ');
+                resultDiv.innerHTML += `<span class="warning">${args}</span>\n`;
+            };
+            
+            // Include the test_connection.js script dynamically
+            try {
+                const script = document.createElement('script');
+                script.src = chrome.runtime.getURL('test_connection.js');
+                script.onload = function() {
+                    console.log('Test script loaded and executed');
+                    
+                    // Restore original console methods after execution
+                    setTimeout(() => {
+                        console.log = originalLog;
+                        console.error = originalError;
+                        console.warn = originalWarn;
+                    }, 5000);
+                };
+                script.onerror = function() {
+                    console.error('Failed to load test script');
+                    resultDiv.innerHTML += '<br><span class="error">Failed to load the diagnostic script. Make sure test_connection.js is included in the extension.</span>';
+                    
+                    // Restore original console methods
+                    console.log = originalLog;
+                    console.error = originalError;
+                    console.warn = originalWarn;
+                };
+                document.head.appendChild(script);
+            } catch (error) {
+                resultDiv.innerHTML += `<span class="error">❌ ERROR: ${error.message}</span>\n`;
+                
+                // Restore original console methods
+                console.log = originalLog;
+                console.error = originalError;
+                console.warn = originalWarn;
+            }
+        });
+    </script>
+</body>
+</html> 
