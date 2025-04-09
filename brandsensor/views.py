@@ -19,6 +19,8 @@ from .models import SocialPost, UserPreference, Brand, BehaviorLog, SocialConnec
 from .ml_processor import process_post, process_user_posts
 from django.contrib.auth.models import User
 from django.contrib.auth import authenticate, login, logout
+from .utils import get_user_data
+from .decorators import api_key_required
 
 def landing(request):
     """
@@ -36,40 +38,52 @@ def user_settings(request):
     User settings and profile view
     """
     user = request.user
-    
-    # Get user preferences or create defaults
-    preferences, created = UserPreference.objects.get_or_create(user=user)
-    
-    # Get API keys
-    api_keys = APIKey.objects.filter(user=user)
-    
-    # Get user statistics
-    post_count = SocialPost.objects.filter(user=user).count()
-    platform_stats = SocialPost.objects.filter(user=user).values('platform').annotate(count=Count('id'))
-    
+
+    # Fetch user data using the utility function
+    user_data = get_user_data(user)
+
     if request.method == 'POST':
         # Handle settings update
-        # Update user profile if needed
-        if 'email' in request.POST:
-            user.email = request.POST.get('email')
-            user.save()
-        
-        # Update notification settings
-        preferences.email_notifications = 'email_notifications' in request.POST
-        preferences.browser_notifications = 'browser_notifications' in request.POST
-        preferences.save()
-        
+        handle_user_settings_update(request, user, user_data["preferences"])
         return redirect('user_settings')
-    
-    context = {
+
+    # Prepare context for rendering
+    context = prepare_user_settings_context(
+        user,
+        user_data["preferences"],
+        user_data["api_keys"],
+        user_data["post_count"],
+        user_data["platform_stats"],
+    )
+    return render(request, 'brandsensor/user_settings.html', context)
+
+
+# Helper function to handle user settings update
+def handle_user_settings_update(request, user, preferences):
+    """
+    Update user profile and preferences based on the POST request.
+    """
+    if 'email' in request.POST:
+        user.email = request.POST.get('email')
+        user.save()
+
+    preferences.email_notifications = 'email_notifications' in request.POST
+    preferences.browser_notifications = 'browser_notifications' in request.POST
+    preferences.save()
+
+
+# Helper function to prepare context for rendering
+def prepare_user_settings_context(user, preferences, api_keys, post_count, platform_stats):
+    """
+    Prepare the context dictionary for rendering the user settings page.
+    """
+    return {
         'user': user,
         'preferences': preferences,
         'api_keys': api_keys,
         'post_count': post_count,
         'platform_stats': platform_stats,
     }
-    
-    return render(request, 'brandsensor/user_settings.html', context)
 
 def user_login(request):
     """
@@ -646,20 +660,17 @@ def mark_family(request, username, platform):
 # ------------------------------
 
 @csrf_exempt
+@api_key_required
 def api_log_behavior(request):
     """
     Accepts POST requests with behavior log data from the Chrome extension.
-    Uses API key authentication.
     """
     if request.method != "POST":
         return JsonResponse({"error": "Only POST allowed"}, status=405)
+
     try:
-        # Get user from API key
-        user = get_user_from_api_key(request)
-        if not user:
-            return JsonResponse({"error": "Invalid or missing API key"}, status=401)
-            
         data = json.loads(request.body)
+        user = request.user  # User is now attached by the decorator
         brand_name = data.get("brand", "")
         brand_domain = data.get("domain", "")
         behavior_type = data.get("behavior_type")

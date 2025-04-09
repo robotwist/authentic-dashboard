@@ -94,12 +94,24 @@ let lastServerCheckTime = 0;
 const SERVER_CHECK_COOLDOWN = 10000; // Check server at most every 10 seconds
 let isServerAvailable = false;
 
-// Function to check if server is available
+// Function to check if the server is available
 function checkServerAvailability(callback) {
-    // Log when we're checking the server availability
     console.log("Checking server availability...");
-
-    // Check if we already have a cached result that's not too old
+    
+    // Use the centralized API client if available
+    if (window.authDashboardAPI) {
+        window.authDashboardAPI.checkAvailability()
+            .then(status => {
+                callback(status.available, status.endpoint, status.apiKey);
+            })
+            .catch(error => {
+                console.error("Error checking server with API client:", error);
+                callback(false, null, null);
+            });
+        return;
+    }
+    
+    // Fallback to legacy method if API client isn't available
     chrome.storage.local.get(['apiAvailable', 'apiLastCheck', 'apiEndpoint', 'apiKey'], function(result) {
         const now = Date.now();
         const lastCheck = result.apiLastCheck || 0;

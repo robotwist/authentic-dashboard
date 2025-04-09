@@ -74,6 +74,7 @@ class UserPreference(models.Model):
     hide_job_posts = models.BooleanField(default=False)  # Hide job postings
     max_content_length = models.IntegerField(default=2000, null=True, blank=True)  # Max post length to show
     filter_sexual_content = models.BooleanField(default=False)  # Filter out sexual content
+    rating = models.IntegerField(null=True, blank=True, help_text="User rating for specific items (1-5 stars).")
 
     def __str__(self):
         return f"Preferences for {self.user.username}"

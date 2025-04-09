@@ -33,12 +33,19 @@
           "*://*.facebook.com/*",
           "*://*.linkedin.com/*"
         ],
-        "js": ["content.js"]
+        "js": ["api_client.js", "content.js"]
       }
     ],
     "background": {
-      "service_worker": "background.js"
+      "service_worker": "background.js",
+      "type": "module"
     },
+    "web_accessible_resources": [
+      {
+        "resources": ["api_client.js"],
+        "matches": ["<all_urls>"]
+      }
+    ],
     "icons": {
       "16": "icon16.png",
       "48": "icon48.png",

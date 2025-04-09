@@ -528,7 +528,20 @@ function sendPostsToAPI(posts, platform, callback) {
         return;
     }
     
-    // Get API key from settings
+    // Use the centralized API client if available
+    if (window.authDashboardAPI) {
+        window.authDashboardAPI.sendPosts(posts, platform)
+            .then(result => {
+                callback(result.success, result.successCount);
+            })
+            .catch(error => {
+                console.error('Error sending posts to API:', error);
+                callback(false, 0);
+            });
+        return;
+    }
+    
+    // Fallback to legacy method if API client isn't available
     chrome.storage.local.get(['settings'], function(result) {
         const settings = result.settings || DEFAULT_SETTINGS;
         const apiKey = settings.apiKey || '8484e01c2e0b4d368eb9a0f9b89807ad'; // Use our default key if none set
