@@ -21,6 +21,7 @@ urlpatterns = [
     path('api/process_ml/', views.process_ml, name='process_ml'),
     path('api/process-ml/', views.process_ml, name='process_ml_dash'),
     
-    # New ML Dashboard
+    # ML Dashboards
     path('ml-dashboard/', views.ml_dashboard, name='ml_dashboard'),
+    path('ml-insights/', views.ml_insights, name='ml_insights'),
 ]

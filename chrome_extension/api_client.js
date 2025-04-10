@@ -204,17 +204,25 @@ class AuthenticDashboardAPI {
       apiEndpoint: endpoint || this.config.currentEndpoint
     });
     
-    // Update badge
-    if (available) {
-      chrome.action.setBadgeBackgroundColor({ color: '#4CAF50' });
-      chrome.action.setBadgeText({ text: '✓' });
-      
-      setTimeout(() => {
-        chrome.action.setBadgeText({ text: '' });
-      }, 5000);
+    // Update badge - only if chrome.action API is available
+    if (typeof chrome !== 'undefined' && chrome.action) {
+      try {
+        if (available) {
+          chrome.action.setBadgeBackgroundColor({ color: '#4CAF50' });
+          chrome.action.setBadgeText({ text: '✓' });
+          
+          setTimeout(() => {
+            chrome.action.setBadgeText({ text: '' });
+          }, 5000);
+        } else {
+          chrome.action.setBadgeBackgroundColor({ color: '#F44336' });
+          chrome.action.setBadgeText({ text: '!' });
+        }
+      } catch (e) {
+        console.log('Badge update failed, likely running in content script context:', e);
+      }
     } else {
-      chrome.action.setBadgeBackgroundColor({ color: '#F44336' });
-      chrome.action.setBadgeText({ text: '!' });
+      console.log('Chrome action API not available in this context - skipping badge update');
     }
   }
   

@@ -306,6 +306,28 @@
                     </div>
                 </div>
             </div>
+
+            <!-- After the stats section, add a new ML Insights card -->
+            <div class="stat-card">
+                <h3>ML Insights</h3>
+                <div class="ml-insights-preview">
+                    <div class="insights-summary">
+                        <p>
+                            <i class="fas fa-brain text-primary"></i> 
+                            <strong>{{ ml_processed_count|default:"0" }}</strong> posts analyzed with ML
+                        </p>
+                        <p>
+                            <i class="fas fa-images text-primary"></i>
+                            <strong>{{ image_posts_count|default:"0" }}</strong> posts with image analysis
+                        </p>
+                    </div>
+                    <div class="ml-actions mt-3">
+                        <a href="{% url 'ml_insights' %}" class="btn btn-primary btn-sm">
+                            <i class="fas fa-lightbulb mr-1"></i> View ML Insights
+                        </a>
+                    </div>
+                </div>
+            </div>
         </div>
 
         <div class="posts-container">
@@ -403,6 +425,13 @@
                             <input type="hidden" name="action" value="hide">
                             <button type="submit" class="action-btn hide-btn">
                                 Hide
+                            </button>
+                        </form>
+                        <form action="{% url 'post_action' post.id %}" method="post" class="ajax-form">
+                            {% csrf_token %}
+                            <input type="hidden" name="action" value="hide_similar">
+                            <button type="submit" class="action-btn hide-similar-btn" title="Hide this post and similar content">
+                                Hide Similar
                             </button>
                         </form>
                         <a href="{% url 'post_detail' post.id %}" class="action-btn detail-btn">View Details</a>
@@ -894,6 +923,19 @@
     
     .family-mode-active .post-card.family-post {
         box-shadow: 0 0 0 1px #c8e6c9, 0 4px 12px rgba(56, 142, 60, 0.15);
+    }
+    
+    .action-btn.hide-btn {
+        color: #dc3545;
+    }
+    
+    .action-btn.hide-similar-btn {
+        color: #fd7e14;
+        font-size: 0.8rem; /* Make it a bit smaller to fit */
+    }
+    
+    .action-btn.detail-btn {
+        color: var(--primary);
     }
 </style>
 {% endblock %}

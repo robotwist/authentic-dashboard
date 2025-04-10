@@ -7,6 +7,8 @@ This module provides ML-powered analysis of social media content:
 - Toxicity detection
 - Engagement prediction
 - Content relevance scoring
+- Image analysis with CLIP, BLIP, AVA, DeepFace
+- Perceptual hashing for image similarity
 
 Ultimate Directive
 
@@ -22,14 +24,23 @@ Ethical technology principles
 
 import json
 import re
+import logging
+import base64
+import hashlib
+from io import BytesIO
 from collections import Counter
 from datetime import datetime
 from django.utils import timezone
 from django.db.models import Avg
 from .models import SocialPost, MLModel, MLPredictionLog, UserPreference
 from django.db.utils import IntegrityError
+from django.conf import settings
+import requests
+from urllib.parse import urlparse
 
-# Try to import numpy, but fallback to basic calculations if not available
+logger = logging.getLogger(__name__)
+
+# Try to import the required libraries, fallback to basic functionality if not available
 try:
     import numpy as np
     HAS_NUMPY = True
@@ -45,6 +56,71 @@ except ImportError:
     def random_float(min_val=0, max_val=1):
         import random
         return random.uniform(min_val, max_val)
+
+# Try to import additional image analysis libraries
+try:
+    import torch
+    HAS_TORCH = True
+except ImportError:
+    HAS_TORCH = False
+
+try:
+    from PIL import Image
+    HAS_PIL = True
+except ImportError:
+    HAS_PIL = False
+
+# Check for transformers library
+try:
+    from transformers import pipeline, AutoProcessor, AutoModelForZeroShotImageClassification
+    HAS_TRANSFORMERS = True
+except ImportError:
+    HAS_TRANSFORMERS = False
+
+# Image model flags
+HAS_CLIP = False
+HAS_BLIP = False
+HAS_DEEPFACE = False
+HAS_YOLO = False
+
+# Only try to load these if we have torch and PIL
+if HAS_TORCH and HAS_PIL and HAS_TRANSFORMERS:
+    try:
+        # Initialize CLIP model for image-text matching
+        from transformers import CLIPProcessor, CLIPModel
+        CLIP_MODEL = CLIPModel.from_pretrained("openai/clip-vit-base-patch32")
+        CLIP_PROCESSOR = CLIPProcessor.from_pretrained("openai/clip-vit-base-patch32")
+        HAS_CLIP = True
+        logger.info("CLIP model loaded successfully")
+    except Exception as e:
+        logger.warning(f"Failed to load CLIP model: {str(e)}")
+
+    try:
+        # Initialize BLIP model for image captioning
+        from transformers import BlipProcessor, BlipForConditionalGeneration
+        BLIP_PROCESSOR = BlipProcessor.from_pretrained("Salesforce/blip-image-captioning-base")
+        BLIP_MODEL = BlipForConditionalGeneration.from_pretrained("Salesforce/blip-image-captioning-base")
+        HAS_BLIP = True
+        logger.info("BLIP model loaded successfully")
+    except Exception as e:
+        logger.warning(f"Failed to load BLIP model: {str(e)}")
+
+try:
+    # Try to import DeepFace for face analysis
+    from deepface import DeepFace
+    HAS_DEEPFACE = True
+    logger.info("DeepFace loaded successfully")
+except Exception as e:
+    logger.warning(f"DeepFace not available: {str(e)}")
+
+try:
+    # Try to import YOLOv5 for object detection
+    import yolov5
+    YOLO_MODEL = yolov5.load('yolov5s')
+    HAS_YOLO = True
+    logger.info("YOLOv5 loaded successfully")
+except Exception as e:
+    logger.warning(f"YOLOv5 not available: {str(e)}")
 
 # Dictionary of stop words to filter out from text analysis
 STOP_WORDS = {
@@ -319,57 +395,52 @@ def calculate_relevance(post, user_id):
 
 def process_post(post):
     """
-    Process a post with all available ML functions
-    Updates the post with ML-derived fields
+    Process a single post with machine learning models.
     """
-    # Skip if already processed
-    if (post.automated_category and post.sentiment_score is not None and 
-        post.relevance_score is not None and post.toxicity_score is not None):
-        return post
-    
-    # Analyze sentiment if not already done
-    if post.sentiment_score is None:
-        sentiment_result = analyze_sentiment(post.content)
-        post.sentiment_score = sentiment_result['sentiment_score']
-        post.positive_indicators = sentiment_result['positive_indicators']
-        post.negative_indicators = sentiment_result['negative_indicators']
-    
-    # Classify topics if not already done
-    if not post.automated_category:
-        topic_scores, top_topic = classify_topics(post.content)
-        post.automated_category = top_topic
-        post.topic_vector = json.dumps(topic_scores)
-    
-    # Calculate toxicity score
-    if post.toxicity_score is None:
-        post.toxicity_score = calculate_toxicity(post.content)
-    
-    # Predict engagement
-    if post.engagement_prediction is None:
-        post.engagement_prediction = predict_engagement(post)
-    
-    # Calculate relevance score for the user
-    if post.relevance_score is None:
-        post.relevance_score = calculate_relevance(post, post.user_id)
-    
-    # Save the updated post with error handling for duplicate content
+    logger.info("Processing post ID: %s", post.id)
     try:
-        post.save()
-    except IntegrityError as e:
-        # Log the error but continue processing other posts
-        print(f"IntegrityError processing post: {str(e)}")
-        # If this is a duplicate post, try to find the existing post and return that
-        if 'unique constraint' in str(e).lower() and post.content_hash:
-            try:
-                existing_post = SocialPost.objects.get(
-                    user_id=post.user_id, 
-                    content_hash=post.content_hash
-                )
-                return existing_post
-            except SocialPost.DoesNotExist:
-                pass
-    
-    return post
+        # Skip if already processed
+        if (post.automated_category and post.sentiment_score is not None and 
+            post.relevance_score is not None and post.toxicity_score is not None):
+            return post
+        
+        # Analyze sentiment if not already done
+        if post.sentiment_score is None:
+            sentiment_result = analyze_sentiment(post.content)
+            post.sentiment_score = sentiment_result['sentiment_score']
+            post.positive_indicators = sentiment_result['positive_indicators']
+            post.negative_indicators = sentiment_result['negative_indicators']
+        
+        # Classify topics if not already done
+        if not post.automated_category:
+            topic_scores, top_topic = classify_topics(post.content)
+            post.automated_category = top_topic
+            post.topic_vector = json.dumps(topic_scores)
+        
+        # Calculate toxicity score
+        if post.toxicity_score is None:
+            post.toxicity_score = calculate_toxicity(post.content)
+        
+        # Predict engagement
+        if post.engagement_prediction is None:
+            post.engagement_prediction = predict_engagement(post)
+        
+        # Calculate relevance score for the user
+        if post.relevance_score is None:
+            post.relevance_score = calculate_relevance(post, post.user_id)
+        
+        # Try to save the post, catching any IntegrityError
+        try:
+            post.save()
+            return post
+        except IntegrityError as e:
+            logger.warning(f"IntegrityError saving post {post.id}: {str(e)}")
+            # Refresh the post from DB to get the current version
+            post.refresh_from_db()
+            return post
+    except Exception as e:
+        logger.error(f"Error processing post {post.id}: {str(e)}")
+        return post
 
 def process_unprocessed_posts(limit=100):
     """
@@ -411,4 +482,354 @@ def process_user_posts(user_id, limit=100):
             # Log the error but continue with other posts
             print(f"Error processing post {post.id}: {str(e)}")
     
-    return processed_count 
+    return processed_count
+
+# New image analysis functions
+
+def fetch_image_from_url(image_url):
+    """Fetch an image from URL and return as PIL Image object"""
+    if not HAS_PIL:
+        logger.warning("PIL not available for image processing")
+        return None
+        
+    try:
+        response = requests.get(image_url, timeout=10)
+        if response.status_code == 200:
+            img = Image.open(BytesIO(response.content))
+            return img
+        else:
+            logger.warning(f"Failed to fetch image from {image_url} - Status code: {response.status_code}")
+            return None
+    except Exception as e:
+        logger.error(f"Error fetching image from {image_url}: {str(e)}")
+        return None
+
+def get_perceptual_hash(image):
+    """Generate a perceptual hash for an image for similarity comparison"""
+    if not HAS_PIL:
+        return None
+        
+    try:
+        # Resize to 32x32 and convert to grayscale
+        img = image.resize((32, 32), Image.LANCZOS).convert('L')
+        
+        # Convert to numpy array if available
+        if HAS_NUMPY:
+            import numpy as np
+            pixels = np.array(img)
+            # Calculate average pixel value
+            avg_pixel = pixels.mean()
+            # Create hash (1 if pixel value > avg, 0 otherwise)
+            diff = pixels > avg_pixel
+            # Convert to a 64-character hexadecimal string
+            hash_value = ''.join('1' if d else '0' for d in diff.flatten())
+            hash_hex = hex(int(hash_value, 2))[2:].zfill(16)
+            return hash_hex
+        else:
+            # Fallback without numpy
+            pixels = list(img.getdata())
+            avg_pixel = sum(pixels) / len(pixels)
+            hash_value = ''.join('1' if p > avg_pixel else '0' for p in pixels)
+            hash_hex = hex(int(hash_value[:64], 2))[2:].zfill(16)
+            return hash_hex
+    except Exception as e:
+        logger.error(f"Error generating perceptual hash: {str(e)}")
+        return None
+
+def analyze_image_with_clip(image, text_queries):
+    """
+    Use CLIP to analyze image alignment with text queries
+    Returns relevance scores for each query
+    """
+    if not HAS_CLIP or not HAS_TORCH:
+        logger.warning("CLIP model not available")
+        return {}
+        
+    try:
+        # Prepare text and image inputs
+        inputs = CLIP_PROCESSOR(
+            text=text_queries,
+            images=image,
+            return_tensors="pt",
+            padding=True
+        )
+        
+        # Get model predictions
+        with torch.no_grad():
+            outputs = CLIP_MODEL(**inputs)
+            logits_per_image = outputs.logits_per_image
+            probs = logits_per_image.softmax(dim=1)
+        
+        # Process results
+        results = {}
+        for i, query in enumerate(text_queries):
+            results[query] = probs[0][i].item()
+            
+        return results
+    except Exception as e:
+        logger.error(f"Error analyzing image with CLIP: {str(e)}")
+        return {}
+
+def generate_image_caption(image):
+    """Generate caption for image using BLIP"""
+    if not HAS_BLIP or not HAS_TORCH:
+        logger.warning("BLIP model not available")
+        return "Image caption unavailable"
+        
+    try:
+        # Process the image
+        inputs = BLIP_PROCESSOR(image, return_tensors="pt")
+        
+        # Generate caption
+        with torch.no_grad():
+            generated_ids = BLIP_MODEL.generate(**inputs, max_length=30)
+            caption = BLIP_PROCESSOR.decode(generated_ids[0], skip_special_tokens=True)
+            
+        return caption
+    except Exception as e:
+        logger.error(f"Error generating caption with BLIP: {str(e)}")
+        return "Error generating caption"
+
+def analyze_image_aesthetics(image):
+    """
+    Analyze image aesthetics (placeholder for AVA model)
+    In a real implementation, we would use a model trained on the AVA dataset
+    """
+    if not HAS_PIL:
+        return {"aesthetic_score": 5.0}  # Default score
+    
+    try:
+        # Simple aesthetic score based on image properties
+        # In a real implementation, use a trained model instead
+        width, height = image.size
+        aspect_ratio = width / height
+        
+        # Ideal aspect ratios (approximate golden ratio)
+        ideal_ratio = 1.618
+        ratio_score = 10 - min(abs(aspect_ratio - ideal_ratio), abs(1/aspect_ratio - ideal_ratio)) * 5
+        
+        # Brightness and contrast assessment
+        if HAS_NUMPY:
+            import numpy as np
+            img_array = np.array(image.convert('L'))
+            brightness = img_array.mean() / 255  # Normalized to 0-1
+            contrast = img_array.std() / 128     # Normalized
+            
+            # Higher scores for moderate brightness (not too dark or bright)
+            brightness_score = 10 - abs(brightness - 0.5) * 10
+            # Higher scores for good contrast
+            contrast_score = min(contrast * 10, 10)
+            
+            final_score = (ratio_score + brightness_score + contrast_score) / 3
+        else:
+            # Simplified version without numpy
+            final_score = ratio_score
+            
+        return {
+            "aesthetic_score": round(final_score, 2),
+            "aspect_ratio": round(aspect_ratio, 3),
+        }
+    except Exception as e:
+        logger.error(f"Error analyzing image aesthetics: {str(e)}")
+        return {"aesthetic_score": 5.0}  # Default on error
+
+def analyze_faces_in_image(image):
+    """Analyze faces in the image using DeepFace"""
+    if not HAS_DEEPFACE:
+        return []
+    
+    try:
+        # Save image to temp file for DeepFace
+        temp_path = "/tmp/temp_image.jpg"
+        image.save(temp_path)
+        
+        # Analyze with DeepFace
+        face_analysis = DeepFace.analyze(
+            img_path=temp_path,
+            actions=['age', 'gender', 'emotion'],
+            enforce_detection=False
+        )
+        
+        # Process results
+        if isinstance(face_analysis, list):
+            return face_analysis
+        else:
+            return [face_analysis]
+    except Exception as e:
+        logger.error(f"Error analyzing faces: {str(e)}")
+        return []
+
+def detect_objects_in_image(image):
+    """Detect objects in the image using YOLOv5"""
+    if not HAS_YOLO:
+        return []
+    
+    try:
+        # Process the image with YOLOv5
+        results = YOLO_MODEL(image)
+        
+        # Extract detected objects
+        objects = []
+        for pred in results.pred[0]:
+            x1, y1, x2, y2, conf, cls = pred
+            label = results.names[int(cls)]
+            objects.append({
+                'label': label,
+                'confidence': float(conf),
+                'box': [float(x1), float(y1), float(x2), float(y2)]
+            })
+            
+        return objects
+    except Exception as e:
+        logger.error(f"Error detecting objects: {str(e)}")
+        return []
+
+def analyze_image(image_url):
+    """
+    Complete image analysis function
+    Returns a dictionary with all analysis results
+    """
+    results = {
+        "success": False,
+        "url": image_url,
+        "error": None,
+        "caption": None,
+        "aesthetic_score": None,
+        "perceptual_hash": None,
+        "clip_scores": None,
+        "faces": None,
+        "objects": None
+    }
+    
+    # Validate URL
+    try:
+        parsed_url = urlparse(image_url)
+        if not parsed_url.scheme or not parsed_url.netloc:
+            results["error"] = "Invalid URL format"
+            return results
+    except Exception:
+        results["error"] = "URL parsing error"
+        return results
+    
+    # Fetch the image
+    image = fetch_image_from_url(image_url)
+    if image is None:
+        results["error"] = "Failed to fetch image"
+        return results
+    
+    # Run analyses
+    results["success"] = True
+    
+    # Generate perceptual hash
+    results["perceptual_hash"] = get_perceptual_hash(image)
+    
+    # Generate caption with BLIP
+    if HAS_BLIP:
+        results["caption"] = generate_image_caption(image)
+    
+    # Analyze with CLIP
+    if HAS_CLIP:
+        # Categories to check image against
+        categories = [
+            "a photo of food", 
+            "a selfie", 
+            "a landscape photo",
+            "a product advertisement", 
+            "a screenshot", 
+            "a meme",
+            "professional photography", 
+            "artificial image",
+            "a photo of a person", 
+            "a photo of an animal",
+            "a photo of text", 
+            "a graph or chart"
+        ]
+        results["clip_scores"] = analyze_image_with_clip(image, categories)
+    
+    # Aesthetic analysis
+    results["aesthetic_score"] = analyze_image_aesthetics(image)
+    
+    # Face analysis
+    if HAS_DEEPFACE:
+        results["faces"] = analyze_faces_in_image(image)
+    
+    # Object detection
+    if HAS_YOLO:
+        results["objects"] = detect_objects_in_image(image)
+    
+    return results
+
+def process_post_images(post):
+    """Process all images in a post"""
+    if not post.image_urls:
+        return []
+    
+    # Parse image URLs
+    try:
+        image_urls = [url.strip() for url in post.image_urls.split(',') if url.strip()]
+    except Exception:
+        return []
+    
+    results = []
+    for url in image_urls[:5]:  # Limit to first 5 images
+        try:
+            analysis = analyze_image(url)
+            results.append(analysis)
+        except Exception as e:
+            logger.error(f"Error analyzing image {url}: {str(e)}")
+    
+    return results
+
+def process_social_post(post_id):
+    """
+    Enhanced processing function for social media posts
+    Adds text analysis and image analysis capabilities
+    """
+    try:
+        post = SocialPost.objects.get(id=post_id)
+    except SocialPost.DoesNotExist:
+        logger.error(f"Post with ID {post_id} not found")
+        return None
+    
+    try:
+        # Process text content
+        if post.content:
+            # Sentiment analysis
+            sentiment_results = analyze_sentiment(post.content)
+            post.sentiment_score = sentiment_results['sentiment_score']
+            post.positive_indicators = sentiment_results['positive_indicators']
+            post.negative_indicators = sentiment_results['negative_indicators']
+            
+            # Topic classification
+            topics = classify_topics(post.content)
+            if topics:
+                post.automated_category = topics[0]['category']  # Set primary category
+                
+                # Store full topic analysis in ML prediction log
+                prediction_log = MLPredictionLog(
+                    post=post,
+                    prediction_type='topic_classification',
+                    prediction_value=topics[0]['score'],
+                    raw_output=json.dumps(topics)
+                )
+                prediction_log.save()
+        
+        # Process images if available
+        if post.image_urls:
+            image_results = process_post_images(post)
+            if image_results:
+                # Store image analysis in ML prediction log
+                prediction_log = MLPredictionLog(
+                    post=post,
+                    prediction_type='image_analysis',
+                    prediction_value=image_results[0].get('aesthetic_score', {}).get('aesthetic_score', 5.0),
+                    raw_output=json.dumps(image_results)
+                )
+                prediction_log.save()
+        
+        # Save updated post
+        post.save()
+        return post
+    except Exception as e:
+        logger.error(f"Error processing post {post_id}: {str(e)}")
+        return None

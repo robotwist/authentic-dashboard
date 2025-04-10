@@ -1,0 +1,560 @@
+{% extends 'brandsensor/base.html' %}
+{% load custom_filters %}
+
+{% block title %}ML Insights - Authentic Internet{% endblock %}
+
+{% block extra_css %}
+<style>
+  .insights-section {
+    margin-bottom: var(--space-xl);
+    position: relative;
+    overflow: hidden;
+  }
+  
+  .insights-card {
+    background-color: var(--card-bg);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow);
+    transition: transform 0.3s ease, box-shadow 0.3s ease;
+    height: 100%;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+  }
+  
+  .insights-card:hover {
+    transform: translateY(-5px);
+    box-shadow: var(--shadow-lg);
+  }
+  
+  .insights-card-header {
+    background: linear-gradient(135deg, var(--primary) 0%, var(--secondary) 100%);
+    padding: var(--space-md) var(--space-lg);
+    color: white;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+  
+  .insights-card-header h5 {
+    margin: 0;
+    color: white;
+    font-weight: 600;
+  }
+  
+  .insights-card-body {
+    padding: var(--space-lg);
+    flex: 1;
+  }
+  
+  .stat-card {
+    background: linear-gradient(135deg, rgba(123, 104, 238, 0.1) 0%, rgba(123, 104, 238, 0.05) 100%);
+    border-radius: var(--radius-sm);
+    padding: var(--space-md);
+    margin-bottom: var(--space-md);
+    display: flex;
+    align-items: center;
+  }
+  
+  .stat-icon {
+    width: 45px;
+    height: 45px;
+    border-radius: 50%;
+    background: linear-gradient(135deg, var(--primary) 0%, var(--secondary) 100%);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin-right: var(--space-md);
+    color: white;
+    flex-shrink: 0;
+    font-size: 1.25rem;
+  }
+  
+  .stat-content h4 {
+    margin: 0;
+    font-size: 1.2rem;
+    font-weight: 700;
+  }
+  
+  .stat-content p {
+    margin: 0;
+    font-size: 0.875rem;
+    color: var(--light-text);
+  }
+  
+  .image-card {
+    position: relative;
+    margin-bottom: var(--space-md);
+    border-radius: var(--radius-sm);
+    overflow: hidden;
+    background-color: var(--card-bg);
+    box-shadow: var(--shadow-sm);
+  }
+  
+  .image-card img {
+    width: 100%;
+    height: auto;
+    object-fit: cover;
+    aspect-ratio: 16/9;
+  }
+  
+  .image-overlay {
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    padding: var(--space-md);
+    background: linear-gradient(to top, rgba(0,0,0,0.8) 0%, rgba(0,0,0,0) 100%);
+    color: white;
+  }
+  
+  .image-overlay h5 {
+    margin: 0;
+    color: white;
+    font-size: 0.95rem;
+  }
+  
+  .image-overlay p {
+    margin: 0;
+    font-size: 0.8rem;
+    opacity: 0.9;
+  }
+  
+  .image-badges {
+    position: absolute;
+    top: var(--space-sm);
+    right: var(--space-sm);
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-xs);
+  }
+  
+  .image-badge {
+    font-size: 0.7rem;
+    padding: 0.2rem 0.5rem;
+    border-radius: 50px;
+    background-color: rgba(0,0,0,0.6);
+    color: white;
+    backdrop-filter: blur(4px);
+  }
+  
+  .image-badge.score {
+    background-color: rgba(255, 126, 95, 0.9);
+  }
+  
+  .filter-bar {
+    background-color: var(--card-bg);
+    border-radius: var(--radius);
+    padding: var(--space-md) var(--space-lg);
+    margin-bottom: var(--space-xl);
+    box-shadow: var(--shadow-sm);
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-md);
+    align-items: center;
+  }
+  
+  .chart-container {
+    height: 300px;
+    width: 100%;
+    position: relative;
+  }
+  
+  .platform-pill {
+    display: inline-flex;
+    align-items: center;
+    padding: 0.3rem 0.8rem;
+    border-radius: 50px;
+    font-size: 0.85rem;
+    margin-right: 0.5rem;
+    margin-bottom: 0.5rem;
+    background-color: rgba(123, 104, 238, 0.1);
+    color: var(--accent);
+  }
+  
+  .platform-pill i {
+    margin-right: 5px;
+  }
+  
+  .platform-pill.facebook {
+    background-color: rgba(24, 119, 242, 0.1);
+    color: #1877f2;
+  }
+  
+  .platform-pill.instagram {
+    background-color: rgba(193, 53, 132, 0.1);
+    color: #c13584;
+  }
+  
+  .platform-pill.twitter {
+    background-color: rgba(29, 161, 242, 0.1);
+    color: #1da1f2;
+  }
+  
+  .platform-pill.linkedin {
+    background-color: rgba(0, 119, 181, 0.1);
+    color: #0077b5;
+  }
+  
+  .no-data-message {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: var(--space-xl);
+    text-align: center;
+    color: var(--light-text);
+  }
+  
+  .no-data-message i {
+    font-size: 3rem;
+    margin-bottom: var(--space-md);
+    color: var(--primary);
+    opacity: 0.5;
+  }
+  
+  @media (max-width: 768px) {
+    .filter-bar {
+      flex-direction: column;
+      align-items: stretch;
+    }
+  }
+</style>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/chart.js@2.9.4/dist/Chart.min.css">
+{% endblock %}
+
+{% block content %}
+<div class="container">
+  <div class="row mb-4">
+    <div class="col-md-12">
+      <h1 class="mb-3">ML Insights</h1>
+      <p class="text-muted">Advanced analysis of your social media content using state-of-the-art machine learning models.</p>
+    </div>
+  </div>
+  
+  <!-- Filter Bar -->
+  <div class="filter-bar">
+    <div class="d-flex align-items-center">
+      <label class="mb-0 mr-2">Time Period:</label>
+      <select class="form-control form-control-sm" id="daysFilter" onchange="window.location.href='?days=' + this.value + '{% if platform_filter %}&platform={{ platform_filter }}{% endif %}'">
+        <option value="7" {% if days_filter == '7' %}selected{% endif %}>Last 7 days</option>
+        <option value="30" {% if days_filter == '30' %}selected{% endif %}>Last 30 days</option>
+        <option value="90" {% if days_filter == '90' %}selected{% endif %}>Last 90 days</option>
+      </select>
+    </div>
+    
+    <div class="d-flex align-items-center">
+      <label class="mb-0 mr-2">Platform:</label>
+      <select class="form-control form-control-sm" id="platformFilter" onchange="window.location.href='?platform=' + this.value + '&days={{ days_filter }}'">
+        <option value="">All Platforms</option>
+        {% for code, name in SocialPost.PLATFORM_CHOICES %}
+          <option value="{{ code }}" {% if platform_filter == code %}selected{% endif %}>{{ name }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    
+    <div class="ml-auto">
+      <button class="btn btn-sm btn-outline" onclick="window.location.reload()">
+        <i class="fas fa-sync-alt"></i> Refresh
+      </button>
+    </div>
+  </div>
+  
+  <!-- Stats Row -->
+  <div class="row mb-4">
+    <div class="col-md-3 col-sm-6 mb-3">
+      <div class="stat-card">
+        <div class="stat-icon">
+          <i class="far fa-file-alt"></i>
+        </div>
+        <div class="stat-content">
+          <h4>{{ ml_posts_count }}</h4>
+          <p>Analyzed Posts</p>
+        </div>
+      </div>
+    </div>
+    
+    <div class="col-md-3 col-sm-6 mb-3">
+      <div class="stat-card">
+        <div class="stat-icon">
+          <i class="far fa-images"></i>
+        </div>
+        <div class="stat-content">
+          <h4>{{ image_posts_count }}</h4>
+          <p>Posts with Images</p>
+        </div>
+      </div>
+    </div>
+    
+    <div class="col-md-3 col-sm-6 mb-3">
+      <div class="stat-card">
+        <div class="stat-icon">
+          <i class="fas fa-calendar-day"></i>
+        </div>
+        <div class="stat-content">
+          <h4>{{ today_posts }}</h4>
+          <p>Posts Today</p>
+        </div>
+      </div>
+    </div>
+    
+    <div class="col-md-3 col-sm-6 mb-3">
+      <div class="stat-card">
+        <div class="stat-icon">
+          <i class="fas fa-calendar-week"></i>
+        </div>
+        <div class="stat-content">
+          <h4>{{ this_week_posts }}</h4>
+          <p>Posts this Week</p>
+        </div>
+      </div>
+    </div>
+  </div>
+  
+  <div class="row">
+    <!-- Left Column - Image Analysis -->
+    <div class="col-md-6 mb-4">
+      <div class="insights-card">
+        <div class="insights-card-header">
+          <h5><i class="fas fa-image mr-2"></i> Image Analysis</h5>
+          <span class="badge badge-light">{{ image_posts_count }} Images</span>
+        </div>
+        <div class="insights-card-body">
+          {% if posts_with_images %}
+            <div class="row">
+              {% for post in posts_with_images|slice:":4" %}
+                <div class="col-md-6 mb-3">
+                  <div class="image-card">
+                    <img src="{{ post.image_urls|first_image }}" alt="Post image">
+                    <div class="image-badges">
+                      <span class="image-badge score">{{ post.sentiment_score|floatformat:1 }}</span>
+                      <span class="image-badge">{{ post.automated_category|default:"Uncategorized" }}</span>
+                    </div>
+                    <div class="image-overlay">
+                      <h5>{{ post.original_user }}</h5>
+                      <p>{{ post.platform|title }}</p>
+                    </div>
+                  </div>
+                </div>
+              {% endfor %}
+            </div>
+            <div class="text-center mt-2">
+              <a href="#" class="btn btn-sm btn-outline">View All Images</a>
+            </div>
+          {% else %}
+            <div class="no-data-message">
+              <i class="far fa-images"></i>
+              <h5>No Images Found</h5>
+              <p>We haven't detected any images in your collected posts for the selected time period.</p>
+            </div>
+          {% endif %}
+        </div>
+      </div>
+    </div>
+    
+    <!-- Right Column - Content Analysis -->
+    <div class="col-md-6 mb-4">
+      <div class="insights-card">
+        <div class="insights-card-header">
+          <h5><i class="fas fa-chart-pie mr-2"></i> Content Analysis</h5>
+          <span class="badge badge-light">{{ ml_posts_count }} Posts</span>
+        </div>
+        <div class="insights-card-body">
+          {% if ml_posts_count > 0 %}
+            <div class="chart-container">
+              <canvas id="categoryChart"></canvas>
+            </div>
+            
+            <h6 class="mt-4 mb-3">Platform Breakdown</h6>
+            <div class="d-flex flex-wrap">
+              {% for stat in platform_stats %}
+                {% if stat.count > 0 %}
+                  <div class="platform-pill {{ stat.code }}">
+                    <i class="fab fa-{{ stat.code }}"></i> {{ stat.platform }} ({{ stat.count }})
+                  </div>
+                {% endif %}
+              {% endfor %}
+            </div>
+            
+            <h6 class="mt-4 mb-3">Recent Analyzed Posts</h6>
+            <div class="table-responsive">
+              <table class="table table-sm">
+                <thead>
+                  <tr>
+                    <th>User</th>
+                    <th>Platform</th>
+                    <th>Category</th>
+                    <th>Sentiment</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {% for post in ml_posts|slice:":5" %}
+                    <tr>
+                      <td>{{ post.original_user }}</td>
+                      <td>{{ post.platform|title }}</td>
+                      <td>{{ post.automated_category|default:"Uncategorized" }}</td>
+                      <td>
+                        {% if post.sentiment_score > 0.3 %}
+                          <span class="text-success"><i class="fas fa-smile"></i> {{ post.sentiment_score|floatformat:2 }}</span>
+                        {% elif post.sentiment_score < -0.3 %}
+                          <span class="text-danger"><i class="fas fa-frown"></i> {{ post.sentiment_score|floatformat:2 }}</span>
+                        {% else %}
+                          <span class="text-muted"><i class="fas fa-meh"></i> {{ post.sentiment_score|floatformat:2 }}</span>
+                        {% endif %}
+                      </td>
+                    </tr>
+                  {% endfor %}
+                </tbody>
+              </table>
+            </div>
+          {% else %}
+            <div class="no-data-message">
+              <i class="fas fa-chart-pie"></i>
+              <h5>No Analyzed Content</h5>
+              <p>We haven't analyzed any content in the selected time period. Try collecting more posts or adjusting your filter.</p>
+            </div>
+          {% endif %}
+        </div>
+      </div>
+    </div>
+  </div>
+  
+  <!-- Processing Pipeline Row -->
+  <div class="row mb-4">
+    <div class="col-md-12">
+      <div class="insights-card">
+        <div class="insights-card-header">
+          <h5><i class="fas fa-tools mr-2"></i> ML Processing Pipeline</h5>
+        </div>
+        <div class="insights-card-body">
+          <div class="pipeline-diagram">
+            <div class="d-flex justify-content-between flex-wrap text-center">
+              <div class="pipeline-step">
+                <div class="step-icon">
+                  <i class="fas fa-file-import"></i>
+                </div>
+                <div class="step-name">Raw Post</div>
+              </div>
+              <div class="pipeline-step">
+                <div class="step-icon">
+                  <i class="fas fa-language"></i>
+                </div>
+                <div class="step-name">Text Analysis</div>
+              </div>
+              <div class="pipeline-step">
+                <div class="step-icon">
+                  <i class="fas fa-image"></i>
+                </div>
+                <div class="step-name">Image Analysis</div>
+              </div>
+              <div class="pipeline-step">
+                <div class="step-icon">
+                  <i class="fas fa-filter"></i>
+                </div>
+                <div class="step-name">Filter & Dedupe</div>
+              </div>
+              <div class="pipeline-step">
+                <div class="step-icon">
+                  <i class="fas fa-star"></i>
+                </div>
+                <div class="step-name">User Preferences</div>
+              </div>
+              <div class="pipeline-step">
+                <div class="step-icon">
+                  <i class="fas fa-check-circle"></i>
+                </div>
+                <div class="step-name">Pure Feed</div>
+              </div>
+            </div>
+          </div>
+          
+          <div class="mt-4">
+            <h6>Models & Techniques Applied:</h6>
+            <div class="row">
+              <div class="col-md-4">
+                <ul class="list-group list-group-flush">
+                  <li class="list-group-item bg-transparent px-0"><i class="fas fa-check-circle text-success mr-2"></i> Sentiment Analysis</li>
+                  <li class="list-group-item bg-transparent px-0"><i class="fas fa-check-circle text-success mr-2"></i> Topic Classification</li>
+                  <li class="list-group-item bg-transparent px-0"><i class="fas fa-check-circle text-success mr-2"></i> Toxicity Detection</li>
+                </ul>
+              </div>
+              <div class="col-md-4">
+                <ul class="list-group list-group-flush">
+                  <li class="list-group-item bg-transparent px-0"><i class="fas fa-check-circle text-success mr-2"></i> Image-Text Matching (CLIP)</li>
+                  <li class="list-group-item bg-transparent px-0"><i class="fas fa-check-circle text-success mr-2"></i> Image Captioning (BLIP)</li>
+                  <li class="list-group-item bg-transparent px-0"><i class="fas fa-check-circle text-success mr-2"></i> Aesthetic Scoring</li>
+                </ul>
+              </div>
+              <div class="col-md-4">
+                <ul class="list-group list-group-flush">
+                  <li class="list-group-item bg-transparent px-0"><i class="fas fa-check-circle text-success mr-2"></i> Perceptual Hashing</li>
+                  <li class="list-group-item bg-transparent px-0"><i class="fas fa-check-circle text-success mr-2"></i> Face Analysis</li>
+                  <li class="list-group-item bg-transparent px-0"><i class="fas fa-check-circle text-success mr-2"></i> Object Detection</li>
+                </ul>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js@2.9.4/dist/Chart.min.js"></script>
+<script>
+  document.addEventListener('DOMContentLoaded', function() {
+    // Category Chart
+    var ctx = document.getElementById('categoryChart').getContext('2d');
+    var categoryData = {{ category_data|safe }};
+    
+    if (Object.keys(categoryData).length > 0) {
+      var labels = Object.keys(categoryData);
+      var data = Object.values(categoryData);
+      
+      var chart = new Chart(ctx, {
+        type: 'doughnut',
+        data: {
+          labels: labels,
+          datasets: [{
+            data: data,
+            backgroundColor: [
+              '#ff7e5f', '#feb47b', '#7b68ee', '#64b5f6', '#81c784',
+              '#ffb74d', '#e57373', '#ba68c8', '#4db6ac', '#f06292'
+            ],
+            borderWidth: 0
+          }]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          legend: {
+            position: 'right',
+            labels: {
+              fontFamily: "'DM Sans', sans-serif",
+              fontSize: 12
+            }
+          },
+          animation: {
+            animateScale: true,
+            animateRotate: true
+          },
+          tooltips: {
+            titleFontFamily: "'Space Grotesk', sans-serif",
+            bodyFontFamily: "'DM Sans', sans-serif"
+          }
+        }
+      });
+    }
+    
+    // Pipeline steps styling
+    const pipelineSteps = document.querySelectorAll('.pipeline-step');
+    pipelineSteps.forEach((step, index) => {
+      const stepIcon = step.querySelector('.step-icon');
+      stepIcon.style.backgroundColor = `rgba(${255 - index * 20}, ${126 - index * 5}, ${95 + index * 10}, 0.1)`;
+      stepIcon.style.color = `rgb(${255 - index * 20}, ${126 - index * 5}, ${95 + index * 10})`;
+    });
+  });
+</script>
+{% endblock %} 

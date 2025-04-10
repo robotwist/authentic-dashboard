@@ -25,6 +25,7 @@ urlpatterns = [
     path('', brandsensor_views.landing, name='landing'),
     path('dashboard/', brandsensor_views.dashboard, name='dashboard'),
     path('ml-dashboard/', brandsensor_views.ml_dashboard, name='ml_dashboard'),
+    path('ml-insights/', brandsensor_views.ml_insights, name='ml_insights'),
     path('settings/', brandsensor_views.user_settings, name='user_settings'),
     path('toggle-mode/', brandsensor_views.toggle_mode, name='toggle_mode'),
     path('api/collect-posts/', brandsensor_views.collect_posts, name='collect_posts'),

@@ -42,25 +42,16 @@ function generateFingerprint(platform, user, content) {
 
 // Function to check if content has already been processed
 function isContentDuplicate(platform, user, content) {
-  // Generate fingerprint
-  const fingerprint = generateFingerprint(platform, user, content);
+  // Get the stored fingerprints
+  const fingerprintKey = `${platform}_fingerprints`;
+  let existingFingerprints = JSON.parse(localStorage.getItem(fingerprintKey) || '[]');
   
-  // Get stored fingerprints
-  return new Promise((resolve) => {
-    chrome.storage.local.get(['processedFingerprints'], function(result) {
-      const now = Date.now();
-      const fingerprints = result.processedFingerprints || {};
-      
-      // Check if this fingerprint exists and is still valid
-      if (fingerprints[fingerprint] && fingerprints[fingerprint] > now) {
-        console.log('Duplicate content detected, skipping collection');
-        resolve(true);
-      } else {
-        // Not a duplicate or expired
-        resolve(false);
-      }
-    });
-  });
+  // Generate fingerprint for the new content
+  const newFingerprint = generateFingerprint(platform, user, content);
+  
+  // Always allow collection by returning false
+  console.log(`${platform}: Allowing collection for all content`);
+  return false;
 }
 
 // Function to record a fingerprint
@@ -172,90 +163,51 @@ function checkServerAvailability(callback) {
     });
 }
 
-// Modified collectWithRateLimitProtection to include deduplication
+// Modified collectWithRateLimitProtection to collect more aggressively
 async function collectWithRateLimitProtection(platform, collectionFunction) {
-  // First check if server is available
-  return new Promise((resolve) => {
-    checkServerAvailability(async function(available, apiEndpoint, apiKey) {
-      if (!available) {
-        console.log('Server unavailable. Collection skipped.');
-        resolve([]);
-        return;
-      }
-      
-      // Continue with original function if server is available
-      // Check if we're currently in a rate-limit backoff period
-      const currentTime = Date.now();
-      if (isRateLimited && currentTime < rateLimitResetTime) {
-        console.log(`Rate limit backoff active. Waiting ${Math.round((rateLimitResetTime - currentTime)/1000)}s before retrying.`);
-        resolve([]);
-        return;
-      }
-      
-      // Check if we're trying to collect too frequently
-      if (currentTime - lastCollectionTime < COLLECTION_COOLDOWN) {
-        console.log('Collection attempted too frequently. Skipping to prevent rate limiting.');
-        resolve([]);
-        return;
-      }
-      
-      // Update collection timestamp
-      lastCollectionTime = currentTime;
-      
-      try {
-        // Run the actual collection function
-        const results = collectionFunction();
-        
-        // Filter out duplicates using fingerprinting
-        const uniqueResults = [];
-        for (let post of results) {
-          const isDuplicate = await isContentDuplicate(post.platform, post.user, post.content);
-          if (!isDuplicate) {
-            uniqueResults.push(post);
-            // Record this content for future deduplication
-            recordFingerprint(post.platform, post.user, post.content);
-          }
-        }
-        
-        console.log(`Collected ${results.length} posts, ${uniqueResults.length} unique.`);
-        
-        // If successful, reset any rate limit flags
-        isRateLimited = false;
-        connectionErrorCount = 0;
-        
-        resolve(uniqueResults);
-      } catch (error) {
-        // Check if this is a rate limit error (429)
-        if (error.message && error.message.includes('429')) {
-          console.warn('Rate limit detected. Activating backoff.');
-          isRateLimited = true;
-          rateLimitResetTime = currentTime + RATE_LIMIT_BACKOFF;
-          
-          // Show notification about rate limiting
-          chrome.runtime.sendMessage({
-            action: 'showNotification',
-            title: 'Rate Limit Detected',
-            message: `${platform} is rate limiting requests. Collection paused for 1 minute.`
-          });
-        } else {
-          // Handle other errors
-          connectionErrorCount++;
-          lastConnectionError = error.message;
-          console.error('Error in collection:', error);
-          
-          if (connectionErrorCount >= MAX_CONNECTION_ERRORS) {
-            chrome.runtime.sendMessage({
-              action: 'showNotification',
-              title: 'Connection Error',
-              message: `Error connecting to ${platform}. Please check your connection.`
-            });
-          }
-        }
-        
-        resolve([]);
-      }
-    });
-  });
+  console.log(`Starting ${platform} collection with minimal rate limit protection`);
+  
+  // Check when we last collected from this platform
+  const lastCollectionKey = `last_${platform}_collection`;
+  const lastCollection = localStorage.getItem(lastCollectionKey);
+  const now = Date.now();
+  
+  // Always allow collection during testing/development
+  const debugMode = true;  // Set to true for testing
+  
+  if (lastCollection && !debugMode) {
+    // Minimum wait time between collections (in milliseconds)
+    // Using a very short interval (5 seconds) to collect more posts
+    const MIN_COLLECTION_INTERVAL = 5000; // 5 seconds for aggressive collection
+    
+    const elapsed = now - parseInt(lastCollection);
+    if (elapsed < MIN_COLLECTION_INTERVAL) {
+      console.log(`Collection attempted after ${elapsed}ms. Allowing collection anyway.`);
+      // Continue with collection always
+    }
+  }
+  
+  // Store last collection time
+  localStorage.setItem(lastCollectionKey, now.toString());
+  
+  // Call the actual collection function
+  let allPosts = [];
+  try {
+    allPosts = await collectionFunction();
+  } catch (e) {
+    console.error(`Error in ${platform} collection:`, e);
+    return [];
+  }
+  
+  // No posts collected
+  if (!allPosts || allPosts.length === 0) {
+    console.log(`No posts collected from ${platform}`);
+    return [];
+  }
+  
+  // Include all posts without filtering duplicates
+  console.log(`Collected ${allPosts.length} posts, including all in results.`);
+  return allPosts;
 }
 
 // Add a function at the top of the file to handle post fingerprinting
@@ -463,186 +415,243 @@ function collectInstagramPosts(dataPreferences) {
 
 // Enhanced Facebook post collector
 function collectFacebookPosts() {
+  console.log("Starting Facebook post collection...");
   const posts = [];
-
-  // Typical FB post containers
-  const postElements = document.querySelectorAll('[role="article"]');
-
-  postElements.forEach((el) => {
-    const content = el.innerText || "";
-    
-    // Better user extraction
-    const userElement = el.querySelector('h4 span strong, h4 span a');
-    const user = userElement?.innerText || "unknown";
-    
-    // Check if it's sponsored content - ensure boolean value
-    const isSponsored = Boolean(
-      content.includes("Sponsored") || 
-      el.innerHTML.includes("Sponsored") ||
-      el.querySelector('a[href*="ads"]') !== null
-    );
-    
-    // Check for verified badge - ensure boolean value
-    const isVerified = Boolean(el.querySelector('svg[aria-label*="Verified"]') !== null);
-    
-    // Enhanced friend detection logic
-    let isFriend = false;
-    
-    // Check for friend indicators
-    if (!isSponsored) {
-      // Look for friend-specific elements
-      const hasFriendLink = el.querySelector('h4 a[href*="/friends/"]') !== null;
-      const hasReactButton = el.querySelector('[role="button"]:not([aria-label*="Like"])') !== null;
-      const hasAuthorLink = el.querySelector('a[role="link"][tabindex="0"]') !== null;
-      const hasCommentOption = el.querySelector('[aria-label*="comment"], [aria-label*="Comment"]') !== null;
+  
+  // Find post elements on the page
+  const postElements = document.querySelectorAll('div[aria-posinset]');
+  console.log(`Found ${postElements.length} potential Facebook posts`);
+  
+  postElements.forEach((el, index) => {
+    try {
+      const content = el.innerText || "";
       
-      // Consider a post as from a friend if it has friend indicators and is not sponsored
-      isFriend = Boolean(hasFriendLink || (hasAuthorLink && hasCommentOption && hasReactButton));
-    }
-    
-    // Extract timestamp
-    let timestamp = '';
-    const timeElement = el.querySelector('abbr');
-    if (timeElement && timeElement.getAttribute('data-utime')) {
-      const unixTime = timeElement.getAttribute('data-utime');
-      timestamp = new Date(parseInt(unixTime) * 1000).toISOString();
-    }
-    
-    // Try to get engagement metrics
-    let likes = 0;
-    let comments = 0;
-    let shares = 0;
-    
-    // Look for reaction counts
-    const reactionElements = el.querySelectorAll('[aria-label*="reaction"], [data-testid*="UFI2ReactionsCount"]');
-    reactionElements.forEach(element => {
-      if (element.innerText) {
-        const match = element.innerText.match(/\d+/);
-        if (match) likes += parseInt(match[0]);
+      // Skip empty posts or very short content
+      if (content.length < 20) {
+        console.log(`Skipping post ${index} due to insufficient content length (${content.length} chars)`);
+        return;
       }
-    });
-    
-    // Look for comment counts
-    const commentElements = el.querySelectorAll('[data-testid*="UFI2CommentCount"], [aria-label*="comment"]');
-    commentElements.forEach(element => {
-      if (element.innerText) {
-        const match = element.innerText.match(/\d+/);
-        if (match) comments += parseInt(match[0]);
+
+      // Extract user information
+      let user = "unknown";
+      let isVerified = false;
+      let isFriend = false;
+      const userElement = el.querySelector('h4 a, h3 a, span a');
+      if (userElement) {
+        user = userElement.innerText.trim();
+        // Check if verified (has verified badge)
+        isVerified = !!el.querySelector('svg[aria-label*="Verified"]');
+        // For Facebook, we'll assume most posts in feed are from friends
+        isFriend = true;
       }
-    });
-    
-    // Look for share counts
-    const shareElements = el.querySelectorAll('[data-testid*="UFI2SharesCount"], [aria-label*="share"]');
-    shareElements.forEach(element => {
-      if (element.innerText) {
-        const match = element.innerText.match(/\d+/);
-        if (match) shares += parseInt(match[0]);
+      
+      // Extract post metadata
+      let likes = 0;
+      let comments = 0;
+      let shares = 0;
+      
+      // Try to find reaction counts
+      const reactionElements = el.querySelectorAll('[aria-label*="reaction"]');
+      if (reactionElements.length > 0) {
+        const reactionText = reactionElements[0].getAttribute('aria-label');
+        const match = reactionText && reactionText.match(/(\d+)/);
+        if (match) likes = parseInt(match[1]);
       }
-    });
-    
-    // Extract image URLs
-    const imageUrls = [];
-    el.querySelectorAll('img').forEach(img => {
-      if (img.src && img.width > 100 && !img.src.includes('profile_pic') && !imageUrls.includes(img.src)) {
-        imageUrls.push(img.src);
+      
+      // Try to extract comment and share counts
+      const commentElements = el.querySelectorAll('[aria-label*="comment"]');
+      if (commentElements.length > 0) {
+        const commentText = commentElements[0].textContent;
+        const match = commentText && commentText.match(/(\d+)/);
+        if (match) comments = parseInt(match[1]);
       }
-    });
-    
-    // Try to identify topics/categories
-    let category = isSponsored ? "sponsored" : "";
-    
-    // Look for hashtags and mentions
-    const hashtags = [];
-    const mentions = [];
-    
-    // Extract hashtags
-    const hashtagMatches = content.match(/#[\w]+/g);
-    if (hashtagMatches) {
-      hashtagMatches.forEach(tag => {
-        if (!hashtags.includes(tag)) {
-          hashtags.push(tag);
-          if (category) category += ',';
-          category += tag;
+      
+      const shareElements = el.querySelectorAll('[aria-label*="share"]');
+      if (shareElements.length > 0) {
+        const shareText = shareElements[0].textContent;
+        const match = shareText && shareText.match(/(\d+)/);
+        if (match) shares = parseInt(match[1]);
+      }
+      
+      // Extract category
+      let category = "";
+      const categoryElement = el.querySelector('[data-testid="story-subtitle"] a');
+      if (categoryElement) {
+        category = categoryElement.textContent.trim();
+      }
+      
+      // Extract image URLs
+      const imageUrls = [];
+      const images = el.querySelectorAll('img[src*="scontent"]');
+      images.forEach(img => {
+        if (img.src && !imageUrls.includes(img.src)) {
+          imageUrls.push(img.src);
         }
       });
-    }
-    
-    // Extract mentions
-    const mentionMatches = content.match(/@[\w.]+/g);
-    if (mentionMatches) {
-      mentionMatches.forEach(mention => {
-        if (!mentions.includes(mention)) mentions.push(mention);
-      });
-    }
-    
-    // Simple sentiment analysis indicators
-    const sentimentIndicators = {
-      positive: ['love', 'happy', 'great', 'good', 'awesome', 'excellent', 'beautiful', 'amazing', 'perfect', 'joy', 'grateful', 'blessed', 'thank', 'exciting', 'fun', '😊', '❤️', '😍', '🥰', '😁', '👍'],
-      negative: ['sad', 'bad', 'hate', 'terrible', 'awful', 'horrible', 'disappointing', 'worst', 'never', 'angry', 'upset', 'unfortunately', 'unfair', 'broken', '😔', '😢', '😭', '😠', '👎', '💔']
-    };
-    
-    // Count sentiment indicators
-    let positiveCount = 0;
-    let negativeCount = 0;
-    
-    const lowerContent = content.toLowerCase();
-    
-    sentimentIndicators.positive.forEach(term => {
-      const regex = new RegExp(term, 'g');
-      const matches = lowerContent.match(regex);
-      if (matches) positiveCount += matches.length;
-    });
-    
-    sentimentIndicators.negative.forEach(term => {
-      const regex = new RegExp(term, 'g');
-      const matches = lowerContent.match(regex);
-      if (matches) negativeCount += matches.length;
-    });
-    
-    // Calculate a simple sentiment score (-1 to 1)
-    let sentimentScore = 0;
-    const totalSentiment = positiveCount + negativeCount;
-    if (totalSentiment > 0) {
-      sentimentScore = (positiveCount - negativeCount) / totalSentiment;
-    }
-    
-    // Extract external link information
-    const externalLinks = [];
-    el.querySelectorAll('a').forEach(link => {
-      if (link.href && 
-          !link.href.includes('facebook.com') && 
-          !link.href.includes('instagram.com') &&
-          !externalLinks.includes(link.href)) {
-        externalLinks.push(link.href);
+      
+      // Extract timestamp
+      let timestamp = "";
+      const timestampElement = el.querySelector('[data-testid="story-subtitle"] [role="link"] > span');
+      if (timestampElement) {
+        timestamp = timestampElement.textContent.trim();
       }
-    });
-
-    if (content.length > 20) {  // Only capture meaningful posts
-      posts.push({
-        content,
-        platform: 'facebook',
-        user: user,
-        is_friend: isFriend,
-        is_family: false,  // Requires user input
-        category: category || "",
-        verified: isVerified,
-        image_urls: imageUrls.slice(0, 3).join(','),
-        timestamp: timestamp,
-        collected_at: new Date().toISOString(),
-        likes: likes,
-        comments: comments,
-        shares: shares,
-        mentions: mentions.join(','),
-        hashtags: hashtags.join(','),
-        external_links: externalLinks.join(','),
-        sentiment_score: sentimentScore,
-        sentiment_indicators: {
-          positive: positiveCount,
-          negative: negativeCount
-        },
-        is_sponsored: isSponsored,
-        content_length: content.length
+      
+      // Check for sponsored content
+      let isSponsored = false;
+      const sponsoredElement = el.querySelector('[data-testid="story-subtitle"] span');
+      if (sponsoredElement && sponsoredElement.textContent.includes('Sponsored')) {
+        isSponsored = true;
+      }
+      
+      // Extract mentions
+      const mentions = [];
+      const mentionElements = el.querySelectorAll('a[href*="/user/"]');
+      mentionElements.forEach(mention => {
+        if (mention.textContent.startsWith('@')) {
+          mentions.push(mention.textContent);
+        }
       });
+      
+      // Extract hashtags
+      const hashtags = [];
+      const words = content.split(/\s+/);
+      words.forEach(word => {
+        if (word.startsWith('#') && word.length > 1) {
+          hashtags.push(word);
+        }
+      });
+      
+      // Extract external links
+      const externalLinks = [];
+      const links = el.querySelectorAll('a[href*="http"]');
+      links.forEach(link => {
+        if (link.href && link.href.startsWith('http') && !link.href.includes('facebook.com')) {
+          externalLinks.push(link.href);
+        }
+      });
+      
+      // Basic sentiment analysis
+      let positiveCount = 0;
+      let negativeCount = 0;
+      const positiveWords = ['good', 'great', 'awesome', 'fantastic', 'excellent', 'happy', 'love', 'like', 'beautiful'];
+      const negativeWords = ['bad', 'terrible', 'awful', 'horrible', 'sad', 'hate', 'dislike', 'ugly', 'wrong'];
+      
+      words.forEach(word => {
+        const normalizedWord = word.toLowerCase().replace(/[^a-z]/g, '');
+        if (positiveWords.includes(normalizedWord)) positiveCount++;
+        if (negativeWords.includes(normalizedWord)) negativeCount++;
+      });
+      
+      let sentimentScore = 0;
+      if (positiveCount + negativeCount > 0) {
+        sentimentScore = (positiveCount - negativeCount) / (positiveCount + negativeCount);
+      }
+      
+      console.log(`Collecting Facebook post ${index} from user ${user}, length: ${content.length} chars`);
+      
+      if (content.length > 20) {  // Only capture meaningful posts
+        const post = {
+          content,
+          platform: 'facebook',
+          user: user,
+          is_friend: isFriend,
+          is_family: false,  // Requires user input
+          category: category || "",
+          verified: isVerified,
+          image_urls: imageUrls.slice(0, 3).join(','),
+          timestamp: timestamp,
+          collected_at: new Date().toISOString(),
+          likes: likes,
+          comments: comments,
+          shares: shares,
+          mentions: mentions.join(','),
+          hashtags: hashtags.join(','),
+          external_links: externalLinks.join(','),
+          sentiment_score: sentimentScore,
+          sentiment_indicators: {
+            positive: positiveCount,
+            negative: negativeCount
+          },
+          is_sponsored: isSponsored,
+          content_length: content.length
+        };
+        
+        posts.push(post);
+        console.log(`Added Facebook post to collection: ${content.substr(0, 50)}...`);
+      }
+    } catch (err) {
+      console.error(`Error processing Facebook post ${index}:`, err);
+    }
+  });
+
+  console.log(`Collected ${posts.length} Facebook posts`);
+  
+  // Get API key and send posts to backend
+  chrome.storage.local.get(['apiKey', 'apiEndpoint'], function(result) {
+    const apiKey = result.apiKey || '42ad72779a934c2d8005992bbecb6772'; // Use the correct API key
+    const apiEndpoint = result.apiEndpoint || 'http://localhost:8000';
+    
+    console.log(`Sending ${posts.length} Facebook posts to ${apiEndpoint} with API key ${apiKey.substr(0, 8)}...`);
+    
+    if (posts.length > 0) {
+      // First try with the API client if available
+      if (window.authDashboardAPI) {
+        console.log("Using authDashboardAPI to send posts");
+        window.authDashboardAPI.sendPosts(posts, 'facebook')
+          .then(result => {
+            console.log("Successfully sent posts via API client:", result);
+          })
+          .catch(error => {
+            console.error("Error sending posts via API client:", error);
+          });
+      } else {
+        // Fallback to direct fetch
+        console.log("Using direct fetch to send posts");
+        fetch(`${apiEndpoint}/api/collect-posts/`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-API-Key': apiKey
+          },
+          body: JSON.stringify({
+            platform: 'facebook',
+            posts: posts
+          })
+        })
+        .then(response => {
+          console.log("Received response:", response.status, response.statusText);
+          if (!response.ok) {
+            throw new Error(`HTTP error! Status: ${response.status}`);
+          }
+          return response.json();
+        })
+        .then(data => {
+          console.log("Successfully sent Facebook posts:", data);
+        })
+        .catch(error => {
+          console.error("Error sending Facebook posts:", error);
+          // Try alternate endpoint as last resort
+          console.log("Trying alternate endpoint /api/post/");
+          fetch(`${apiEndpoint}/api/post/`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'X-API-Key': apiKey
+            },
+            body: JSON.stringify(posts[0]) // Send first post as a test
+          })
+          .then(response => {
+            console.log("Alternate endpoint response:", response.status);
+            return response.json();
+          })
+          .then(data => {
+            console.log("Alternate endpoint result:", data);
+          })
+          .catch(altError => {
+            console.error("Both endpoints failed:", altError);
+          });
+        });
+      }
     }
   });
 
@@ -842,10 +851,10 @@ function collectLinkedInPosts() {
   });
   
   // Get API key and send posts
-  chrome.storage.local.get(['apiKey'], function(result) {
+  chrome.storage.local.get(['apiKey', 'apiEndpoint'], function(result) {
     const apiKey = result.apiKey || '8484e01c2e0b4d368eb9a0f9b89807ad'; // Default fallback API key
 
-  posts.forEach(post => {
+    posts.forEach(post => {
       // Ensure boolean fields are correctly formatted
       const formattedPost = {
         ...post,
@@ -856,14 +865,17 @@ function collectLinkedInPosts() {
         is_job_post: Boolean(post.is_job_post)
       };
       
-      fetch("http://127.0.0.1:8080/api/process-ml/", {
-      method: "POST",
+      fetch(`${result.apiEndpoint}/api/collect-posts/`, {
+        method: "POST",
         headers: { 
           "Content-Type": "application/json",
           "X-API-Key": apiKey
         },
-      body: JSON.stringify(formattedPost)
-    })
+        body: JSON.stringify({
+          platform: 'linkedin',
+          posts: [formattedPost]
+        })
+      })
       .then(res => {
         if (!res.ok) {
           // Create more informative error message
@@ -876,29 +888,50 @@ function collectLinkedInPosts() {
       .then(data => console.log("LinkedIn post saved:", data))
       .catch(err => {
         console.error("Error sending LinkedIn post:", err);
-        // Update connection error counters
-        connectionErrorCount++;
-        lastConnectionError = err.message;
         
-        // Create user-friendly error message
-        let userMessage = "Error connecting to server. ";
-        if (err.message.includes("404")) {
-          userMessage += "API endpoint not found. Check server configuration.";
-        } else if (err.message.includes("401")) {
-          userMessage += "Authentication failed. Check your API key.";
-        } else if (err.message.includes("500")) {
-          userMessage += "Server error. Check Django logs for details.";
-        } else {
-          userMessage += err.message;
-        }
-        
-        if (connectionErrorCount >= MAX_CONNECTION_ERRORS) {
-          chrome.runtime.sendMessage({
-            action: 'showNotification',
-            title: 'Connection Error',
-            message: userMessage
-          });
-        }
+        // Try alternate endpoint
+        console.log("Trying alternate endpoint /api/post/");
+        fetch(`${result.apiEndpoint}/api/post/`, {
+          method: "POST",
+          headers: { 
+            "Content-Type": "application/json",
+            "X-API-Key": apiKey
+          },
+          body: JSON.stringify(formattedPost)
+        })
+        .then(res => {
+          if (!res.ok) {
+            throw new Error(`HTTP error on alternate endpoint! Status: ${res.status}`);
+          }
+          return res.json();
+        })
+        .then(data => console.log("LinkedIn post saved via alternate endpoint:", data))
+        .catch(altErr => {
+          console.error("Error on alternate endpoint:", altErr);
+          // Update connection error counters
+          connectionErrorCount++;
+          lastConnectionError = err.message;
+          
+          // Create user-friendly error message
+          let userMessage = "Error connecting to server. ";
+          if (err.message.includes("404")) {
+            userMessage += "API endpoint not found. Check server configuration.";
+          } else if (err.message.includes("401")) {
+            userMessage += "Authentication failed. Check your API key.";
+          } else if (err.message.includes("500")) {
+            userMessage += "Server error. Check Django logs for details.";
+          } else {
+            userMessage += err.message;
+          }
+          
+          if (connectionErrorCount >= MAX_CONNECTION_ERRORS) {
+            chrome.runtime.sendMessage({
+              action: 'showNotification',
+              title: 'Connection Error',
+              message: userMessage
+            });
+          }
+        });
       });
     });
   });

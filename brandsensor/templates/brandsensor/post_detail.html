@@ -299,6 +299,12 @@
                 <button type="submit" class="btn danger-btn">Hide Post</button>
             </form>
             
+            <form action="{% url 'post_action' post.id %}" method="post" class="ajax-form">
+                {% csrf_token %}
+                <input type="hidden" name="action" value="hide_similar">
+                <button type="submit" class="btn warning-btn">Hide Similar</button>
+            </form>
+            
             {% if post.is_friend and not post.is_family %}
             <form action="{% url 'mark_family' post.original_user post.platform %}" method="post">
                 {% csrf_token %}
@@ -697,6 +703,31 @@
     /* Dynamic width styles applied via JavaScript */
     .topic-bar, .meter-fill {
         /* Base styles without width */
+    }
+    
+    .btn.primary-btn {
+        background-color: var(--primary);
+        color: white;
+    }
+    
+    .btn.secondary-btn {
+        background-color: #6c757d;
+        color: white;
+    }
+    
+    .btn.danger-btn {
+        background-color: #dc3545;
+        color: white;
+    }
+    
+    .btn.warning-btn {
+        background-color: #fd7e14;
+        color: white;
+    }
+    
+    .btn.light-btn {
+        background-color: #f8f9fa;
+        color: #222;
     }
 </style>
 <script>

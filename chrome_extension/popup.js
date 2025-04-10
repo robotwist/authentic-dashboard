@@ -4,7 +4,7 @@ const DEFAULT_SETTINGS = {
     advancedML: true,
     collectSponsored: true,
     showNotifications: true,
-    apiKey: '508f3487618d47da8d02970250bc26a1', // Default API key for testing
+    apiKey: '42ad72779a934c2d8005992bbecb6772', // Default API key for testing
     scanHistory: [],
     stats: {
         totalPosts: 0,

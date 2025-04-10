@@ -58,3 +58,15 @@ def multiply(value, arg):
         return float(value) * float(arg)
     except (ValueError, TypeError):
         return 0 
+
+@register.filter
+def first_image(value):
+    """
+    Gets the first image URL from a comma-separated list.
+    Usage: {{ post.image_urls|first_image }}
+    """
+    if value and isinstance(value, str):
+        parts = value.split(',')
+        if parts:
+            return parts[0].strip()
+    return "" 

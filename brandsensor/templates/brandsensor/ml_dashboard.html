@@ -28,7 +28,10 @@
                 <span class="stat-value">{{ ml_posts_count|default:"0" }} / {{ total_posts_count|default:"0" }}</span>
                 <span class="stat-label">Coverage</span>
             </div>
-            <a href="{% url 'process_ml' %}" class="btn primary-btn ml-process-btn" id="process-ml-btn">Process More Posts</a>
+            <form action="{% url 'process_ml' %}" method="POST">
+                {% csrf_token %}
+                <button type="submit" class="btn primary-btn ml-process-btn" id="process-ml-btn">Process More Posts</button>
+            </form>
         </div>
     </div>
     
@@ -41,7 +44,10 @@
             <h2>No ML-Processed Content Yet</h2>
             <p>We need to analyze some posts before we can show you insights.</p>
             <div class="empty-state-options">
-                <a href="{% url 'process_ml' %}" class="btn primary-btn">Process Posts Now</a>
+                <form action="{% url 'process_ml' %}" method="POST">
+                    {% csrf_token %}
+                    <button type="submit" class="btn primary-btn">Process Posts Now</button>
+                </form>
                 <a href="{% url 'dashboard' %}" class="btn secondary-btn">Collect More Posts</a>
             </div>
         </div>

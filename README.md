@@ -208,4 +208,4 @@ MIT License
 
 ## Attribution
 
-Created by [Your Name]. Inspired by ongoing conversations about authenticity, digital overload, and the need for a better online experience.
+Created by R.W. Wistrand. Inspired by ongoing conversations about authenticity, digital overload, and the need for a better online experience.

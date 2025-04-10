@@ -14,6 +14,10 @@ import secrets
 import string
 import hashlib
 from django.db.utils import IntegrityError
+import logging
+import time
+
+logger = logging.getLogger(__name__)
 
 from .models import SocialPost, UserPreference, Brand, BehaviorLog, SocialConnection, MLModel, MLPredictionLog, APIKey, FilterPreset
 from .ml_processor import process_post, process_user_posts
@@ -202,7 +206,7 @@ def user_cache_key(user_id, prefix, **kwargs):
 @login_required
 def dashboard(request):
     """
-    Renders the dashboard with curated social posts and recent behavior logs.
+    Renders the dashboard with curated social posts.
     Applies filtering based on the user's preferences.
     """
     try:
@@ -251,8 +255,6 @@ def dashboard(request):
     # Try to get cached data
     cached_context = cache.get(cache_key)
     if cached_context:
-        # We have cached data, but still need to add the current filter presets
-        cached_context['filter_presets'] = FilterPreset.objects.filter(user=request.user)
         return render(request, "brandsensor/dashboard.html", cached_context)
     
     # No cached data, continue with normal data fetching
@@ -366,86 +368,64 @@ def dashboard(request):
     elif sort_by == 'sentiment':
         posts = posts.order_by('-sentiment_score', '-collected_at')
     
-    # Get recent behavior logs (limit to 10 for display)
-    logs = BehaviorLog.objects.filter(user=request.user).order_by('-created_at')[:10]
-    
-    # Get platform statistics
-    platform_stats = SocialPost.objects.filter(
-        user=request.user
-    ).values('platform').annotate(
-        count=Count('id')
-    ).order_by('-count')
-    
-    # Get sentiment statistics
-    sentiment_stats = SocialPost.objects.filter(
+    # Filter posts to include only curated social media posts
+    curated_posts = posts[:50]  # Limit to 50 posts for performance
+
+    # Get ML stats for dashboard
+    ml_processed_count = SocialPost.objects.filter(
         user=request.user,
-        sentiment_score__isnull=False
-    ).aggregate(
-        avg_sentiment=Avg('sentiment_score'),
-        positive_count=Count('id', filter=Q(sentiment_score__gt=0.2)),
-        negative_count=Count('id', filter=Q(sentiment_score__lt=-0.2)),
-        neutral_count=Count('id', filter=Q(sentiment_score__gte=-0.2, sentiment_score__lte=0.2))
-    )
+        sentiment_score__isnull=False,
+        automated_category__isnull=False
+    ).count()
     
-    # Get topic/category statistics
+    # Get count of posts with images
+    image_posts_count = SocialPost.objects.filter(
+        user=request.user
+    ).exclude(image_urls='').count()
+    
+    # Get platform stats
+    platform_stats = []
+    for platform_code, platform_name in SocialPost.PLATFORM_CHOICES:
+        platform_posts = SocialPost.objects.filter(
+            user=request.user,
+            platform=platform_code
+        )
+        platform_stats.append({
+            'platform': platform_name,
+            'count': platform_posts.count()
+        })
+    
+    # Get top categories
+    category_stats = SocialPost.objects.filter(
+        user=request.user,
+        category__isnull=False
+    ).exclude(category='').values('category').annotate(
+        count=Count('id'),
+        name=F('category')
+    ).order_by('-count')[:5]
+    
+    # Get top ML-detected topics
     topic_stats = SocialPost.objects.filter(
         user=request.user,
         automated_category__isnull=False
     ).exclude(automated_category='').values('automated_category').annotate(
         count=Count('id')
-    ).order_by('-count')[:10]
-    
-    # Get category statistics from manual categories
-    categories = []
-    for post in posts:
-        if post.category:
-            for category in post.category.split(','):
-                if category.strip() and not category.strip().startswith('#'):
-                    categories.append(category.strip())
-    
-    category_counts = {}
-    for category in categories:
-        if category in category_counts:
-            category_counts[category] += 1
-        else:
-            category_counts[category] = 1
-    
-    # Convert to list of dicts for the template
-    category_stats = [
-        {'name': k, 'count': v} 
-        for k, v in sorted(category_counts.items(), key=lambda x: x[1], reverse=True)
-    ][:10]  # Top 10 categories
-    
-    # Get ML-processed post count
-    ml_processed_count = SocialPost.objects.filter(
-        user=request.user,
-        automated_category__isnull=False,
-        sentiment_score__isnull=False
-    ).count()
-    
-    # Add user's filter presets to the context
-    filter_presets = FilterPreset.objects.filter(user=request.user)
-    
+    ).order_by('-count')[:5]
+
     context = {
-        "posts": posts[:50],  # Limit to 50 posts for performance
+        "posts": curated_posts,  # Only curated posts
         "preferences": preferences,
-        "logs": logs,
-        "platform_stats": platform_stats,
-        "category_stats": category_stats,
-        "topic_stats": topic_stats,
-        "sentiment_stats": sentiment_stats,
         "days_filter": days_filter,
         "platforms": SocialPost.PLATFORM_CHOICES,
         "current_platform": platform_filter,
         "current_sort": sort_by,
         "ml_processed_count": ml_processed_count,
-        "total_posts_count": SocialPost.objects.filter(user=request.user).count(),
-        "filter_presets": filter_presets,  # Add filter presets to the context
+        "image_posts_count": image_posts_count,
+        "platform_stats": platform_stats,
+        "category_stats": category_stats,
+        "topic_stats": topic_stats,
     }
-    
-    # Cache this context for 5 minutes (short-lived cache for dashboard)
-    cache.set(cache_key, context, settings.CACHE_TTL_SHORT)
-    
+
     return render(request, "brandsensor/dashboard.html", context)
 
 
@@ -701,34 +681,24 @@ def api_log_post(request):
     Accepts POST requests with social post data scraped by the Chrome extension.
     Uses API key authentication.
     """
-    # Handle OPTIONS preflight requests
-    if request.method == "OPTIONS":
-        response = JsonResponse({'status': 'ok'})
-        response["Access-Control-Allow-Origin"] = "*"
-        response["Access-Control-Allow-Methods"] = "POST, OPTIONS"
-        response["Access-Control-Allow-Headers"] = "X-API-Key, Content-Type"
-        return response
-        
+    logger.info("Received request at /api/post/")
     if request.method != "POST":
+        logger.warning("Invalid request method: %s", request.method)
         response = JsonResponse({"error": "Only POST allowed"}, status=405)
         response["Access-Control-Allow-Origin"] = "*"
         return response
-    
+
     try:
-        # Get user from API key
         user = get_user_from_api_key(request)
         if not user:
+            logger.warning("Invalid or missing API key")
             response = JsonResponse({"error": "Invalid or missing API key"}, status=401)
             response["Access-Control-Allow-Origin"] = "*"
             return response
-        
-        try:
-            data = json.loads(request.body)
-        except json.JSONDecodeError:
-            response = JsonResponse({"error": "Invalid JSON data"}, status=400)
-            response["Access-Control-Allow-Origin"] = "*"
-            return response
-        
+
+        data = json.loads(request.body)
+        logger.info("Request data: %s", data)
+
         # Check if post from this user/content already exists to avoid duplicates
         content = data.get("content", "")
         platform = data.get("platform", "")
@@ -743,6 +713,7 @@ def api_log_post(request):
         ).exists()
         
         if existing:
+            logger.info("Duplicate post detected, skipping")
             response = JsonResponse({"status": "duplicate post, skipped"})
             response["Access-Control-Allow-Origin"] = "*"
             return response
@@ -798,11 +769,17 @@ def api_log_post(request):
         # Run ML processing on the post
         process_post(post)
 
+        logger.info("Post saved and processed successfully")
         response = JsonResponse({"status": "post saved and processed"})
         response["Access-Control-Allow-Origin"] = "*"
         return response
+    except json.JSONDecodeError:
+        logger.error("Invalid JSON data")
+        response = JsonResponse({"error": "Invalid JSON data"}, status=400)
+        response["Access-Control-Allow-Origin"] = "*"
+        return response
     except Exception as e:
-        print(f"Error in api_log_post: {str(e)}")
+        logger.error("Error in api_log_post: %s", str(e))
         response = JsonResponse({"error": str(e)}, status=500)
         response["Access-Control-Allow-Origin"] = "*"
         return response
@@ -811,7 +788,7 @@ def api_log_post(request):
 @login_required
 def post_action(request, post_id):
     """
-    Handle various post actions: star, hide, rate, categorize
+    Handle various post actions: star, hide, hide_similar, rate, categorize
     """
     if request.method == "POST":
         action = request.POST.get('action')
@@ -822,6 +799,102 @@ def post_action(request, post_id):
                 post.starred = not post.starred
             elif action == "hide":
                 post.hidden = True
+                # Log the hiding action for feedback
+                BehaviorLog.objects.create(
+                    user=request.user,
+                    behavior_type='feedback_hide',
+                    platform=post.platform,
+                    details=f"Hidden {post.platform} post from {post.original_user}"
+                )
+            elif action == "hide_similar":
+                post.hidden = True
+                
+                # Process keywords from post content for similarity detection
+                from django.db.models import Q
+                import re
+                
+                # Extract key terms from content (simple implementation)
+                def extract_key_terms(text, max_terms=5):
+                    if not text:
+                        return []
+                    # Remove URLs, special characters and convert to lowercase
+                    text = re.sub(r'https?://\S+|www\.\S+', '', text.lower())
+                    text = re.sub(r'[^\w\s]', '', text)
+                    # Split into words and filter out short words
+                    words = [w for w in text.split() if len(w) > 3]
+                    # Return most frequent words
+                    word_counts = {}
+                    for word in words:
+                        if word not in word_counts:
+                            word_counts[word] = 0
+                        word_counts[word] += 1
+                    # Sort by frequency
+                    sorted_words = sorted(word_counts.items(), key=lambda x: x[1], reverse=True)
+                    return [word for word, count in sorted_words[:max_terms]]
+                
+                key_terms = extract_key_terms(post.content)
+                content_filter = None
+                
+                # Build content similarity query
+                for term in key_terms:
+                    if content_filter is None:
+                        content_filter = Q(content__icontains=term)
+                    else:
+                        content_filter |= Q(content__icontains=term)
+                
+                # Create a query for similar posts
+                similar_filter = Q()
+                
+                # Similar by content keywords
+                if content_filter and len(key_terms) > 0:
+                    similar_filter |= content_filter
+                
+                # Similar by same user
+                if post.original_user and post.original_user != "unknown":
+                    similar_filter |= Q(original_user=post.original_user)
+                
+                # Similar by category
+                if post.automated_category:
+                    similar_filter |= Q(automated_category=post.automated_category)
+                elif post.category:
+                    main_category = post.category.split(',')[0]
+                    similar_filter |= Q(category__icontains=main_category)
+                
+                # Find and hide similar posts
+                similar_posts = SocialPost.objects.filter(
+                    user=request.user,
+                    hidden=False  # Only select posts that aren't already hidden
+                ).filter(similar_filter).exclude(id=post.id)
+                
+                # Limit the number of similar posts to hide (prevent over-hiding)
+                similar_count = similar_posts.count()
+                max_to_hide = 10  # Limit to prevent accidental mass-hiding
+                
+                if similar_count > 0:
+                    # Hide only a limited number of most similar posts
+                    hidden_count = similar_posts[:max_to_hide].update(hidden=True)
+                    
+                    # Log the bulk hiding action
+                    BehaviorLog.objects.create(
+                        user=request.user,
+                        behavior_type='feedback_hide_similar',
+                        platform=post.platform,
+                        count=hidden_count,
+                        details=f"Hidden {hidden_count} similar posts to {post_id}"
+                    )
+                    
+                    # Add a message for non-AJAX requests
+                    if request.headers.get('X-Requested-With') != 'XMLHttpRequest':
+                        from django.contrib import messages
+                        messages.success(request, f"Hidden this post and {hidden_count} similar posts.")
+                
+                # Log the original hide action
+                BehaviorLog.objects.create(
+                    user=request.user,
+                    behavior_type='feedback_hide',
+                    platform=post.platform,
+                    details=f"Hidden {post.platform} post from {post.original_user}"
+                )
             elif action == "rate":
                 rating = request.POST.get('rating')
                 if rating and rating.isdigit():
@@ -873,41 +946,29 @@ def ml_dashboard(request):
     Advanced Machine Learning Dashboard
     Provides detailed analysis and visualizations of ML-processed content
     """
+    user_data = get_user_data(request.user)
+
     # Get days filter (default to 30 days)
     days_filter = request.GET.get('days', '30')
     try:
         days_ago = int(days_filter)
     except ValueError:
         days_ago = 30
-    
-    # Generate a cache key for this view and its parameters
-    cache_key = user_cache_key(
-        request.user.id, 
-        'ml_dashboard', 
-        days=days_ago
-    )
-    
-    # Try to get cached data
-    cached_context = cache.get(cache_key)
-    if cached_context:
-        return render(request, "brandsensor/ml_dashboard.html", cached_context)
-    
+
     since_date = timezone.now() - datetime.timedelta(days=days_ago)
-    
+
     # Process any unprocessed posts - wrap in try/except to catch IntegrityError
     try:
         process_user_posts(request.user.id, limit=100)
     except IntegrityError as e:
-        # Log the error but continue - the duplicate has been handled
         import logging
         logger = logging.getLogger(__name__)
         logger.warning(f"IntegrityError in ml_dashboard: {str(e)}")
     except Exception as e:
-        # Handle any other exceptions that might occur
         import logging
         logger = logging.getLogger(__name__)
         logger.error(f"Error processing posts in ml_dashboard: {str(e)}")
-    
+
     # Get ML-processed posts
     ml_posts = SocialPost.objects.filter(
         user=request.user,
@@ -915,156 +976,101 @@ def ml_dashboard(request):
         sentiment_score__isnull=False,
         automated_category__isnull=False
     ).order_by('-created_at')
-    
-    # Check if we have any ML-processed posts
-    if ml_posts.count() == 0:
-        # If no ML-processed posts, show a basic template
-        context = {
-            'ml_posts_count': 0,
-            'total_posts_count': SocialPost.objects.filter(user=request.user).count(),
-            'no_ml_data': True,
-            'days_filter': days_filter,
-        }
-        return render(request, "brandsensor/ml_dashboard.html", context)
-    
-    # Get sentiment statistics by platform
-    sentiment_by_platform = (
-        ml_posts.values('platform')
-        .annotate(
-            avg_sentiment=Avg('sentiment_score'),
-            count=Count('id')
-        )
-        .order_by('-count')
-    )
-    
-    # Get topic distribution
-    topic_distribution = (
-        ml_posts.exclude(automated_category='')
-        .values('automated_category')
-        .annotate(count=Count('id'))
-        .order_by('-count')[:10]  # Top 10 topics
-    )
-    
-    # Get engagement prediction distribution
-    engagement_ranges = {
-        'Very Low': (0, 0.2),
-        'Low': (0.2, 0.4),
-        'Medium': (0.4, 0.6),
-        'High': (0.6, 0.8),
-        'Very High': (0.8, 1.0)
-    }
-    
-    engagement_distribution = {}
-    for label, (min_val, max_val) in engagement_ranges.items():
-        count = ml_posts.filter(
-            engagement_prediction__gte=min_val,
-            engagement_prediction__lt=max_val
-        ).count()
-        engagement_distribution[label] = count
-    
-    # Get toxicity analysis
-    toxicity_ranges = {
-        'Clean': (0, 0.2),
-        'Mild': (0.2, 0.4),
-        'Moderate': (0.4, 0.6),
-        'High': (0.6, 0.8),
-        'Extreme': (0.8, 1.0)
-    }
-    
-    toxicity_distribution = {}
-    for label, (min_val, max_val) in toxicity_ranges.items():
-        count = ml_posts.filter(
-            toxicity_score__gte=min_val,
-            toxicity_score__lt=max_val
-        ).count()
-        toxicity_distribution[label] = count
-    
-    # Get sentiment over time (weekly)
-    sentiment_over_time = []
-    for i in range(days_ago // 7 + 1):
-        end_date = since_date + datetime.timedelta(days=(i+1)*7)
-        start_date = since_date + datetime.timedelta(days=i*7)
-        
-        # Skip future periods
-        if start_date > timezone.now():
-            continue
-            
-        # Cap the end date to today
-        if end_date > timezone.now():
-            end_date = timezone.now()
-        
-        # Get average sentiment for this week
-        weekly_sentiment = ml_posts.filter(
-            created_at__gte=start_date,
-            created_at__lt=end_date
-        ).aggregate(avg_sentiment=Avg('sentiment_score'))
-        
-        if weekly_sentiment['avg_sentiment'] is not None:
-            sentiment_over_time.append({
-                'period': f"{start_date.strftime('%b %d')} - {end_date.strftime('%b %d')}",
-                'sentiment': weekly_sentiment['avg_sentiment']
-            })
-    
-    # Get most positive/negative posts
-    most_positive_posts = ml_posts.order_by('-sentiment_score')[:5]
-    most_negative_posts = ml_posts.filter(sentiment_score__lt=0).order_by('sentiment_score')[:5]
-    
-    # Get highest/lowest engagement posts
-    highest_engagement_posts = ml_posts.order_by('-engagement_prediction')[:5]
-    
-    # Get posts with highest toxicity scores
-    toxic_posts = ml_posts.order_by('-toxicity_score')[:5]
-    
-    # Prepare data for charts (JSON)
-    charts_data = {
-        'sentiment_by_platform': [
-            {
-                'platform': item['platform'],
-                'avg_sentiment': float(item['avg_sentiment']) if item['avg_sentiment'] else 0,
-                'count': item['count']
-            }
-            for item in sentiment_by_platform
-        ],
-        'topic_distribution': [
-            {
-                'topic': item['automated_category'],
-                'count': item['count']
-            }
-            for item in topic_distribution
-        ],
-        'engagement_distribution': [
-            {
-                'label': label,
-                'count': count
-            }
-            for label, count in engagement_distribution.items()
-        ],
-        'toxicity_distribution': [
-            {
-                'label': label,
-                'count': count
-            }
-            for label, count in toxicity_distribution.items()
-        ],
-        'sentiment_over_time': sentiment_over_time
-    }
-    
+
     context = {
         'ml_posts': ml_posts[:20],  # Limit to 20 for performance
         'ml_posts_count': ml_posts.count(),
         'total_posts_count': SocialPost.objects.filter(user=request.user).count(),
-        'charts_data': json.dumps(charts_data),
-        'most_positive_posts': most_positive_posts,
-        'most_negative_posts': most_negative_posts,
-        'highest_engagement_posts': highest_engagement_posts,
-        'toxic_posts': toxic_posts,
+        'today_posts': user_data['today_posts'],
+        'this_week_posts': user_data['this_week_posts'],
         'days_filter': days_filter,
     }
-    
-    # Cache this heavy computation result (ML dashboard is very compute-intensive)
-    cache.set(cache_key, context, settings.CACHE_TTL)
-    
+
     return render(request, "brandsensor/ml_dashboard.html", context)
+
+@login_required
+def ml_insights(request):
+    """
+    Enhanced ML Insights page
+    Provides advanced image and content analysis with state-of-the-art ML models
+    """
+    user_data = get_user_data(request.user)
+
+    # Get days filter (default to 30 days)
+    days_filter = request.GET.get('days', '30')
+    try:
+        days_ago = int(days_filter)
+    except ValueError:
+        days_ago = 30
+
+    since_date = timezone.now() - datetime.timedelta(days=days_ago)
+    
+    # Get platform filter
+    platform_filter = request.GET.get('platform', '')
+    platforms = request.GET.getlist('platform') or [p[0] for p in SocialPost.PLATFORM_CHOICES]
+    
+    # Process any unprocessed posts
+    try:
+        process_user_posts(request.user.id, limit=100)
+    except Exception as e:
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.error(f"Error processing posts in ml_insights: {str(e)}")
+    
+    # Query for posts with images
+    posts_query = SocialPost.objects.filter(
+        user=request.user,
+        created_at__gte=since_date,
+    )
+    
+    # Apply platform filter if specified
+    if platform_filter:
+        posts_query = posts_query.filter(platform=platform_filter)
+    
+    # Filter posts that have image URLs
+    posts_with_images = posts_query.exclude(image_urls='').order_by('-created_at')
+    
+    # Get ML-processed posts
+    ml_posts = posts_query.filter(
+        sentiment_score__isnull=False,
+        automated_category__isnull=False
+    ).order_by('-created_at')
+    
+    # Get stats by platform
+    platform_stats = []
+    for platform_code, platform_name in SocialPost.PLATFORM_CHOICES:
+        platform_posts = posts_query.filter(platform=platform_code)
+        platform_stats.append({
+            'platform': platform_name,
+            'code': platform_code,
+            'count': platform_posts.count(),
+            'sentiment': platform_posts.filter(sentiment_score__isnull=False).aggregate(Avg('sentiment_score'))['sentiment_score__avg'] or 0,
+            'engagement': platform_posts.aggregate(Avg('engagement_count'))['engagement_count__avg'] or 0,
+        })
+    
+    # Get category distribution
+    category_counts = ml_posts.exclude(automated_category='').values('automated_category').annotate(
+        count=Count('id')
+    ).order_by('-count')
+    
+    # Prepare for visualization (limit to top 10)
+    category_data = {item['automated_category']: item['count'] for item in category_counts[:10]}
+    
+    context = {
+        'ml_posts': ml_posts[:20],
+        'ml_posts_count': ml_posts.count(),
+        'platform_stats': platform_stats,
+        'category_data': json.dumps(category_data),
+        'posts_with_images': posts_with_images[:20],
+        'image_posts_count': posts_with_images.count(),
+        'days_filter': days_filter,
+        'platform_filter': platform_filter,
+        'platforms': platforms,
+        'today_posts': user_data['today_posts'],
+        'this_week_posts': user_data['this_week_posts'],
+    }
+    
+    return render(request, "brandsensor/ml_insights.html", context)
 
 # ------------------------------
 # Filter Preset Management
@@ -1128,105 +1134,117 @@ def collect_posts(request):
     """
     API endpoint to collect social media posts from browser extension
     """
+    logger.info("collect_posts endpoint called")
+    
     if request.method != 'POST':
+        logger.warning("Only POST requests are allowed")
         return JsonResponse({'status': 'error', 'message': 'Only POST requests are allowed'}, status=405)
     
     # API key authentication
     user = get_user_from_api_key(request)
     if user is None:
+        logger.warning("Invalid API key")
         return JsonResponse({'status': 'error', 'message': 'Invalid API key'}, status=401)
     
     try:
         data = json.loads(request.body)
+        logger.info(f"Received data: platform={data.get('platform')}, posts count={len(data.get('posts', []))}")
+        
         posts = data.get('posts', [])
         platform = data.get('platform')
         
         if not platform or not posts:
+            logger.warning("Missing platform or posts data")
             return JsonResponse({'status': 'error', 'message': 'Missing platform or posts data'}, status=400)
         
         # Create statistics counters
         new_count = 0
         updated_count = 0
         duplicate_count = 0
+        error_count = 0
         
         # Process each post
         for post_data in posts:
-            content = post_data.get('content', '')
-            if not content:
-                continue  # Skip posts with no content
+            try:
+                content = post_data.get('content', '')
+                if not content or len(content) < 10:  # Skip posts with very little content
+                    logger.warning(f"Skipping post with insufficient content: {content}")
+                    continue
                 
-            # Check if post already exists by platform_id
-            platform_id = post_data.get('platform_id')
-            if not platform_id:
-                # Generate a unique ID if not provided
-                platform_id = str(uuid.uuid4())
-            
-            # Create hash for content to detect duplicates
-            content_to_hash = f"{platform}:{content}"
-            content_hash = hashlib.md5(content_to_hash.encode('utf-8')).hexdigest()
-            
-            # Check for duplicates either by platform_id or content_hash
-            existing_post = None
-            if platform_id:
-                existing_post = SocialPost.objects.filter(platform_id=platform_id, user=user).first()
-            
-            # If not found by platform_id, check by content_hash
-            if not existing_post:
-                existing_post = SocialPost.objects.filter(content_hash=content_hash, user=user).first()
-            
-            if existing_post:
-                # Update existing post with any new information
-                was_updated = False
+                # Generate a content hash for duplicate detection
+                content_hash = hashlib.md5(content.encode()).hexdigest()
                 
-                # Only update fields that are provided and different
-                for field in ['original_user', 'engagement_count', 'is_sponsored', 
-                             'verified', 'timestamp', 'is_friend', 'is_family']:
-                    if field in post_data and getattr(existing_post, field) != post_data[field]:
-                        setattr(existing_post, field, post_data[field])
-                        was_updated = True
+                # Use platform_id if available, otherwise generate one
+                platform_id = post_data.get('platform_id')
+                if not platform_id:
+                    # Generate a unique ID based on content hash and timestamp
+                    platform_id = f"{platform}_{content_hash[:8]}_{int(time.time())}"
                 
-                # Only update content if it's different and we want to overwrite
-                if content != existing_post.content and post_data.get('overwrite_content', False):
-                    existing_post.content = content
-                    was_updated = True
+                # Check if the post already exists by platform_id or content hash
+                existing_post = SocialPost.objects.filter(
+                    user=user, 
+                    platform=platform,
+                    content_hash=content_hash
+                ).first()
                 
-                if was_updated:
-                    # Track update timestamp
-                    existing_post.collected_at = timezone.now()
-                    existing_post.save()
-                    updated_count += 1
+                if existing_post:
+                    # Post already exists, update if necessary
+                    logger.info(f"Post already exists with ID {existing_post.id}")
+                    updated = False
+                    
+                    # Update fields if needed (e.g., engagement metrics)
+                    for field in ['likes', 'comments', 'shares']:
+                        if field in post_data and getattr(existing_post, field, 0) != post_data.get(field, 0):
+                            setattr(existing_post, field, post_data.get(field, 0))
+                            updated = True
+                    
+                    if updated:
+                        existing_post.save()
+                        updated_count += 1
+                    else:
+                        duplicate_count += 1
                 else:
-                    duplicate_count += 1
-            else:
-                # Create new post with the content hash
-                try:
-                    SocialPost.objects.create(
-                        user=user,
-                        platform=platform,
-                        platform_id=platform_id,
-                        content_hash=content_hash,
-                        content=content,
-                        original_user=post_data.get('original_user', ''),
-                        engagement_count=post_data.get('engagement_count', 0),
-                        is_sponsored=post_data.get('is_sponsored', False),
-                        verified=post_data.get('verified', False),
-                        timestamp=post_data.get('timestamp'),
-                        is_friend=post_data.get('is_friend', False),
-                        is_family=post_data.get('is_family', False),
-                        collected_at=timezone.now()
-                    )
-                    new_count += 1
-                except IntegrityError:
-                    # This handles the rare case where a duplicate was created between our check and save
-                    duplicate_count += 1
+                    # Create new post with the content hash
+                    try:
+                        logger.info(f"Creating new post for platform {platform}")
+                        SocialPost.objects.create(
+                            user=user,
+                            platform=platform,
+                            platform_id=platform_id,
+                            content_hash=content_hash,
+                            content=content,
+                            original_user=post_data.get('original_user', ''),
+                            engagement_count=post_data.get('engagement_count', 0),
+                            is_sponsored=post_data.get('is_sponsored', False),
+                            verified=post_data.get('verified', False),
+                            timestamp=post_data.get('timestamp'),
+                            is_friend=post_data.get('is_friend', False),
+                            is_family=post_data.get('is_family', False),
+                            collected_at=timezone.now()
+                        )
+                        new_count += 1
+                        logger.info(f"New post created successfully")
+                    except IntegrityError as e:
+                        # This handles the rare case where a duplicate was created between our check and save
+                        logger.error(f"IntegrityError: {str(e)}")
+                        duplicate_count += 1
+                    except Exception as e:
+                        logger.error(f"Error creating post: {str(e)}")
+                        error_count += 1
+            except Exception as e:
+                logger.error(f"Error processing post: {str(e)}")
+                error_count += 1
         
         # Log the activity
+        activity_details = f"Collected {new_count} new posts, updated {updated_count}, skipped {duplicate_count} duplicates, and encountered {error_count} errors"
+        logger.info(activity_details)
+        
         BehaviorLog.objects.create(
             user=user,
             behavior_type='collect_posts',
             platform=platform,
             count=new_count + updated_count,
-            details=f"Collected {new_count} new posts, updated {updated_count}, and skipped {duplicate_count} duplicates"
+            details=activity_details
         )
         
         # Process ML for new posts in the background
@@ -1236,17 +1254,17 @@ def collect_posts(request):
         
         return JsonResponse({
             'status': 'success',
-            'new_posts': new_count,
-            'updated_posts': updated_count,
-            'duplicate_posts': duplicate_count,
-            'message': f"Successfully collected {new_count} new posts, updated {updated_count}, and skipped {duplicate_count} duplicates"
+            'message': activity_details,
+            'new': new_count,
+            'updated': updated_count,
+            'duplicates': duplicate_count,
+            'errors': error_count
         })
     except json.JSONDecodeError:
-        return JsonResponse({'status': 'error', 'message': 'Invalid JSON data'}, status=400)
+        logger.error("Invalid JSON in request body")
+        return JsonResponse({'status': 'error', 'message': 'Invalid JSON in request body'}, status=400)
     except Exception as e:
-        import traceback
-        error_details = traceback.format_exc()
-        print(f"Error in collect_posts: {error_details}")
+        logger.error(f"Unexpected error: {str(e)}")
         return JsonResponse({'status': 'error', 'message': str(e)}, status=500)
 
 @csrf_exempt

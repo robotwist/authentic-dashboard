@@ -1,6 +1,49 @@
-asgiref==3.8.1
-Django==5.2
-django-cors-headers==4.7.0
-numpy==2.2.4
-sqlparse==0.5.3
-typing_extensions==4.13.0
+# Core Django dependencies
+Django>=3.2.0,<4.0.0
+django-crispy-forms>=1.12.0
+django-allauth>=0.45.0
+django-filter>=2.4.0
+django-cors-headers>=3.7.0
+django-debug-toolbar>=3.2.0
+django-extensions>=3.1.3
+
+# Database
+psycopg2-binary>=2.9.1  # PostgreSQL adapter
+dj-database-url>=0.5.0
+
+# Web server and WSGI
+gunicorn>=20.1.0
+whitenoise>=5.3.0
+
+# Common utilities
+python-dotenv>=0.19.0
+Pillow>=8.3.1  # Image processing
+requests>=2.26.0
+numpy>=1.21.2
+pandas>=1.3.2
+scipy>=1.7.1
+
+# ML & Data Science
+scikit-learn>=1.0.0
+xgboost>=1.4.2
+fastai>=2.5.3
+torch>=1.9.0  # Base for PyTorch
+torchvision>=0.10.0
+transformers>=4.9.2  # Hugging Face transformers
+sentence-transformers>=2.0.0  # Sentence-BERT embeddings
+
+# Optional: Install if using these models
+# deepface>=0.0.75  # Face analysis
+# yolov5>=6.0.0  # Object detection in images
+# lightfm>=1.16  # Recommender system
+# surprise>=1.1.1  # Recommender system
+# dgl>=0.7.2  # Graph neural networks
+# torch-geometric>=2.0.1  # PyTorch Geometric for GNNs
+
+# Development & testing
+pytest>=6.2.5
+pytest-django>=4.4.0
+coverage>=5.5
+flake8>=3.9.2
+black>=21.7b0
+isort>=5.9.3
