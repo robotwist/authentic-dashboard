@@ -37,6 +37,7 @@ INSTALLED_APPS = [
     'django.contrib.sessions',
     'django.contrib.messages',
     'django.contrib.staticfiles',
+    'rest_framework',  # Django REST Framework
     'brandsensor',
     'brandsensor.templatetags',  # Add templatetags as a separate app for custom filters
     # 'corsheaders',  # Enable CORS for cross-origin requests - temporarily removed
@@ -190,3 +191,18 @@ CACHE_TTL_LONG = 60 * 60 * 24  # 24 hours for static data
 LOGIN_URL = '/login/'
 LOGIN_REDIRECT_URL = '/dashboard/'
 LOGOUT_REDIRECT_URL = '/'
+
+# Django REST Framework settings
+REST_FRAMEWORK = {
+    'DEFAULT_PERMISSION_CLASSES': [
+        'rest_framework.permissions.IsAuthenticated',
+    ],
+    'DEFAULT_AUTHENTICATION_CLASSES': [
+        'rest_framework.authentication.SessionAuthentication',
+        # Removing or commenting out the problematic import
+        # 'brandsensor.api_views.APIKeyAuthentication',
+        'brandsensor.auth.APIKeyAuthentication',
+    ],
+    'DEFAULT_PAGINATION_CLASS': 'rest_framework.pagination.PageNumberPagination',
+    'PAGE_SIZE': 20,
+}
