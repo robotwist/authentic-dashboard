@@ -468,9 +468,12 @@ def feedback(request):
         return Response({'status': 'error', 'message': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 @api_view(['GET'])
+@authentication_classes([])  # Empty list means no authentication required
+@permission_classes([])      # Empty list means no permissions required
 def api_health_check(request):
     """
-    Simple health check endpoint to verify API is up and running
+    Simple health check endpoint to verify API is up and running.
+    This endpoint is intentionally open (no auth) to allow connectivity checks.
     """
     return Response({
         'status': 'ok',

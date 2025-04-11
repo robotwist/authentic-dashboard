@@ -62,7 +62,40 @@ chrome.runtime.onInstalled.addListener(function(details) {
             }
         });
     }
+    
+    // Always reset API availability status on install or update
+    resetApiAvailabilityStatus();
 });
+
+// Also reset API status on browser startup
+chrome.runtime.onStartup.addListener(function() {
+    console.log("Extension starting up - resetting API availability status");
+    resetApiAvailabilityStatus();
+});
+
+// Function to reset API availability status
+function resetApiAvailabilityStatus() {
+    console.log("Resetting API availability status");
+    chrome.storage.local.set({
+        apiAvailable: undefined,
+        apiLastCheck: 0
+    }, function() {
+        console.log("API availability status has been reset");
+        
+        // Force a fresh check if authDashboardAPI is available
+        setTimeout(() => {
+            if (window.authDashboardAPI) {
+                window.authDashboardAPI.checkAvailability(true)
+                    .then(status => {
+                        console.log("Initial API availability check result:", status);
+                    })
+                    .catch(err => {
+                        console.error("Error checking API availability:", err);
+                    });
+            }
+        }, 2000); // Wait for API client to initialize
+    });
+}
 
 // Listen for clicks on notifications
 chrome.notifications.onClicked.addListener(function(notificationId) {
