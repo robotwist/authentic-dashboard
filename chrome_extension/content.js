@@ -282,6 +282,8 @@ function markPostAsProcessed(fingerprint) {
 
 // Then modify the collectInstagramPosts function to use fingerprinting
 function collectInstagramPosts(dataPreferences) {
+  console.log("Starting Instagram post collection with error prevention");
+  
   // Default to all enabled if not specified
   const prefs = dataPreferences || {
     collectContent: true,
@@ -294,155 +296,186 @@ function collectInstagramPosts(dataPreferences) {
   // Existing post collection code, but respect preferences
   const posts = [];
   const postElements = document.querySelectorAll('article');
+  
+  console.log(`Found ${postElements.length} potential Instagram posts`);
+  
+  if (postElements.length === 0) {
+    console.log("No Instagram posts found on page");
+    return Promise.resolve([]);
+  }
 
   const processedPromises = [];
 
-  postElements.forEach((el) => {
-    // Get content only if preference is enabled
-    const content = prefs.collectContent ? (el.innerText || "") : "";
-    
-    // Get user only if preference is enabled
-    const username = prefs.collectUsers 
-      ? (el.querySelector('header a')?.innerText || "unknown") 
-      : "anonymous";
-    
-    // Enhanced friend detection logic
-    let isFriend = false;
-    if (prefs.collectUsers) {
-      // Check for following status in buttons
-      const followButton = el.querySelector('header button');
-      if (followButton) {
-        const buttonText = followButton.innerText.toLowerCase();
-        isFriend = buttonText.includes('following') || 
-                  buttonText.includes('unfollow') ||
-                  buttonText.includes('requested');
+  postElements.forEach((el, index) => {
+    try {
+      // Check if element exists before accessing properties
+      if (!el) {
+        console.log(`Skipping invalid post element at index ${index}`);
+        return;
       }
       
-      // Also check for follow status text
-      if (!isFriend) {
-        const headerText = el.querySelector('header').innerText.toLowerCase();
-        isFriend = headerText.includes('following') || 
-                  headerText.includes('follows you') ||
-                  headerText.includes('mutual');
-      }
-    }
-    
-    // Collect engagement data based on preference
-    let likes = 0;
-    let comments = 0;
-    
-    if (prefs.collectEngagement) {
-      // Look for like count
-      const likeElement = el.querySelector('section span');
-      if (likeElement && likeElement.innerText) {
-        const likeText = likeElement.innerText;
-        if (likeText.includes('like') || likeText.includes('heart')) {
-          const match = likeText.match(/\d+/);
-          if (match) likes = parseInt(match[0]);
-        }
+      // Get content safely
+      let content = "";
+      try {
+        content = prefs.collectContent ? (el.innerText || "") : "";
+      } catch (err) {
+        console.warn(`Error getting content for post ${index}:`, err);
+        content = "";
       }
       
-      // Look for comment count
-      const commentElement = el.querySelector('a[href*="comments"]');
-      if (commentElement && commentElement.innerText) {
-        const commentText = commentElement.innerText;
-        if (commentText.includes('comment')) {
-          const match = commentText.match(/\d+/);
-          if (match) comments = parseInt(match[0]);
-        }
-      }
-    }
-    
-    // Only collect hashtags if preference enabled
-    const hashtags = [];
-    const mentions = [];
-    
-    if (prefs.collectHashtags) {
-      // Extract hashtags
-      const hashtagMatches = content.match(/#[\w]+/g);
-      if (hashtagMatches) {
-        hashtagMatches.forEach(tag => {
-          if (!hashtags.includes(tag)) hashtags.push(tag);
-        });
+      // Get username safely with null checking
+      let username = "unknown";
+      try {
+        const headerElement = el.querySelector('header');
+        const usernameElement = headerElement ? headerElement.querySelector('a') : null;
+        username = (usernameElement && usernameElement.innerText) ? usernameElement.innerText.trim() : "unknown";
+      } catch (err) {
+        console.warn(`Error getting username for post ${index}:`, err);
       }
       
-      // Extract mentions
-      const mentionMatches = content.match(/@[\w.]+/g);
-      if (mentionMatches) {
-        mentionMatches.forEach(mention => {
-          if (!mentions.includes(mention)) mentions.push(mention);
-        });
+      // If we couldn't get basic content or username, skip this post
+      if (!content && username === "unknown") {
+        console.log(`Skipping post ${index} due to missing content and username`);
+        return;
       }
-    }
-    
-    // Only do ML analysis if enabled
-    let sentimentScore = 0;
-    let manipulativePatterns = [];
-    
-    if (prefs.collectLocalML && content) {
-      // Simple sentiment analysis
-      const mlAnalysis = analyzeContentWithML(content, 'instagram');
-      sentimentScore = mlAnalysis.sentiment_score;
-      manipulativePatterns = mlAnalysis.manipulative_patterns;
-    }
-
-    if (content.length > 0) {
-      // Generate fingerprint for this post
-      const fingerprint = generatePostFingerprint('instagram', username, content, '');
       
-      // Check if we've already processed this post
-      const processedPromise = isPostAlreadyProcessed(fingerprint).then(isProcessed => {
-        if (isProcessed) {
-          console.log(`Skipping already processed Instagram post: ${fingerprint}`);
-          return null; // Skip this post
-        }
-        
-        // Build an object with only the enabled data fields
-        const post = {
-        platform: 'instagram',
-          collected_at: new Date().toISOString()
-        };
-        
-        // Only add fields based on preferences
-        if (prefs.collectContent) {
-          post.content = content;
-          post.content_length = content.length;
-        }
-        
+      console.log(`Processing Instagram post ${index} from user ${username}, content length: ${content.length}`);
+      
+      // Rest of the function remains the same, but wrapped in try/catch
+      try {
+        // Enhanced friend detection logic
+        let isFriend = false;
         if (prefs.collectUsers) {
-          post.user = username;
-          post.verified = el.querySelector('header svg[aria-label="Verified"]') !== null;
-          post.is_friend = Boolean(isFriend);
-          post.is_family = false; // Always needs user input
+          // Check for following status in buttons
+          const followButton = el.querySelector('header button');
+          if (followButton) {
+            const buttonText = followButton.innerText.toLowerCase();
+            isFriend = buttonText.includes('following') || 
+                      buttonText.includes('unfollow') ||
+                      buttonText.includes('requested');
+          }
+          
+          // Also check for follow status text
+          if (!isFriend && el.querySelector('header')) {
+            const headerText = el.querySelector('header').innerText.toLowerCase();
+            isFriend = headerText.includes('following') || 
+                      headerText.includes('follows you') ||
+                      headerText.includes('mutual');
+          }
         }
         
-        if (prefs.collectEngagement) {
-          post.likes = likes;
-          post.comments = comments;
-        }
-        
-        if (prefs.collectHashtags) {
-          post.hashtags = hashtags.join(',');
-          post.mentions = mentions.join(',');
-          post.category = hashtags.join(',');
-        }
-        
-        if (prefs.collectLocalML) {
-          post.sentiment_score = sentimentScore;
-          post.manipulative_patterns = manipulativePatterns;
-        }
-        
-        // Mark this post as processed
-        markPostAsProcessed(fingerprint);
-        return post;
-      });
+        // Collect engagement data based on preference
+        let likes = 0;
+        let comments = 0;
       
-      processedPromises.push(processedPromise);
+        if (prefs.collectEngagement) {
+          // Look for like count
+          const likeElement = el.querySelector('section span');
+          if (likeElement && likeElement.innerText) {
+            const likeText = likeElement.innerText;
+            if (likeText.includes('like') || likeText.includes('heart')) {
+              const match = likeText.match(/\d+/);
+              if (match) likes = parseInt(match[0]);
+            }
+          }
+          
+          // Look for comment count
+          const commentElement = el.querySelector('a[href*="comments"]');
+          if (commentElement && commentElement.innerText) {
+            const commentText = commentElement.innerText;
+            if (commentText.includes('comment')) {
+              const match = commentText.match(/\d+/);
+              if (match) comments = parseInt(match[0]);
+            }
+          }
+        }
+    
+        // Only collect hashtags if preference enabled
+        const hashtags = [];
+        const mentions = [];
+        
+        if (prefs.collectHashtags && content) {
+          // Extract hashtags
+          const hashtagMatches = content.match(/#[\w]+/g);
+          if (hashtagMatches) {
+            hashtagMatches.forEach(tag => {
+              if (!hashtags.includes(tag)) hashtags.push(tag);
+            });
+          }
+          
+          // Extract mentions
+          const mentionMatches = content.match(/@[\w.]+/g);
+          if (mentionMatches) {
+            mentionMatches.forEach(mention => {
+              if (!mentions.includes(mention)) mentions.push(mention);
+            });
+          }
+        }
+        
+        // Only do ML analysis if enabled
+        let sentimentScore = 0;
+        let manipulativePatterns = [];
+        
+        if (prefs.collectLocalML && content) {
+          // Simple sentiment analysis
+          const mlAnalysis = analyzeContentWithML(content, 'instagram');
+          sentimentScore = mlAnalysis.sentiment_score;
+          manipulativePatterns = mlAnalysis.manipulative_patterns;
+        }
+  
+        if (content.length > 0) {
+          // Generate fingerprint for this post
+          const fingerprint = generatePostFingerprint('instagram', username, content, '');
+          
+          // Check if we've already processed this post
+          const processedPromise = isPostAlreadyProcessed(fingerprint).then(isProcessed => {
+            if (isProcessed) {
+              console.log(`Skipping already processed Instagram post: ${fingerprint}`);
+              return null; // Skip this post
+            }
+            
+            // Build an object with only the enabled data fields
+            const post = {
+              platform: 'instagram',
+              collected_at: new Date().toISOString()
+            };
+            
+            // Add all the fields we collected
+            post.content = content;
+            post.content_length = content.length;
+            post.user = username;
+            post.verified = el.querySelector('header svg[aria-label="Verified"]') !== null;
+            post.is_friend = Boolean(isFriend);
+            post.is_family = false;
+            post.likes = likes;
+            post.comments = comments;
+            post.hashtags = hashtags.join(',');
+            post.mentions = mentions.join(',');
+            post.category = hashtags.join(',');
+            post.sentiment_score = sentimentScore;
+            
+            // Mark this post as processed
+            markPostAsProcessed(fingerprint);
+            console.log(`Added Instagram post to collection from ${username}`);
+            return post;
+          });
+          
+          processedPromises.push(processedPromise);
+        }
+      } catch (innerError) {
+        console.error(`Error processing Instagram post ${index} details:`, innerError);
+      }
+    } catch (outerError) {
+      console.error(`Error processing Instagram post ${index}:`, outerError);
     }
   });
   
   // Wait for all promise checks to complete and return only non-null posts
-  return Promise.all(processedPromises).then(posts => posts.filter(post => post !== null));
+  return Promise.all(processedPromises).then(posts => {
+    const validPosts = posts.filter(post => post !== null);
+    console.log(`Collected ${validPosts.length} Instagram posts successfully`);
+    return validPosts;
+  });
 }
 
 // Enhanced Facebook post collector
@@ -654,6 +687,27 @@ function collectFacebookPosts() {
  */
 function sendWithDirectFetch(posts, apiKey, apiEndpoint) {
   console.log("Using direct fetch to send posts");
+  
+  // Ensure we have a valid API key
+  if (!apiKey || apiKey.length < 10) {
+    console.error("Invalid API key provided for direct fetch:", apiKey);
+    
+    // Try to get a valid API key from storage
+    chrome.storage.local.get(['apiKey'], function(result) {
+      if (result.apiKey && result.apiKey.length > 10) {
+        console.log("Retrieved API key from storage:", result.apiKey.substring(0, 8) + '...');
+        sendWithDirectFetch(posts, result.apiKey, apiEndpoint);
+      } else {
+        console.error("No valid API key available in storage");
+      }
+    });
+    return;
+  }
+  
+  // Log the API key being used (first 8 chars only for security)
+  console.log("Using API key for direct fetch:", apiKey.substring(0, 8) + '...');
+  
+  // First try the collect-posts endpoint
   fetch(`${apiEndpoint}/api/collect-posts/`, {
     method: 'POST',
     headers: {
@@ -674,29 +728,53 @@ function sendWithDirectFetch(posts, apiKey, apiEndpoint) {
   })
   .then(data => {
     console.log("Successfully sent Facebook posts:", data);
+    
+    // Check for processing errors
+    if (data.errors && data.errors > 0) {
+      console.warn(`Server reported ${data.errors} errors processing the posts`);
+    }
   })
   .catch(error => {
     console.error("Error sending Facebook posts:", error);
     // Try alternate endpoint as last resort
     console.log("Trying alternate endpoint /api/post/");
-    fetch(`${apiEndpoint}/api/post/`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'X-API-Key': apiKey
-      },
-      body: JSON.stringify(posts[0]) // Send first post as a test
-    })
-    .then(response => {
-      console.log("Alternate endpoint response:", response.status);
-      return response.json();
-    })
-    .then(data => {
-      console.log("Alternate endpoint result:", data);
-    })
-    .catch(altError => {
-      console.error("Both endpoints failed:", altError);
-    });
+    
+    // Send posts one by one to the individual post endpoint
+    let successCount = 0;
+    
+    // Process posts sequentially to avoid overwhelming the server
+    sendNextPost(0);
+    
+    function sendNextPost(index) {
+      if (index >= posts.length) {
+        console.log(`Finished sending ${successCount}/${posts.length} posts via alternate endpoint`);
+        return;
+      }
+      
+      fetch(`${apiEndpoint}/api/post/`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-API-Key': apiKey
+        },
+        body: JSON.stringify(posts[index])
+      })
+      .then(response => {
+        console.log(`Post ${index+1}/${posts.length} response:`, response.status);
+        if (response.ok) successCount++;
+        return response.json();
+      })
+      .then(data => {
+        console.log(`Post ${index+1} result:`, data);
+        // Process next post with a small delay to avoid rate limiting
+        setTimeout(() => sendNextPost(index + 1), 100);
+      })
+      .catch(err => {
+        console.error(`Error with post ${index+1}:`, err);
+        // Continue with next post despite error
+        setTimeout(() => sendNextPost(index + 1), 100);
+      });
+    }
   });
 }
 
