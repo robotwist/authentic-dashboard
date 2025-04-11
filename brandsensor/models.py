@@ -103,6 +103,7 @@ class SocialPost(models.Model):
     # Additional fields to support enhanced filtering
     verified = models.BooleanField(default=False)
     image_urls = models.TextField(blank=True)  # Comma-separated list of image URLs
+    image_analysis = models.TextField(blank=True, null=True)  # JSON data for image analysis results
     likes = models.IntegerField(default=0)
     comments = models.IntegerField(default=0)
     shares = models.IntegerField(default=0)

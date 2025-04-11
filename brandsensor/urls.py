@@ -25,6 +25,7 @@ urlpatterns = [
     path('toggle-mode/', dashboard_views.toggle_mode, name='toggle_mode'),
     path('filter-presets/', dashboard_views.filter_presets, name='filter_presets'),
     path('apply-preset/<int:preset_id>/', dashboard_views.apply_preset, name='apply_preset'),
+    path('analyze-images/', dashboard_views.analyze_images, name='analyze_images'),
     
     # Post related views
     path('post/<int:post_id>/', post_views.post_detail, name='post_detail'),

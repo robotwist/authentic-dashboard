@@ -142,12 +142,78 @@ def ml_insights(request):
     # Prepare for visualization (limit to top 10)
     category_data = {item['automated_category']: item['count'] for item in category_counts[:10]}
     
+    # Enhanced image analysis - Process and get images with captions
+    posts_with_captions = []
+    for post in posts_with_images[:10]:  # Limit to 10 for performance
+        image_urls = post.image_urls.split(',') if post.image_urls else []
+        image_data = []
+        
+        for url in image_urls[:3]:  # Process up to 3 images per post
+            url = url.strip()
+            if url:
+                # Check if we have ML data for this image
+                image_analysis = json.loads(post.image_analysis) if post.image_analysis else {}
+                caption = image_analysis.get('caption', 'No caption available')
+                aesthetics = image_analysis.get('aesthetics', {})
+                objects = image_analysis.get('objects', [])
+                
+                image_data.append({
+                    'url': url,
+                    'caption': caption,
+                    'aesthetics': aesthetics,
+                    'objects': objects[:5] if objects else [],  # Show top 5 objects
+                })
+        
+        if image_data:
+            posts_with_captions.append({
+                'post': post,
+                'images': image_data
+            })
+    
+    # Get topic distribution over time
+    topic_time_series = []
+    weekly_data = []
+    
+    # Group posts by week and get top topics for each week
+    week_posts = {}
+    for post in ml_posts:
+        week = post.created_at.strftime('%Y-%U')  # Year and week number
+        if week not in week_posts:
+            week_posts[week] = []
+        week_posts[week].append(post)
+    
+    # For each week, get the top topics
+    for week, posts in sorted(week_posts.items()):
+        topics = {}
+        for post in posts:
+            if post.automated_category:
+                topic = post.automated_category
+                if topic not in topics:
+                    topics[topic] = 0
+                topics[topic] += 1
+        
+        top_topics = sorted(topics.items(), key=lambda x: x[1], reverse=True)[:3]
+        week_date = datetime.datetime.strptime(week + '-1', '%Y-%U-%w')
+        weekly_data.append({
+            'week': week_date.strftime('%b %d'),
+            'topics': [{'name': t[0], 'count': t[1]} for t in top_topics]
+        })
+    
+    # Get image analysis statistics
+    image_analysis_stats = {
+        'total_images': posts_with_images.count(),
+        'faces_detected': posts_query.filter(image_analysis__icontains='faces').count(),
+        'has_aesthetics': posts_query.filter(image_analysis__icontains='aesthetics').count(),
+        'has_objects': posts_query.filter(image_analysis__icontains='objects').count(),
+    }
+    
     context = {
         'ml_posts': ml_posts[:20],
         'ml_posts_count': ml_posts.count(),
         'platform_stats': platform_stats,
         'category_data': json.dumps(category_data),
         'posts_with_images': posts_with_images[:20],
+        'posts_with_captions': posts_with_captions,
         'image_posts_count': posts_with_images.count(),
         'days_filter': days_filter,
         'platform_filter': platform_filter,
@@ -155,6 +221,8 @@ def ml_insights(request):
         'today_posts': user_data['today_posts'],
         'this_week_posts': user_data['this_week_posts'],
         'SocialPost': SocialPost,  # Pass the model class for template access
+        'weekly_data': weekly_data,
+        'image_analysis_stats': image_analysis_stats,
     }
     
     return render(request, "brandsensor/ml_insights.html", context)

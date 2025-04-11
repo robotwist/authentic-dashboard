@@ -1,4 +1,6 @@
 from django import template
+from django.template.defaultfilters import stringfilter
+import itertools
 
 register = template.Library()
 
@@ -69,4 +71,57 @@ def first_image(value):
         parts = value.split(',')
         if parts:
             return parts[0].strip()
-    return "" 
+    return ""
+
+@register.filter
+def intcomma(value):
+    """
+    Converts an integer to a string containing commas.
+    Usage: {{ value|intcomma }}
+    """
+    try:
+        orig = str(value)
+        new = orig
+        if "." in new:
+            dec_point_idx = new.index(".")
+            new = new[:dec_point_idx]
+        if len(new) <= 3:
+            return orig
+        else:
+            parts = []
+            while new:
+                parts.append(new[-3:])
+                new = new[:-3]
+            parts.reverse()
+            return ','.join(parts) + orig[len(''.join(parts)):]
+    except (ValueError, TypeError):
+        return value
+
+@register.filter
+def percof(value, arg):
+    """
+    Calculates what percentage value is of the total arg.
+    Usage: {{ value|percof:total }}
+    
+    Example: 
+        {{ 10|percof:50 }} => 20
+        {{ 25|percof:100 }} => 25
+        {{ sentiment_bins.positive|percof:sentiment_bins.values }} => percentage of positive sentiment
+    """
+    try:
+        if isinstance(arg, dict):
+            # If arg is a dictionary, calculate the sum of its values
+            total = sum(arg.values())
+        elif hasattr(arg, '__iter__') and not isinstance(arg, str):
+            # If arg is an iterable (like a list), calculate the sum
+            total = sum(arg)
+        else:
+            # Otherwise, use the arg as is
+            total = float(arg)
+            
+        if total <= 0:
+            return 0
+            
+        return int((float(value) / total) * 100)
+    except (ValueError, TypeError, ZeroDivisionError):
+        return 0 

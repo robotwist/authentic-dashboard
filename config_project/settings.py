@@ -40,13 +40,13 @@ INSTALLED_APPS = [
     'rest_framework',  # Django REST Framework
     'brandsensor',
     'brandsensor.templatetags',  # Add templatetags as a separate app for custom filters
-    # 'corsheaders',  # Enable CORS for cross-origin requests - temporarily removed
+    'corsheaders',  # Enable CORS for cross-origin requests
 ]
 
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
-    # 'corsheaders.middleware.CorsMiddleware',  # This must come before CommonMiddleware - temporarily removed
+    'corsheaders.middleware.CorsMiddleware',  # This must come before CommonMiddleware
     'django.middleware.common.CommonMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
     'django.contrib.auth.middleware.AuthenticationMiddleware',
@@ -54,29 +54,29 @@ MIDDLEWARE = [
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
 ]
 
-# CORS settings - temporarily disabled
-# CORS_ALLOW_ALL_ORIGINS = True  # For development - in production, specify domains
-# CORS_ALLOW_CREDENTIALS = True
-# CORS_ALLOW_METHODS = [
-#     'GET',
-#     'POST',
-#     'PUT',
-#     'PATCH',
-#     'DELETE',
-#     'OPTIONS',
-# ]
-# CORS_ALLOW_HEADERS = [
-#     'accept',
-#     'accept-encoding',
-#     'authorization',
-#     'content-type',
-#     'dnt',
-#     'origin',
-#     'user-agent',
-#     'x-csrftoken',
-#     'x-requested-with',
-#     'x-api-key',  # Allow the API key header
-# ]
+# CORS settings
+CORS_ALLOW_ALL_ORIGINS = True  # For development - in production, specify domains
+CORS_ALLOW_CREDENTIALS = True
+CORS_ALLOW_METHODS = [
+    'GET',
+    'POST',
+    'PUT',
+    'PATCH',
+    'DELETE',
+    'OPTIONS',
+]
+CORS_ALLOW_HEADERS = [
+    'accept',
+    'accept-encoding',
+    'authorization',
+    'content-type',
+    'dnt',
+    'origin',
+    'user-agent',
+    'x-csrftoken',
+    'x-requested-with',
+    'x-api-key',  # Allow the API key header
+]
 
 ROOT_URLCONF = 'config_project.urls'
 

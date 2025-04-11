@@ -498,6 +498,187 @@
       </div>
     </div>
   </div>
+  
+  <!-- Add this section for Advanced Image Analysis -->
+  <div class="card mt-4">
+    <div class="card-header bg-primary text-white">
+      <h5 class="mb-0">
+        <i class="fas fa-camera mr-2"></i> Advanced Image Analysis
+        <span class="badge badge-light ml-2">{{ image_analysis_stats.total_images }}</span>
+      </h5>
+    </div>
+    <div class="card-body">
+      <!-- Image Analysis Stats -->
+      <div class="row mb-4">
+        <div class="col-md-3">
+          <div class="card border-0 bg-light">
+            <div class="card-body text-center">
+              <h3 class="text-primary">{{ image_analysis_stats.total_images }}</h3>
+              <div class="text-muted">Total Images</div>
+            </div>
+          </div>
+        </div>
+        <div class="col-md-3">
+          <div class="card border-0 bg-light">
+            <div class="card-body text-center">
+              <h3 class="text-primary">{{ image_analysis_stats.faces_detected }}</h3>
+              <div class="text-muted">Faces Detected</div>
+            </div>
+          </div>
+        </div>
+        <div class="col-md-3">
+          <div class="card border-0 bg-light">
+            <div class="card-body text-center">
+              <h3 class="text-primary">{{ image_analysis_stats.has_aesthetics }}</h3>
+              <div class="text-muted">Aesthetic Analysis</div>
+            </div>
+          </div>
+        </div>
+        <div class="col-md-3">
+          <div class="card border-0 bg-light">
+            <div class="card-body text-center">
+              <h3 class="text-primary">{{ image_analysis_stats.has_objects }}</h3>
+              <div class="text-muted">Object Detection</div>
+            </div>
+          </div>
+        </div>
+      </div>
+      
+      <!-- Images with Captions -->
+      <h5 class="mb-3">Images with ML-Generated Captions</h5>
+      <div class="row">
+        {% for post_item in posts_with_captions %}
+          {% for image in post_item.images %}
+            <div class="col-md-4 mb-4">
+              <div class="card h-100">
+                <img src="{{ image.url }}" class="card-img-top" alt="Social media image" style="max-height: 200px; object-fit: cover;">
+                <div class="card-body">
+                  <h6 class="card-subtitle mb-2 text-muted">
+                    {{ post_item.post.platform|upper }} • {{ post_item.post.original_user }}
+                  </h6>
+                  <p class="card-text">
+                    <i class="fas fa-quote-left text-muted mr-1"></i>
+                    {{ image.caption }}
+                    <i class="fas fa-quote-right text-muted ml-1"></i>
+                  </p>
+                  
+                  {% if image.aesthetics %}
+                    <div class="mt-3">
+                      <h6 class="mb-2">Aesthetic Scores:</h6>
+                      <div class="row small">
+                        {% if image.aesthetics.technical_score %}
+                          <div class="col-6 mb-2">
+                            <div class="d-flex justify-content-between">
+                              <span>Technical:</span>
+                              <span class="badge {% if image.aesthetics.technical_score > 7 %}badge-success{% elif image.aesthetics.technical_score > 5 %}badge-info{% else %}badge-secondary{% endif %}">
+                                {{ image.aesthetics.technical_score|floatformat:1 }}/10
+                              </span>
+                            </div>
+                          </div>
+                        {% endif %}
+                        {% if image.aesthetics.aesthetic_score %}
+                          <div class="col-6 mb-2">
+                            <div class="d-flex justify-content-between">
+                              <span>Aesthetic:</span>
+                              <span class="badge {% if image.aesthetics.aesthetic_score > 7 %}badge-success{% elif image.aesthetics.aesthetic_score > 5 %}badge-info{% else %}badge-secondary{% endif %}">
+                                {{ image.aesthetics.aesthetic_score|floatformat:1 }}/10
+                              </span>
+                            </div>
+                          </div>
+                        {% endif %}
+                        {% if image.aesthetics.composition_score %}
+                          <div class="col-6 mb-2">
+                            <div class="d-flex justify-content-between">
+                              <span>Composition:</span>
+                              <span class="badge {% if image.aesthetics.composition_score > 7 %}badge-success{% elif image.aesthetics.composition_score > 5 %}badge-info{% else %}badge-secondary{% endif %}">
+                                {{ image.aesthetics.composition_score|floatformat:1 }}/10
+                              </span>
+                            </div>
+                          </div>
+                        {% endif %}
+                        {% if image.aesthetics.color_harmony %}
+                          <div class="col-6 mb-2">
+                            <div class="d-flex justify-content-between">
+                              <span>Color:</span>
+                              <span class="badge {% if image.aesthetics.color_harmony > 7 %}badge-success{% elif image.aesthetics.color_harmony > 5 %}badge-info{% else %}badge-secondary{% endif %}">
+                                {{ image.aesthetics.color_harmony|floatformat:1 }}/10
+                              </span>
+                            </div>
+                          </div>
+                        {% endif %}
+                      </div>
+                    </div>
+                  {% endif %}
+                  
+                  {% if image.objects %}
+                    <div class="mt-3">
+                      <h6 class="mb-2">Detected Objects:</h6>
+                      <div>
+                        {% for obj in image.objects %}
+                          <span class="badge badge-pill badge-info mr-1 mb-1">{{ obj.name }}</span>
+                        {% endfor %}
+                      </div>
+                    </div>
+                  {% endif %}
+                  
+                  <div class="mt-3 text-right">
+                    <a href="{% url 'post_detail' post_item.post.id %}" class="btn btn-sm btn-outline-primary">
+                      <i class="fas fa-search"></i> View Post
+                    </a>
+                  </div>
+                </div>
+              </div>
+            </div>
+          {% endfor %}
+        {% empty %}
+          <div class="col-12">
+            <div class="alert alert-info">
+              No images with ML analysis found. Process more posts with images to see analysis results.
+            </div>
+          </div>
+        {% endfor %}
+      </div>
+    </div>
+  </div>
+  
+  <!-- Add a weekly topic trends section -->
+  <div class="card mt-4">
+    <div class="card-header bg-primary text-white">
+      <h5 class="mb-0">
+        <i class="fas fa-chart-line mr-2"></i> Topic Trends Over Time
+      </h5>
+    </div>
+    <div class="card-body">
+      <div class="row">
+        {% for week_data in weekly_data %}
+          <div class="col-md-3 mb-4">
+            <div class="card h-100">
+              <div class="card-header text-center">
+                <h6 class="mb-0">{{ week_data.week }}</h6>
+              </div>
+              <div class="card-body">
+                <h6 class="text-muted mb-3">Top Topics</h6>
+                {% for topic in week_data.topics %}
+                  <div class="d-flex justify-content-between mb-2">
+                    <div class="text-truncate mr-2">{{ topic.name }}</div>
+                    <span class="badge badge-primary">{{ topic.count }}</span>
+                  </div>
+                {% empty %}
+                  <div class="text-muted">No topics found</div>
+                {% endfor %}
+              </div>
+            </div>
+          </div>
+        {% empty %}
+          <div class="col-12">
+            <div class="alert alert-info">
+              No topic trend data available. This will populate as more content is processed over time.
+            </div>
+          </div>
+        {% endfor %}
+      </div>
+    </div>
+  </div>
 </div>
 {% endblock %}
 

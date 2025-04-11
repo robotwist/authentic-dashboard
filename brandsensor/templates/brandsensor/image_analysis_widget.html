@@ -1,0 +1,103 @@
+{% if image_analysis_stats %}
+<div class="card mb-4">
+    <div class="card-header">
+        <i class="fas fa-image me-1"></i>
+        Image Analysis Insights
+    </div>
+    <div class="card-body">
+        <div class="row">
+            <div class="col-md-4">
+                <h5 class="card-title">Overview</h5>
+                <ul class="list-group list-group-flush">
+                    <li class="list-group-item d-flex justify-content-between align-items-center">
+                        Images Analyzed
+                        <span class="badge bg-primary rounded-pill">{{ image_analysis_stats.posts_with_analysis }}</span>
+                    </li>
+                    <li class="list-group-item d-flex justify-content-between align-items-center">
+                        Total Images
+                        <span class="badge bg-primary rounded-pill">{{ image_analysis_stats.total_images }}</span>
+                    </li>
+                    <li class="list-group-item d-flex justify-content-between align-items-center">
+                        Posts With Images
+                        <span class="badge bg-primary rounded-pill">{{ image_analysis_stats.posts_with_images }}</span>
+                    </li>
+                    <li class="list-group-item d-flex justify-content-between align-items-center">
+                        Average Aesthetic Score
+                        <span class="badge bg-info rounded-pill">{{ image_analysis_stats.avg_aesthetic_score|floatformat:2 }}</span>
+                    </li>
+                </ul>
+                
+                <form method="post" action="{% url 'analyze_images' %}" class="mt-3">
+                    {% csrf_token %}
+                    <button type="submit" class="btn btn-primary btn-sm w-100">
+                        <i class="fas fa-magic me-1"></i> Analyze More Images
+                    </button>
+                </form>
+            </div>
+            
+            <div class="col-md-4">
+                <h5 class="card-title">Top Objects Detected</h5>
+                {% if image_analysis_stats.top_objects %}
+                    <ul class="list-group list-group-flush">
+                        {% for object_name, count in image_analysis_stats.top_objects %}
+                            <li class="list-group-item d-flex justify-content-between align-items-center">
+                                {{ object_name|title }}
+                                <span class="badge bg-primary rounded-pill">{{ count }}</span>
+                            </li>
+                        {% endfor %}
+                    </ul>
+                {% else %}
+                    <p class="text-muted">No objects detected yet</p>
+                {% endif %}
+            </div>
+            
+            <div class="col-md-4">
+                <h5 class="card-title">Face Detection</h5>
+                <ul class="list-group list-group-flush">
+                    <li class="list-group-item d-flex justify-content-between align-items-center">
+                        Total Faces Detected
+                        <span class="badge bg-primary rounded-pill">{{ image_analysis_stats.face_count }}</span>
+                    </li>
+                    <li class="list-group-item d-flex justify-content-between align-items-center">
+                        Posts With Faces
+                        <span class="badge bg-primary rounded-pill">{{ image_analysis_stats.posts_with_faces }}</span>
+                    </li>
+                </ul>
+                
+                <h5 class="card-title mt-3">Sample Captions</h5>
+                {% if image_analysis_stats.captions_sample %}
+                    <div class="list-group">
+                        {% for caption in image_analysis_stats.captions_sample %}
+                            <div class="list-group-item list-group-item-action">
+                                <small>{{ caption }}</small>
+                            </div>
+                        {% endfor %}
+                    </div>
+                {% else %}
+                    <p class="text-muted">No captions available</p>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+    <div class="card-footer small text-muted">
+        Powered by AI image analysis
+    </div>
+</div>
+{% else %}
+<div class="card mb-4">
+    <div class="card-header">
+        <i class="fas fa-image me-1"></i>
+        Image Analysis
+    </div>
+    <div class="card-body text-center py-5">
+        <h5>No image analysis data available yet</h5>
+        <p class="text-muted">Analyze your content with images to get insights on objects, faces, and aesthetics.</p>
+        <form method="post" action="{% url 'analyze_images' %}" class="mt-4">
+            {% csrf_token %}
+            <button type="submit" class="btn btn-primary">
+                <i class="fas fa-magic me-1"></i> Analyze Images
+            </button>
+        </form>
+    </div>
+</div>
+{% endif %} 

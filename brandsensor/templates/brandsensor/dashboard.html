@@ -445,6 +445,197 @@
                 </div>
             {% endif %}
         </div>
+
+        <!-- Add this new Analytics Section after the main post listing section -->
+        <div class="row mt-4">
+          <div class="col-12">
+            <div class="card">
+              <div class="card-header bg-primary text-white">
+                <h5 class="mb-0">
+                  <i class="fas fa-chart-bar mr-2"></i> Enhanced Content Analytics
+                </h5>
+              </div>
+              <div class="card-body">
+                <div class="row">
+                  <!-- Sentiment Distribution -->
+                  <div class="col-md-4">
+                    <div class="card mb-3">
+                      <div class="card-header">
+                        <h6 class="mb-0">Sentiment Distribution</h6>
+                      </div>
+                      <div class="card-body">
+                        <div class="sentiment-chart">
+                          <div class="d-flex justify-content-between mb-2">
+                            <span>Very Negative</span>
+                            <span>{{ sentiment_bins.very_negative }}</span>
+                          </div>
+                          <div class="progress mb-3">
+                            <div class="progress-bar bg-danger" role="progressbar" 
+                                 style="width: {{ sentiment_bins.very_negative|default:0|percof:sentiment_bins.values|default:5 }}%" 
+                                 aria-valuenow="{{ sentiment_bins.very_negative }}" aria-valuemin="0" 
+                                 aria-valuemax="100"></div>
+                          </div>
+                          
+                          <div class="d-flex justify-content-between mb-2">
+                            <span>Negative</span>
+                            <span>{{ sentiment_bins.negative }}</span>
+                          </div>
+                          <div class="progress mb-3">
+                            <div class="progress-bar bg-warning" role="progressbar" 
+                                 style="width: {{ sentiment_bins.negative|default:0|percof:sentiment_bins.values|default:5 }}%" 
+                                 aria-valuenow="{{ sentiment_bins.negative }}" aria-valuemin="0" 
+                                 aria-valuemax="100"></div>
+                          </div>
+                          
+                          <div class="d-flex justify-content-between mb-2">
+                            <span>Neutral</span>
+                            <span>{{ sentiment_bins.neutral }}</span>
+                          </div>
+                          <div class="progress mb-3">
+                            <div class="progress-bar bg-secondary" role="progressbar" 
+                                 style="width: {{ sentiment_bins.neutral|default:0|percof:sentiment_bins.values|default:5 }}%" 
+                                 aria-valuenow="{{ sentiment_bins.neutral }}" aria-valuemin="0" 
+                                 aria-valuemax="100"></div>
+                          </div>
+                          
+                          <div class="d-flex justify-content-between mb-2">
+                            <span>Positive</span>
+                            <span>{{ sentiment_bins.positive }}</span>
+                          </div>
+                          <div class="progress mb-3">
+                            <div class="progress-bar bg-info" role="progressbar" 
+                                 style="width: {{ sentiment_bins.positive|default:0|percof:sentiment_bins.values|default:5 }}%" 
+                                 aria-valuenow="{{ sentiment_bins.positive }}" aria-valuemin="0" 
+                                 aria-valuemax="100"></div>
+                          </div>
+                          
+                          <div class="d-flex justify-content-between mb-2">
+                            <span>Very Positive</span>
+                            <span>{{ sentiment_bins.very_positive }}</span>
+                          </div>
+                          <div class="progress">
+                            <div class="progress-bar bg-success" role="progressbar" 
+                                 style="width: {{ sentiment_bins.very_positive|default:0|percof:sentiment_bins.values|default:5 }}%" 
+                                 aria-valuenow="{{ sentiment_bins.very_positive }}" aria-valuemin="0" 
+                                 aria-valuemax="100"></div>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                  
+                  <!-- Engagement Metrics -->
+                  <div class="col-md-4">
+                    <div class="card mb-3">
+                      <div class="card-header">
+                        <h6 class="mb-0">Engagement Metrics</h6>
+                      </div>
+                      <div class="card-body">
+                        <div class="row">
+                          <div class="col-6 mb-3">
+                            <div class="metric-card text-center p-3 border rounded">
+                              <h3 class="text-primary mb-1">{{ engagement_stats.total_likes|default:0|intcomma }}</h3>
+                              <div class="text-muted small">Total Likes</div>
+                            </div>
+                          </div>
+                          <div class="col-6 mb-3">
+                            <div class="metric-card text-center p-3 border rounded">
+                              <h3 class="text-primary mb-1">{{ engagement_stats.total_comments|default:0|intcomma }}</h3>
+                              <div class="text-muted small">Total Comments</div>
+                            </div>
+                          </div>
+                          <div class="col-6 mb-3">
+                            <div class="metric-card text-center p-3 border rounded">
+                              <h3 class="text-primary mb-1">{{ engagement_stats.total_shares|default:0|intcomma }}</h3>
+                              <div class="text-muted small">Total Shares</div>
+                            </div>
+                          </div>
+                          <div class="col-6 mb-3">
+                            <div class="metric-card text-center p-3 border rounded">
+                              <h3 class="text-primary mb-1">{{ engagement_stats.avg_engagement|default:0|floatformat:1 }}</h3>
+                              <div class="text-muted small">Avg. Engagement</div>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                  
+                  <!-- Toxicity Distribution -->
+                  <div class="col-md-4">
+                    <div class="card mb-3">
+                      <div class="card-header">
+                        <h6 class="mb-0">Content Safety Analysis</h6>
+                      </div>
+                      <div class="card-body">
+                        <div class="toxicity-chart">
+                          <div class="d-flex justify-content-between mb-2">
+                            <span>Safe Content</span>
+                            <span>{{ toxicity_bins.safe }}</span>
+                          </div>
+                          <div class="progress mb-3">
+                            <div class="progress-bar bg-success" role="progressbar" 
+                                 style="width: {{ toxicity_bins.safe|default:0|percof:toxicity_bins.values|default:5 }}%" 
+                                 aria-valuenow="{{ toxicity_bins.safe }}" aria-valuemin="0" 
+                                 aria-valuemax="100"></div>
+                          </div>
+                          
+                          <div class="d-flex justify-content-between mb-2">
+                            <span>Low Risk</span>
+                            <span>{{ toxicity_bins.low }}</span>
+                          </div>
+                          <div class="progress mb-3">
+                            <div class="progress-bar bg-info" role="progressbar" 
+                                 style="width: {{ toxicity_bins.low|default:0|percof:toxicity_bins.values|default:5 }}%" 
+                                 aria-valuenow="{{ toxicity_bins.low }}" aria-valuemin="0" 
+                                 aria-valuemax="100"></div>
+                          </div>
+                          
+                          <div class="d-flex justify-content-between mb-2">
+                            <span>Moderate Risk</span>
+                            <span>{{ toxicity_bins.moderate }}</span>
+                          </div>
+                          <div class="progress mb-3">
+                            <div class="progress-bar bg-warning" role="progressbar" 
+                                 style="width: {{ toxicity_bins.moderate|default:0|percof:toxicity_bins.values|default:5 }}%" 
+                                 aria-valuenow="{{ toxicity_bins.moderate }}" aria-valuemin="0" 
+                                 aria-valuemax="100"></div>
+                          </div>
+                          
+                          <div class="d-flex justify-content-between mb-2">
+                            <span>High Risk</span>
+                            <span>{{ toxicity_bins.high }}</span>
+                          </div>
+                          <div class="progress mb-3">
+                            <div class="progress-bar bg-danger" role="progressbar" 
+                                 style="width: {{ toxicity_bins.high|default:0|percof:toxicity_bins.values|default:5 }}%" 
+                                 aria-valuenow="{{ toxicity_bins.high }}" aria-valuemin="0" 
+                                 aria-valuemax="100"></div>
+                          </div>
+                          
+                          <div class="d-flex justify-content-between mb-2">
+                            <span>Extreme Risk</span>
+                            <span>{{ toxicity_bins.extreme }}</span>
+                          </div>
+                          <div class="progress">
+                            <div class="progress-bar bg-dark" role="progressbar" 
+                                 style="width: {{ toxicity_bins.extreme|default:0|percof:toxicity_bins.values|default:5 }}%" 
+                                 aria-valuenow="{{ toxicity_bins.extreme }}" aria-valuemin="0" 
+                                 aria-valuemax="100"></div>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+                
+                <!-- Image Analysis Widget -->
+                {% include "brandsensor/image_analysis_widget.html" %}
+                
+              </div>
+            </div>
+          </div>
+        </div>
     </div>
 </div>
 {% endblock %}

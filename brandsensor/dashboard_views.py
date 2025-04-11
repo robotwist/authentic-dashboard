@@ -1,10 +1,11 @@
 from django.shortcuts import render, redirect
 from django.contrib.auth.decorators import login_required
-from django.db.models import Q, Count, Avg, F
+from django.db.models import Q, Count, Avg, F, Sum
 from django.utils import timezone
 from django.conf import settings
 from django.core.cache import cache
 from django.db.utils import IntegrityError
+from django.contrib import messages
 import hashlib
 import datetime
 import json
@@ -12,7 +13,7 @@ import logging
 
 from .models import SocialPost, UserPreference, FilterPreset
 from .ml_processor import process_user_posts
-from .utils import get_user_data
+from .utils import get_user_data, process_image_analysis, analyze_all_post_images
 
 logger = logging.getLogger(__name__)
 
@@ -226,6 +227,15 @@ def dashboard(request):
             'count': platform_posts.count()
         })
     
+    # Process image analysis data
+    # Get posts with image_urls for analysis
+    image_posts = SocialPost.objects.filter(
+        user=request.user
+    ).exclude(image_urls='')
+    
+    # Process image analysis data using our utility function
+    image_analysis_stats = process_image_analysis(image_posts)
+    
     # Get top categories
     category_stats = SocialPost.objects.filter(
         user=request.user,
@@ -242,6 +252,78 @@ def dashboard(request):
     ).exclude(automated_category='').values('automated_category').annotate(
         count=Count('id')
     ).order_by('-count')[:5]
+    
+    # Enhanced analytics - Get sentiment distribution
+    sentiment_distribution = SocialPost.objects.filter(
+        user=request.user,
+        sentiment_score__isnull=False
+    ).values('sentiment_score').annotate(
+        count=Count('id')
+    ).order_by('sentiment_score')
+    
+    # Group sentiment scores into bins for visualization
+    sentiment_bins = {
+        'very_negative': 0,  # -1.0 to -0.6
+        'negative': 0,      # -0.6 to -0.2
+        'neutral': 0,       # -0.2 to 0.2
+        'positive': 0,      # 0.2 to 0.6
+        'very_positive': 0  # 0.6 to 1.0
+    }
+    
+    for item in sentiment_distribution:
+        score = item['sentiment_score']
+        count = item['count']
+        
+        if score < -0.6:
+            sentiment_bins['very_negative'] += count
+        elif score < -0.2:
+            sentiment_bins['negative'] += count
+        elif score < 0.2:
+            sentiment_bins['neutral'] += count
+        elif score < 0.6:
+            sentiment_bins['positive'] += count
+        else:
+            sentiment_bins['very_positive'] += count
+    
+    # Enhanced analytics - Get engagement metrics
+    engagement_stats = {
+        'total_likes': SocialPost.objects.filter(user=request.user).aggregate(Sum('likes'))['likes__sum'] or 0,
+        'total_comments': SocialPost.objects.filter(user=request.user).aggregate(Sum('comments'))['comments__sum'] or 0,
+        'total_shares': SocialPost.objects.filter(user=request.user).aggregate(Sum('shares'))['shares__sum'] or 0,
+        'avg_engagement': SocialPost.objects.filter(user=request.user).aggregate(Avg('engagement_count'))['engagement_count__avg'] or 0,
+    }
+    
+    # Enhanced analytics - Get toxicity distribution
+    toxicity_distribution = SocialPost.objects.filter(
+        user=request.user,
+        toxicity_score__isnull=False
+    ).values('toxicity_score').annotate(
+        count=Count('id')
+    ).order_by('toxicity_score')
+    
+    # Group toxicity scores into bins
+    toxicity_bins = {
+        'safe': 0,      # 0.0 to 0.2
+        'low': 0,       # 0.2 to 0.4
+        'moderate': 0,  # 0.4 to 0.6
+        'high': 0,      # 0.6 to 0.8
+        'extreme': 0    # 0.8 to 1.0
+    }
+    
+    for item in toxicity_distribution:
+        score = item['toxicity_score']
+        count = item['count']
+        
+        if score < 0.2:
+            toxicity_bins['safe'] += count
+        elif score < 0.4:
+            toxicity_bins['low'] += count
+        elif score < 0.6:
+            toxicity_bins['moderate'] += count
+        elif score < 0.8:
+            toxicity_bins['high'] += count
+        else:
+            toxicity_bins['extreme'] += count
 
     context = {
         "posts": curated_posts,  # Only curated posts
@@ -255,7 +337,16 @@ def dashboard(request):
         "platform_stats": platform_stats,
         "category_stats": category_stats,
         "topic_stats": topic_stats,
+        # Enhanced analytics data
+        "sentiment_bins": sentiment_bins,
+        "engagement_stats": engagement_stats,
+        "toxicity_bins": toxicity_bins,
+        # Image analysis data
+        "image_analysis_stats": image_analysis_stats,
     }
+    
+    # Cache the results
+    cache.set(cache_key, context, settings.CACHE_TTL)
 
     return render(request, "brandsensor/dashboard.html", context)
 
@@ -421,6 +512,43 @@ def apply_preset(request, preset_id):
     sort = request.GET.get('sort', '')
     
     # Redirect to dashboard with filters
+    redirect_url = f'/dashboard/?days={days}'
+    if platform:
+        redirect_url += f'&platform={platform}'
+    if sort:
+        redirect_url += f'&sort={sort}'
+    
+    return redirect(redirect_url)
+
+@login_required
+def analyze_images(request):
+    """
+    Process images for a user's social posts.
+    Generates image analysis data for posts with images but no analysis.
+    """
+    if request.method == "POST":
+        # Process up to 50 posts at a time
+        processed_count = analyze_all_post_images(request.user.id, limit=50)
+        
+        # Add a success message
+        if processed_count > 0:
+            messages.success(request, f"Successfully analyzed {processed_count} new images!")
+        else:
+            messages.info(request, "No new images to analyze or all images already analyzed.")
+        
+        # Log the action
+        from .models import BehaviorLog
+        BehaviorLog.objects.create(
+            user=request.user,
+            action='analyze_images',
+            details=f"Analyzed {processed_count} images"
+        )
+    
+    # Return to dashboard with the current filter parameters
+    platform = request.GET.get('platform', '')
+    days = request.GET.get('days', '30')
+    sort = request.GET.get('sort', '')
+    
     redirect_url = f'/dashboard/?days={days}'
     if platform:
         redirect_url += f'&platform={platform}'

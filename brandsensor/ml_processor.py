@@ -395,51 +395,82 @@ def calculate_relevance(post, user_id):
 
 def process_post(post):
     """
-    Process a single post with machine learning models.
+    Process a post with ML algorithms to extract insights.
+    Returns the post with ML predictions.
     """
-    logger.info("Processing post ID: %s", post.id)
+    # Skip if the post has already been processed fully
+    if (post.sentiment_score is not None and 
+        post.relevance_score is not None and 
+        post.automated_category is not None and
+        post.toxicity_score is not None):
+        return post
+    
     try:
-        # Skip if already processed
-        if (post.automated_category and post.sentiment_score is not None and 
-            post.relevance_score is not None and post.toxicity_score is not None):
+        # Extract content from the post
+        content = post.content
+        
+        # Skip processing if the post has no content
+        if not content or len(content) < 10:
             return post
         
-        # Analyze sentiment if not already done
+        # Analyze sentiment
         if post.sentiment_score is None:
-            sentiment_result = analyze_sentiment(post.content)
-            post.sentiment_score = sentiment_result['sentiment_score']
-            post.positive_indicators = sentiment_result['positive_indicators']
-            post.negative_indicators = sentiment_result['negative_indicators']
+            sentiment_result = analyze_sentiment(content)
+            post.sentiment_score = sentiment_result.get('sentiment_score', 0)
+            post.positive_indicators = sentiment_result.get('positive_indicators', 0)
+            post.negative_indicators = sentiment_result.get('negative_indicators', 0)
         
-        # Classify topics if not already done
-        if not post.automated_category:
-            topic_scores, top_topic = classify_topics(post.content)
-            post.automated_category = top_topic
-            post.topic_vector = json.dumps(topic_scores)
+        # Classify topics and categories
+        if post.automated_category is None:
+            topics = classify_topics(content)
+            if topics:
+                primary_topic = max(topics.items(), key=lambda x: x[1])
+                post.automated_category = primary_topic[0]
+                
+                # Store all topics with scores above a threshold as tags
+                threshold = 0.2
+                topic_tags = [topic for topic, score in topics.items() if score >= threshold]
+                post.automated_tags = ','.join(topic_tags)
         
         # Calculate toxicity score
         if post.toxicity_score is None:
-            post.toxicity_score = calculate_toxicity(post.content)
+            post.toxicity_score = calculate_toxicity(content)
         
-        # Predict engagement
+        # Calculate predicted engagement score (0-100 scale)
         if post.engagement_prediction is None:
             post.engagement_prediction = predict_engagement(post)
         
-        # Calculate relevance score for the user
+        # Calculate relevance score (personalized to user)
         if post.relevance_score is None:
             post.relevance_score = calculate_relevance(post, post.user_id)
         
-        # Try to save the post, catching any IntegrityError
-        try:
-            post.save()
-            return post
-        except IntegrityError as e:
-            logger.warning(f"IntegrityError saving post {post.id}: {str(e)}")
-            # Refresh the post from DB to get the current version
-            post.refresh_from_db()
-            return post
+        # Process post images - Activate this feature
+        if (post.image_urls and not post.image_analysis) or (post.image_urls and not post.image_caption):
+            process_post_images(post)
+        
+        # Save the processed post
+        post.ml_processed = True
+        post.ml_processed_at = timezone.now()
+        post.save()
+        
+        # Log the ML processing
+        MLPredictionLog.objects.create(
+            post=post,
+            prediction_type='sentiment',
+            prediction_value=post.sentiment_score,
+            confidence=0.8,
+            raw_output=json.dumps({
+                'sentiment': post.sentiment_score,
+                'positive': post.positive_indicators,
+                'negative': post.negative_indicators
+            })
+        )
+        
+        return post
+        
     except Exception as e:
         logger.error(f"Error processing post {post.id}: {str(e)}")
+        # Don't re-raise the exception, just return the post as is
         return post
 
 def process_unprocessed_posts(limit=100):
