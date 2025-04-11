@@ -1,5 +1,5 @@
 from django.contrib import admin
-from .models import Brand, BehaviorLog, UserPreference, SocialPost
+from .models import Brand, BehaviorLog, UserPreference, SocialPost, APIKey, SocialConnection, MLModel, MLPredictionLog, FilterPreset
 
 @admin.register(Brand)
 class BrandAdmin(admin.ModelAdmin):
@@ -26,3 +26,11 @@ class SocialPostAdmin(admin.ModelAdmin):
     list_display = ('user', 'platform', 'is_friend', 'is_family', 'category', 'created_at')
     list_filter = ('platform', 'is_friend', 'is_family', 'category')
     search_fields = ('user__username', 'content')
+
+
+@admin.register(APIKey)
+class APIKeyAdmin(admin.ModelAdmin):
+    list_display = ('user', 'key', 'name', 'created_at', 'last_used', 'is_active')
+    list_filter = ('is_active', 'created_at')
+    search_fields = ('user__username', 'key', 'name')
+    readonly_fields = ('key', 'created_at', 'last_used')

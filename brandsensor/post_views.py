@@ -123,8 +123,11 @@ def post_action(request, post_id):
                 max_to_hide = 10  # Limit to prevent accidental mass-hiding
                 
                 if similar_count > 0:
-                    # Hide only a limited number of most similar posts
-                    hidden_count = similar_posts[:max_to_hide].update(hidden=True)
+                    # Fix: Get IDs from the slice first, then update in a separate query
+                    similar_post_ids = list(similar_posts[:max_to_hide].values_list('id', flat=True))
+                    
+                    # Now update using the IDs
+                    hidden_count = SocialPost.objects.filter(id__in=similar_post_ids).update(hidden=True)
                     
                     # Log the bulk hiding action
                     BehaviorLog.objects.create(

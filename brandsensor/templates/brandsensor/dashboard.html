@@ -2,128 +2,348 @@
 
 {% block title %}Authentic Dashboard{% endblock %}
 
+{% block extra_css %}
+<style>
+  .dashboard-insights {
+    margin-bottom: var(--space-xl);
+    position: relative;
+    overflow: hidden;
+  }
+  
+  .insights-card {
+    background-color: var(--card-bg);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow);
+    transition: transform 0.3s ease, box-shadow 0.3s ease;
+    height: 100%;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    margin-bottom: var(--space-md);
+  }
+  
+  .insights-card:hover {
+    transform: translateY(-3px);
+    box-shadow: var(--shadow-lg);
+  }
+  
+  .insights-card-header {
+    background: linear-gradient(135deg, var(--primary) 0%, var(--secondary) 100%);
+    padding: var(--space-md) var(--space-lg);
+    color: white;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+  
+  .insights-card-header h5 {
+    margin: 0;
+    color: white;
+    font-weight: 600;
+  }
+  
+  .insights-card-body {
+    padding: var(--space-lg);
+    flex: 1;
+  }
+  
+  .stat-card {
+    background: linear-gradient(135deg, rgba(123, 104, 238, 0.1) 0%, rgba(123, 104, 238, 0.05) 100%);
+    border-radius: var(--radius-sm);
+    padding: var(--space-md);
+    margin-bottom: var(--space-md);
+    display: flex;
+    align-items: center;
+  }
+  
+  .stat-icon {
+    width: 45px;
+    height: 45px;
+    border-radius: 50%;
+    background: linear-gradient(135deg, var(--primary) 0%, var(--secondary) 100%);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin-right: var(--space-md);
+    color: white;
+    flex-shrink: 0;
+    font-size: 1.25rem;
+  }
+  
+  .stat-content h4 {
+    margin: 0;
+    font-size: 1.2rem;
+    font-weight: 700;
+  }
+  
+  .stat-content p {
+    margin: 0;
+    font-size: 0.875rem;
+    color: var(--light-text);
+  }
+  
+  .filter-bar {
+    background-color: var(--card-bg);
+    border-radius: var(--radius);
+    padding: var(--space-md) var(--space-lg);
+    margin-bottom: var(--space-xl);
+    box-shadow: var(--shadow-sm);
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-md);
+    align-items: center;
+  }
+  
+  .platform-pill {
+    display: inline-flex;
+    align-items: center;
+    padding: 0.3rem 0.8rem;
+    border-radius: 50px;
+    font-size: 0.85rem;
+    margin-right: 0.5rem;
+    margin-bottom: 0.5rem;
+    background-color: rgba(123, 104, 238, 0.1);
+    color: var(--accent);
+  }
+  
+  .platform-pill i {
+    margin-right: 5px;
+  }
+  
+  .platform-pill.facebook {
+    background-color: rgba(24, 119, 242, 0.1);
+    color: #1877f2;
+  }
+  
+  .platform-pill.instagram {
+    background-color: rgba(193, 53, 132, 0.1);
+    color: #c13584;
+  }
+  
+  .platform-pill.twitter {
+    background-color: rgba(29, 161, 242, 0.1);
+    color: #1da1f2;
+  }
+  
+  .platform-pill.linkedin {
+    background-color: rgba(0, 119, 181, 0.1);
+    color: #0077b5;
+  }
+  
+  .sidebar-section h3 {
+    font-size: 1.1rem;
+    font-weight: 600;
+    margin-bottom: var(--space-md);
+    padding-bottom: var(--space-sm);
+    border-bottom: 1px solid var(--border-color);
+    color: var(--primary);
+  }
+  
+  .time-filter a, .platform-filter a {
+    display: inline-block;
+    padding: 6px 12px;
+    border-radius: var(--radius-sm);
+    margin-right: 4px;
+    margin-bottom: 8px;
+    background-color: rgba(123, 104, 238, 0.05);
+    color: var(--dark-text);
+    font-size: 0.85rem;
+    transition: all 0.2s ease;
+  }
+  
+  .time-filter a:hover, .platform-filter a:hover {
+    background-color: rgba(123, 104, 238, 0.1);
+    transform: translateY(-2px);
+  }
+  
+  .time-filter a.active, .platform-filter a.active {
+    background: linear-gradient(135deg, var(--primary) 0%, var(--secondary) 100%);
+    color: white;
+    font-weight: 500;
+  }
+  
+  .form-group label {
+    font-size: 0.9rem;
+    font-weight: 500;
+    margin-bottom: 6px;
+    color: var(--dark-text);
+  }
+  
+  .form-control {
+    border-radius: var(--radius-sm);
+    border: 1px solid var(--border-color);
+    background-color: var(--card-bg);
+    color: var(--dark-text);
+    padding: 10px 12px;
+    font-size: 0.9rem;
+    box-shadow: none;
+    transition: all 0.2s ease;
+  }
+  
+  .form-control:focus {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 3px rgba(123, 104, 238, 0.1);
+  }
+  
+  .post-card {
+    border-radius: var(--radius);
+    overflow: hidden;
+    box-shadow: var(--shadow);
+    background-color: var(--card-bg);
+    margin-bottom: var(--space-lg);
+    transition: transform 0.3s ease, box-shadow 0.3s ease;
+  }
+  
+  .post-card:hover {
+    transform: translateY(-3px);
+    box-shadow: var(--shadow-lg);
+  }
+</style>
+{% endblock %}
+
 {% block content %}
 <div class="dashboard-container">
     <div class="sidebar">
-        <div class="sidebar-section">
-            <h3>Filter Preferences</h3>
-            
-            <!-- Filter Presets Section -->
-            <div class="filter-presets mb-3">
-                <div class="d-flex justify-content-between align-items-center mb-2">
-                    <h4 class="m-0 text-muted">Saved Presets</h4>
-                    <a href="{% url 'filter_presets' %}" class="btn btn-sm btn-outline-primary">
-                        <i class="fas fa-cog"></i> Manage
-                    </a>
-                </div>
-                
-                {% if filter_presets %}
-                <div class="preset-buttons">
-                    {% for preset in filter_presets %}
-                    <a href="{% url 'apply_preset' preset.id %}{% if days_filter %}?days={{ days_filter }}{% endif %}{% if current_platform %}&platform={{ current_platform }}{% endif %}{% if current_sort %}&sort={{ current_sort }}{% endif %}" 
-                       class="btn btn-sm btn-{{ preset.color }} mb-1 {% if preset.is_default %}border-success{% endif %}">
-                        <i class="fas fa-{{ preset.icon }} mr-1"></i> {{ preset.name }}
-                        {% if preset.is_default %}<i class="fas fa-star text-warning ml-1 small"></i>{% endif %}
-                    </a>
-                    {% endfor %}
-                </div>
-                {% else %}
-                <p class="text-muted small">No saved presets yet. Save your filter combinations below.</p>
-                {% endif %}
-                <hr>
+        <div class="insights-card mb-4">
+            <div class="insights-card-header">
+                <h5><i class="fas fa-sliders-h mr-2"></i> Filter Settings</h5>
             </div>
-            
-            <form action="{% url 'toggle_mode' %}" method="post" id="filter-form">
-      {% csrf_token %}
-      <div class="form-group">
-        <label>
-          <input type="checkbox" name="friends_only" {% if preferences.friends_only %}checked{% endif %}>
-          <span>Friends Only Mode</span>
-          <span class="active-filter-indicator"></span>
-          {% if preferences.friends_only %}<small style="margin-left: 10px; color: #1976d2;">(Active)</small>{% endif %}
-        </label>
-        <small class="form-text" style="margin-left: 25px; color: #555;">Only show posts from people you follow</small>
-      </div>
-      <div class="form-group">
-        <label>
-          <input type="checkbox" name="family_only" {% if preferences.family_only %}checked{% endif %}>
-          <span>Family Only Mode</span>
-          <span class="active-filter-indicator"></span>
-          {% if preferences.family_only %}<small style="margin-left: 10px; color: #388e3c;">(Active)</small>{% endif %}
-        </label>
-        <small class="form-text" style="margin-left: 25px; color: #555;">Only show posts from your family members - <a href="#" data-toggle="tooltip" title="Visit a post's detail page to mark someone as family">How to add family members?</a></small>
-      </div>
-                <div class="form-group">
-                    <label>
-                        <input type="checkbox" name="hide_sponsored" {% if preferences.hide_sponsored %}checked{% endif %}>
-                        Hide Sponsored Content
-                    </label>
-                </div>
-                <div class="form-group">
-                    <label>
-                        <input type="checkbox" name="show_verified_only" {% if preferences.show_verified_only %}checked{% endif %}>
-                        Verified Accounts Only
-                    </label>
+            <div class="insights-card-body">
+                <!-- Filter Presets Section -->
+                <div class="filter-presets mb-3">
+                    <div class="d-flex justify-content-between align-items-center mb-2">
+                        <h4 class="m-0" style="font-size: 1rem;">Saved Presets</h4>
+                        <a href="{% url 'filter_presets' %}" class="btn btn-sm btn-outline-primary">
+                            <i class="fas fa-cog"></i> Manage
+                        </a>
+                    </div>
+                    
+                    {% if filter_presets %}
+                    <div class="preset-buttons">
+                        {% for preset in filter_presets %}
+                        <a href="{% url 'apply_preset' preset.id %}{% if days_filter %}?days={{ days_filter }}{% endif %}{% if current_platform %}&platform={{ current_platform }}{% endif %}{% if current_sort %}&sort={{ current_sort }}{% endif %}" 
+                           class="btn btn-sm btn-{{ preset.color }} mb-1 {% if preset.is_default %}border-success{% endif %}">
+                            <i class="fas fa-{{ preset.icon }} mr-1"></i> {{ preset.name }}
+                            {% if preset.is_default %}<i class="fas fa-star text-warning ml-1 small"></i>{% endif %}
+                        </a>
+                        {% endfor %}
+                    </div>
+                    {% else %}
+                    <p class="text-muted small">No saved presets yet. Save your filter combinations below.</p>
+                    {% endif %}
+                    <hr>
                 </div>
                 
-                <!-- New Machine Learning Filters -->
+                <form action="{% url 'toggle_mode' %}" method="post" id="filter-form">
+                {% csrf_token %}
                 <div class="form-group">
-                    <label>
-                        <input type="checkbox" name="bizfluencer_filter" {% if preferences.bizfluencer_filter %}checked{% endif %}>
-                        Filter Bizfluencer Content
+                    <label class="d-flex align-items-center">
+                        <input type="checkbox" name="friends_only" {% if preferences.friends_only %}checked{% endif %} class="mr-2">
+                        <span>Friends Only Mode</span>
+                        {% if preferences.friends_only %}<span class="badge badge-primary ml-2">Active</span>{% endif %}
                     </label>
-                    <div class="sub-option {% if not preferences.bizfluencer_filter %}hidden{% endif %}">
-                        <label>Threshold:
-                            <input type="number" name="bizfluencer_threshold" value="{{ preferences.bizfluencer_threshold }}" min="1" max="10">
-                        </label>
-                        <small>Higher = more filtering</small>
+                    <small class="form-text text-muted">Only show posts from people you follow</small>
+                </div>
+                <div class="form-group">
+                    <label class="d-flex align-items-center">
+                        <input type="checkbox" name="family_only" {% if preferences.family_only %}checked{% endif %} class="mr-2">
+                        <span>Family Only Mode</span>
+                        {% if preferences.family_only %}<span class="badge badge-success ml-2">Active</span>{% endif %}
+                    </label>
+                    <small class="form-text text-muted">Only show posts from your family members - <a href="#" data-toggle="tooltip" title="Visit a post's detail page to mark someone as family">How to add family members?</a></small>
+                </div>
+                
+                <!-- Additional filters in columns for better space usage -->
+                <div class="row">
+                    <div class="col-md-6">
+                        <div class="form-group">
+                            <label class="d-flex align-items-center">
+                                <input type="checkbox" name="hide_sponsored" {% if preferences.hide_sponsored %}checked{% endif %} class="mr-2">
+                                Hide Sponsored
+                            </label>
+                        </div>
+                    </div>
+                    <div class="col-md-6">
+                        <div class="form-group">
+                            <label class="d-flex align-items-center">
+                                <input type="checkbox" name="show_verified_only" {% if preferences.show_verified_only %}checked{% endif %} class="mr-2">
+                                Verified Only
+                            </label>
+                        </div>
                     </div>
                 </div>
                 
-                <div class="form-group">
-                    <label>
-                        <input type="checkbox" name="high_sentiment_only" {% if preferences.high_sentiment_only %}checked{% endif %}>
-                        Positive Content Only
-                    </label>
-                    <div class="sub-option {% if not preferences.high_sentiment_only %}hidden{% endif %}">
-                        <label>Threshold:
-                            <input type="number" name="sentiment_threshold" value="{{ preferences.sentiment_threshold }}" min="0" max="1" step="0.1">
-                        </label>
-                        <small>Higher = more positive</small>
+                <div class="row">
+                    <div class="col-md-6">
+                        <div class="form-group">
+                            <label class="d-flex align-items-center">
+                                <input type="checkbox" name="bizfluencer_filter" {% if preferences.bizfluencer_filter %}checked{% endif %} class="mr-2">
+                                Bizfluencer Filter
+                            </label>
+                            <div class="sub-option {% if not preferences.bizfluencer_filter %}d-none{% endif %}">
+                                <div class="input-group input-group-sm">
+                                    <div class="input-group-prepend">
+                                        <span class="input-group-text">Threshold</span>
+                                    </div>
+                                    <input type="number" name="bizfluencer_threshold" value="{{ preferences.bizfluencer_threshold }}" min="1" max="10" class="form-control form-control-sm">
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-md-6">
+                        <div class="form-group">
+                            <label class="d-flex align-items-center">
+                                <input type="checkbox" name="high_sentiment_only" {% if preferences.high_sentiment_only %}checked{% endif %} class="mr-2">
+                                Positive Only
+                            </label>
+                            <div class="sub-option {% if not preferences.high_sentiment_only %}d-none{% endif %}">
+                                <div class="input-group input-group-sm">
+                                    <div class="input-group-prepend">
+                                        <span class="input-group-text">Threshold</span>
+                                    </div>
+                                    <input type="number" name="sentiment_threshold" value="{{ preferences.sentiment_threshold }}" min="0" max="1" step="0.1" class="form-control form-control-sm">
+                                </div>
+                            </div>
+                        </div>
                     </div>
                 </div>
                 
-                <div class="form-group">
-                    <label>
-                        <input type="checkbox" name="hide_job_posts" {% if preferences.hide_job_posts %}checked{% endif %}>
-                        Hide Job Postings
-                    </label>
+                <div class="row">
+                    <div class="col-md-6">
+                        <div class="form-group">
+                            <label class="d-flex align-items-center">
+                                <input type="checkbox" name="hide_job_posts" {% if preferences.hide_job_posts %}checked{% endif %} class="mr-2">
+                                Hide Job Posts
+                            </label>
+                        </div>
+                    </div>
+                    <div class="col-md-6">
+                        <div class="form-group">
+                            <label for="max_content_length">Max Length:</label>
+                            <input type="number" name="max_content_length" id="max_content_length" value="{{ preferences.max_content_length }}" placeholder="No limit" class="form-control form-control-sm">
+                        </div>
+                    </div>
                 </div>
 
-      <div class="form-group">
-                    <label for="max_content_length">Max Content Length:</label>
-                    <input type="number" name="max_content_length" id="max_content_length" value="{{ preferences.max_content_length }}" placeholder="No limit">
-                    <small>Characters (leave blank for no limit)</small>
-      </div>
-
-      <div class="form-group">
+                <!-- Text filters with better styling -->
+                <div class="form-group">
                     <label for="interest_filter">Interests:</label>
-                    <input type="text" name="interest_filter" id="interest_filter" placeholder="travel, food, tech" value="{{ preferences.interest_filter }}">
+                    <input type="text" name="interest_filter" id="interest_filter" placeholder="travel, food, tech" value="{{ preferences.interest_filter }}" class="form-control">
                 </div>
                 <div class="form-group">
                     <label for="approved_brands">Approved Brands:</label>
-                    <input type="text" name="approved_brands" id="approved_brands" placeholder="brand1, brand2" value="{{ preferences.approved_brands }}">
+                    <input type="text" name="approved_brands" id="approved_brands" placeholder="brand1, brand2" value="{{ preferences.approved_brands }}" class="form-control">
                 </div>
                 <div class="form-group">
                     <label for="excluded_keywords">Excluded Keywords:</label>
-                    <input type="text" name="excluded_keywords" id="excluded_keywords" placeholder="spam, scam" value="{{ preferences.excluded_keywords }}">
+                    <input type="text" name="excluded_keywords" id="excluded_keywords" placeholder="spam, scam" value="{{ preferences.excluded_keywords }}" class="form-control">
                 </div>
                 <div class="form-group">
                     <label for="favorite_hashtags">Favorite Hashtags:</label>
-                    <input type="text" name="favorite_hashtags" id="favorite_hashtags" placeholder="travel, food" value="{{ preferences.favorite_hashtags }}">
+                    <input type="text" name="favorite_hashtags" id="favorite_hashtags" placeholder="travel, food" value="{{ preferences.favorite_hashtags }}" class="form-control">
                 </div>
                 
-                <button type="submit" class="btn primary-btn">Update Preferences</button>
+                <button type="submit" class="btn btn-primary btn-block">Update Preferences</button>
                 
                 <!-- Save as Preset Section -->
                 <div class="save-preset-section mt-3">
@@ -132,7 +352,7 @@
                         <label class="form-check-label" for="save-as-preset-toggle">
                             Save as Preset
                         </label>
-      </div>
+                    </div>
 
                     <div id="preset-options" class="mt-2" style="display: none;">
                         <div class="form-group">
@@ -173,27 +393,36 @@
                         <input type="hidden" name="save_as_preset" value="1">
                     </div>
                 </div>
-    </form>
-  </div>
+                </form>
+            </div>
+        </div>
 
-        <div class="sidebar-section">
-            <h3>Time Period</h3>
-            <div class="time-filter">
-                <a href="?days=1{% if current_platform %}&platform={{ current_platform }}{% endif %}{% if current_sort %}&sort={{ current_sort }}{% endif %}" class="{% if days_filter == '1' %}active{% endif %}">Today</a>
-                <a href="?days=7{% if current_platform %}&platform={{ current_platform }}{% endif %}{% if current_sort %}&sort={{ current_sort }}{% endif %}" class="{% if days_filter == '7' %}active{% endif %}">Last Week</a>
-                <a href="?days=30{% if current_platform %}&platform={{ current_platform }}{% endif %}{% if current_sort %}&sort={{ current_sort }}{% endif %}" class="{% if days_filter == '30' %}active{% endif %}">Last Month</a>
-                <a href="?days=90{% if current_platform %}&platform={{ current_platform }}{% endif %}{% if current_sort %}&sort={{ current_sort }}{% endif %}" class="{% if days_filter == '90' %}active{% endif %}">Last 3 Months</a>
-                <a href="?days=365{% if current_platform %}&platform={{ current_platform }}{% endif %}{% if current_sort %}&sort={{ current_sort }}{% endif %}" class="{% if days_filter == '365' %}active{% endif %}">Last Year</a>
+        <div class="insights-card mb-4">
+            <div class="insights-card-header">
+                <h5><i class="fas fa-calendar-alt mr-2"></i> Time Period</h5>
+            </div>
+            <div class="insights-card-body">
+                <div class="time-filter">
+                    <a href="?days=1{% if current_platform %}&platform={{ current_platform }}{% endif %}{% if current_sort %}&sort={{ current_sort }}{% endif %}" class="{% if days_filter == '1' %}active{% endif %}">Today</a>
+                    <a href="?days=7{% if current_platform %}&platform={{ current_platform }}{% endif %}{% if current_sort %}&sort={{ current_sort }}{% endif %}" class="{% if days_filter == '7' %}active{% endif %}">Last Week</a>
+                    <a href="?days=30{% if current_platform %}&platform={{ current_platform }}{% endif %}{% if current_sort %}&sort={{ current_sort }}{% endif %}" class="{% if days_filter == '30' %}active{% endif %}">Last Month</a>
+                    <a href="?days=90{% if current_platform %}&platform={{ current_platform }}{% endif %}{% if current_sort %}&sort={{ current_sort }}{% endif %}" class="{% if days_filter == '90' %}active{% endif %}">Last 3 Months</a>
+                    <a href="?days=365{% if current_platform %}&platform={{ current_platform }}{% endif %}{% if current_sort %}&sort={{ current_sort }}{% endif %}" class="{% if days_filter == '365' %}active{% endif %}">Last Year</a>
+                </div>
             </div>
         </div>
         
-        <div class="sidebar-section">
-            <h3>Platform</h3>
-            <div class="platform-filter">
-                <a href="?{% if days_filter %}days={{ days_filter }}{% endif %}{% if current_sort %}&sort={{ current_sort }}{% endif %}" class="{% if not current_platform %}active{% endif %}">All</a>
-                {% for platform_code, platform_name in platforms %}
-                <a href="?platform={{ platform_code }}{% if days_filter %}&days={{ days_filter }}{% endif %}{% if current_sort %}&sort={{ current_sort }}{% endif %}" class="{% if current_platform == platform_code %}active{% endif %}">{{ platform_name }}</a>
-                {% endfor %}
+        <div class="insights-card mb-4">
+            <div class="insights-card-header">
+                <h5><i class="fas fa-share-alt mr-2"></i> Platform</h5>
+            </div>
+            <div class="insights-card-body">
+                <div class="platform-filter">
+                    <a href="?{% if days_filter %}days={{ days_filter }}{% endif %}{% if current_sort %}&sort={{ current_sort }}{% endif %}" class="{% if not current_platform %}active{% endif %}">All</a>
+                    {% for platform_code, platform_name in platforms %}
+                    <a href="?platform={{ platform_code }}{% if days_filter %}&days={{ days_filter }}{% endif %}{% if current_sort %}&sort={{ current_sort }}{% endif %}" class="{% if current_platform == platform_code %}active{% endif %}">{{ platform_name }}</a>
+                    {% endfor %}
+                </div>
             </div>
         </div>
         
@@ -215,116 +444,84 @@
         </div>
     </div>
 
-    <div class="main-content">
-        <div class="dashboard-header">
-            <h2>Your Authentic Feed</h2>
-            <div class="post-count">
-                Showing {{ posts|length }} posts
+    <div class="content">
+        <!-- Redesigned header with gradient banner -->
+        <div class="filter-bar mb-4">
+            <div class="d-flex justify-content-between align-items-center w-100">
+                <h1 class="mb-0">Authentic Dashboard</h1>
+                <div class="d-flex">
+                    <div class="dropdown mr-2">
+                        <button class="btn btn-outline-secondary dropdown-toggle" type="button" id="sortDropdown" data-toggle="dropdown">
+                            <i class="fas fa-sort mr-1"></i> Sort
+                        </button>
+                        <div class="dropdown-menu">
+                            <a class="dropdown-item {% if current_sort == 'relevance' %}active{% endif %}" 
+                               href="?sort=relevance{% if days_filter %}&days={{ days_filter }}{% endif %}{% if current_platform %}&platform={{ current_platform }}{% endif %}">
+                                <i class="fas fa-star mr-1"></i> Relevance
+                            </a>
+                            <a class="dropdown-item {% if current_sort == 'engagement' %}active{% endif %}"
+                               href="?sort=engagement{% if days_filter %}&days={{ days_filter }}{% endif %}{% if current_platform %}&platform={{ current_platform }}{% endif %}">
+                                <i class="fas fa-comments mr-1"></i> Engagement
+                            </a>
+                            <a class="dropdown-item {% if current_sort == 'sentiment' %}active{% endif %}"
+                               href="?sort=sentiment{% if days_filter %}&days={{ days_filter }}{% endif %}{% if current_platform %}&platform={{ current_platform }}{% endif %}">
+                                <i class="fas fa-smile mr-1"></i> Sentiment
+                            </a>
+                        </div>
+                    </div>
+                    <form action="{% url 'process_ml' %}" method="post" class="ml-2">
+                        {% csrf_token %}
+                        <button type="submit" class="btn btn-primary">
+                            <i class="fas fa-sync-alt mr-1"></i> Process with ML
+                        </button>
+                    </form>
+                </div>
             </div>
         </div>
 
-        {% if not preferences.friends_only and not preferences.family_only %}
-        <div class="alert alert-info mb-4" role="alert" style="position: relative; padding-right: 30px;">
-            <strong>Tip:</strong> Use the "Friends Only" or "Family Only" modes in the sidebar to focus on content from people who matter most to you. 
-            <span style="display: block; margin-top: 5px; font-size: 0.9rem;">
-                <i class="fas fa-info-circle"></i> <strong>How it works:</strong> 
-                Friends are automatically detected as people you follow. 
-                To mark someone as family, look for the "+ Family" button next to their name in posts.
-            </span>
-            <button type="button" class="close" style="position: absolute; top: 10px; right: 10px;" data-dismiss="alert" aria-label="Close">
-                <span aria-hidden="true">&times;</span>
-            </button>
-        </div>
-        {% endif %}
-
-        <div class="stats-section">
-            <div class="stat-card">
-                <h3>Platform Distribution</h3>
-                <div class="platform-stats">
-                    {% for platform in platform_stats %}
-                    <div class="platform-stat">
-                        <div class="platform-name">{{ platform.platform }}</div>
-                        <div class="platform-count">{{ platform.count }}</div>
+        <!-- Stats Cards Row -->
+        <div class="row mb-4">
+            <div class="col-md-3">
+                <div class="stat-card">
+                    <div class="stat-icon">
+                        <i class="fas fa-brain"></i>
                     </div>
-                    {% endfor %}
-                </div>
-            </div>
-            
-            <div class="stat-card">
-                <h3>Categories</h3>
-                <div class="category-stats">
-                    {% for category in category_stats %}
-                    <div class="category-badge">
-                        {{ category.name }} ({{ category.count }})
-                    </div>
-                    {% endfor %}
-                </div>
-            </div>
-            
-            <div class="stat-card">
-                <h3>Auto-Detected Topics</h3>
-                <div class="topic-stats">
-                    {% for topic in topic_stats %}
-                    <div class="topic-badge">
-                        {{ topic.automated_category }} ({{ topic.count }})
-                    </div>
-                    {% endfor %}
-                </div>
-            </div>
-            
-            <div class="stat-card">
-                <h3>Sentiment Analysis</h3>
-                <div class="sentiment-stats">
-                    <div class="sentiment-overview">
-                        <div class="sentiment-score">
-                            {% if sentiment_stats.avg_sentiment %}
-                                <span class="large-number">{{ sentiment_stats.avg_sentiment|floatformat:2 }}</span>
-                                <span class="sentiment-label">
-                                    {% if sentiment_stats.avg_sentiment > 0.2 %}
-                                        Positive
-                                    {% elif sentiment_stats.avg_sentiment < -0.2 %}
-                                        Negative
-                                    {% else %}
-                                        Neutral
-                                    {% endif %}
-                                </span>
-                            {% else %}
-                                <span class="neutral">No sentiment data</span>
-                            {% endif %}
-                        </div>
-                    </div>
-                    <div class="sentiment-distribution">
-                        <div class="sentiment-bar positive" style="width: {% if sentiment_stats.positive_count %}{{ sentiment_stats.positive_count|floatformat:0 }}%{% else %}0{% endif %}">
-                            Positive: {{ sentiment_stats.positive_count|default:0 }}
-                        </div>
-                        <div class="sentiment-bar neutral" style="width: {% if sentiment_stats.neutral_count %}{{ sentiment_stats.neutral_count|floatformat:0 }}%{% else %}0{% endif %}">
-                            Neutral: {{ sentiment_stats.neutral_count|default:0 }}
-                        </div>
-                        <div class="sentiment-bar negative" style="width: {% if sentiment_stats.negative_count %}{{ sentiment_stats.negative_count|floatformat:0 }}%{% else %}0{% endif %}">
-                            Negative: {{ sentiment_stats.negative_count|default:0 }}
-                        </div>
+                    <div class="stat-content">
+                        <h4>{{ ml_processed_count }}</h4>
+                        <p>ML Processed Posts</p>
                     </div>
                 </div>
             </div>
-
-            <!-- After the stats section, add a new ML Insights card -->
-            <div class="stat-card">
-                <h3>ML Insights</h3>
-                <div class="ml-insights-preview">
-                    <div class="insights-summary">
-                        <p>
-                            <i class="fas fa-brain text-primary"></i> 
-                            <strong>{{ ml_processed_count|default:"0" }}</strong> posts analyzed with ML
-                        </p>
-                        <p>
-                            <i class="fas fa-images text-primary"></i>
-                            <strong>{{ image_posts_count|default:"0" }}</strong> posts with image analysis
-                        </p>
+            <div class="col-md-3">
+                <div class="stat-card">
+                    <div class="stat-icon">
+                        <i class="fas fa-image"></i>
                     </div>
-                    <div class="ml-actions mt-3">
-                        <a href="{% url 'ml_insights' %}" class="btn btn-primary btn-sm">
-                            <i class="fas fa-lightbulb mr-1"></i> View ML Insights
-                        </a>
+                    <div class="stat-content">
+                        <h4>{{ image_posts_count }}</h4>
+                        <p>Posts with Images</p>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="stat-card">
+                    <div class="stat-icon">
+                        <i class="fas fa-calendar-day"></i>
+                    </div>
+                    <div class="stat-content">
+                        <h4>{{ today_posts }}</h4>
+                        <p>Today's Posts</p>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="stat-card">
+                    <div class="stat-icon">
+                        <i class="fas fa-calendar-week"></i>
+                    </div>
+                    <div class="stat-content">
+                        <h4>{{ this_week_posts }}</h4>
+                        <p>This Week's Posts</p>
                     </div>
                 </div>
             </div>
@@ -332,7 +529,8 @@
 
         <div class="posts-container">
             {% if posts %}
-  {% for post in posts %}
+                <!-- Redesigned posts display to match ML Insights aesthetic -->
+                {% for post in posts %}
                 <div class="post-card {% if post.is_sponsored %}sponsored{% endif %} {% if post.starred %}starred{% endif %} {% if post.is_friend %}friend-post{% endif %} {% if post.is_family %}family-post{% endif %}">
                     <div class="post-header">
                         <div class="post-user">
@@ -439,890 +637,50 @@
                 </div>
                 {% endfor %}
             {% else %}
-                <div class="no-posts">
-                    <p>No posts match your current filters.</p>
-                    <p>Try adjusting your preferences or collecting more content using the Chrome extension.</p>
+                <div class="no-posts-message">
+                    <div class="text-center py-5">
+                        <i class="fas fa-search fa-3x mb-3 text-muted"></i>
+                        <h4>No posts found</h4>
+                        <p class="text-muted">Try adjusting your filters or time period</p>
+                    </div>
                 </div>
             {% endif %}
-        </div>
-
-        <!-- Add this new Analytics Section after the main post listing section -->
-        <div class="row mt-4">
-          <div class="col-12">
-            <div class="card">
-              <div class="card-header bg-primary text-white">
-                <h5 class="mb-0">
-                  <i class="fas fa-chart-bar mr-2"></i> Enhanced Content Analytics
-                </h5>
-              </div>
-              <div class="card-body">
-                <div class="row">
-                  <!-- Sentiment Distribution -->
-                  <div class="col-md-4">
-                    <div class="card mb-3">
-                      <div class="card-header">
-                        <h6 class="mb-0">Sentiment Distribution</h6>
-                      </div>
-                      <div class="card-body">
-                        <div class="sentiment-chart">
-                          <div class="d-flex justify-content-between mb-2">
-                            <span>Very Negative</span>
-                            <span>{{ sentiment_bins.very_negative }}</span>
-                          </div>
-                          <div class="progress mb-3">
-                            <div class="progress-bar bg-danger" role="progressbar" 
-                                 style="width: {{ sentiment_bins.very_negative|default:0|percof:sentiment_bins.values|default:5 }}%" 
-                                 aria-valuenow="{{ sentiment_bins.very_negative }}" aria-valuemin="0" 
-                                 aria-valuemax="100"></div>
-                          </div>
-                          
-                          <div class="d-flex justify-content-between mb-2">
-                            <span>Negative</span>
-                            <span>{{ sentiment_bins.negative }}</span>
-                          </div>
-                          <div class="progress mb-3">
-                            <div class="progress-bar bg-warning" role="progressbar" 
-                                 style="width: {{ sentiment_bins.negative|default:0|percof:sentiment_bins.values|default:5 }}%" 
-                                 aria-valuenow="{{ sentiment_bins.negative }}" aria-valuemin="0" 
-                                 aria-valuemax="100"></div>
-                          </div>
-                          
-                          <div class="d-flex justify-content-between mb-2">
-                            <span>Neutral</span>
-                            <span>{{ sentiment_bins.neutral }}</span>
-                          </div>
-                          <div class="progress mb-3">
-                            <div class="progress-bar bg-secondary" role="progressbar" 
-                                 style="width: {{ sentiment_bins.neutral|default:0|percof:sentiment_bins.values|default:5 }}%" 
-                                 aria-valuenow="{{ sentiment_bins.neutral }}" aria-valuemin="0" 
-                                 aria-valuemax="100"></div>
-                          </div>
-                          
-                          <div class="d-flex justify-content-between mb-2">
-                            <span>Positive</span>
-                            <span>{{ sentiment_bins.positive }}</span>
-                          </div>
-                          <div class="progress mb-3">
-                            <div class="progress-bar bg-info" role="progressbar" 
-                                 style="width: {{ sentiment_bins.positive|default:0|percof:sentiment_bins.values|default:5 }}%" 
-                                 aria-valuenow="{{ sentiment_bins.positive }}" aria-valuemin="0" 
-                                 aria-valuemax="100"></div>
-                          </div>
-                          
-                          <div class="d-flex justify-content-between mb-2">
-                            <span>Very Positive</span>
-                            <span>{{ sentiment_bins.very_positive }}</span>
-                          </div>
-                          <div class="progress">
-                            <div class="progress-bar bg-success" role="progressbar" 
-                                 style="width: {{ sentiment_bins.very_positive|default:0|percof:sentiment_bins.values|default:5 }}%" 
-                                 aria-valuenow="{{ sentiment_bins.very_positive }}" aria-valuemin="0" 
-                                 aria-valuemax="100"></div>
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                  
-                  <!-- Engagement Metrics -->
-                  <div class="col-md-4">
-                    <div class="card mb-3">
-                      <div class="card-header">
-                        <h6 class="mb-0">Engagement Metrics</h6>
-                      </div>
-                      <div class="card-body">
-                        <div class="row">
-                          <div class="col-6 mb-3">
-                            <div class="metric-card text-center p-3 border rounded">
-                              <h3 class="text-primary mb-1">{{ engagement_stats.total_likes|default:0|intcomma }}</h3>
-                              <div class="text-muted small">Total Likes</div>
-                            </div>
-                          </div>
-                          <div class="col-6 mb-3">
-                            <div class="metric-card text-center p-3 border rounded">
-                              <h3 class="text-primary mb-1">{{ engagement_stats.total_comments|default:0|intcomma }}</h3>
-                              <div class="text-muted small">Total Comments</div>
-                            </div>
-                          </div>
-                          <div class="col-6 mb-3">
-                            <div class="metric-card text-center p-3 border rounded">
-                              <h3 class="text-primary mb-1">{{ engagement_stats.total_shares|default:0|intcomma }}</h3>
-                              <div class="text-muted small">Total Shares</div>
-                            </div>
-                          </div>
-                          <div class="col-6 mb-3">
-                            <div class="metric-card text-center p-3 border rounded">
-                              <h3 class="text-primary mb-1">{{ engagement_stats.avg_engagement|default:0|floatformat:1 }}</h3>
-                              <div class="text-muted small">Avg. Engagement</div>
-                            </div>
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                  
-                  <!-- Toxicity Distribution -->
-                  <div class="col-md-4">
-                    <div class="card mb-3">
-                      <div class="card-header">
-                        <h6 class="mb-0">Content Safety Analysis</h6>
-                      </div>
-                      <div class="card-body">
-                        <div class="toxicity-chart">
-                          <div class="d-flex justify-content-between mb-2">
-                            <span>Safe Content</span>
-                            <span>{{ toxicity_bins.safe }}</span>
-                          </div>
-                          <div class="progress mb-3">
-                            <div class="progress-bar bg-success" role="progressbar" 
-                                 style="width: {{ toxicity_bins.safe|default:0|percof:toxicity_bins.values|default:5 }}%" 
-                                 aria-valuenow="{{ toxicity_bins.safe }}" aria-valuemin="0" 
-                                 aria-valuemax="100"></div>
-                          </div>
-                          
-                          <div class="d-flex justify-content-between mb-2">
-                            <span>Low Risk</span>
-                            <span>{{ toxicity_bins.low }}</span>
-                          </div>
-                          <div class="progress mb-3">
-                            <div class="progress-bar bg-info" role="progressbar" 
-                                 style="width: {{ toxicity_bins.low|default:0|percof:toxicity_bins.values|default:5 }}%" 
-                                 aria-valuenow="{{ toxicity_bins.low }}" aria-valuemin="0" 
-                                 aria-valuemax="100"></div>
-                          </div>
-                          
-                          <div class="d-flex justify-content-between mb-2">
-                            <span>Moderate Risk</span>
-                            <span>{{ toxicity_bins.moderate }}</span>
-                          </div>
-                          <div class="progress mb-3">
-                            <div class="progress-bar bg-warning" role="progressbar" 
-                                 style="width: {{ toxicity_bins.moderate|default:0|percof:toxicity_bins.values|default:5 }}%" 
-                                 aria-valuenow="{{ toxicity_bins.moderate }}" aria-valuemin="0" 
-                                 aria-valuemax="100"></div>
-                          </div>
-                          
-                          <div class="d-flex justify-content-between mb-2">
-                            <span>High Risk</span>
-                            <span>{{ toxicity_bins.high }}</span>
-                          </div>
-                          <div class="progress mb-3">
-                            <div class="progress-bar bg-danger" role="progressbar" 
-                                 style="width: {{ toxicity_bins.high|default:0|percof:toxicity_bins.values|default:5 }}%" 
-                                 aria-valuenow="{{ toxicity_bins.high }}" aria-valuemin="0" 
-                                 aria-valuemax="100"></div>
-                          </div>
-                          
-                          <div class="d-flex justify-content-between mb-2">
-                            <span>Extreme Risk</span>
-                            <span>{{ toxicity_bins.extreme }}</span>
-                          </div>
-                          <div class="progress">
-                            <div class="progress-bar bg-dark" role="progressbar" 
-                                 style="width: {{ toxicity_bins.extreme|default:0|percof:toxicity_bins.values|default:5 }}%" 
-                                 aria-valuenow="{{ toxicity_bins.extreme }}" aria-valuemin="0" 
-                                 aria-valuemax="100"></div>
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-                
-                <!-- Image Analysis Widget -->
-                {% include "brandsensor/image_analysis_widget.html" %}
-                
-              </div>
-            </div>
-          </div>
         </div>
     </div>
 </div>
 {% endblock %}
 
-{% block extra_styles %}
-<style>
-    .dashboard-container {
-        display: flex;
-        gap: 30px;
-    }
-    
-    .sidebar {
-        width: 280px;
-        flex-shrink: 0;
-    }
-    
-    .sidebar-section {
-        background: #fff;
-        border-radius: var(--radius);
-        box-shadow: var(--shadow);
-        padding: 20px;
-        margin-bottom: 20px;
-    }
-    
-    .sidebar-section h3 {
-        font-size: 1.1rem;
-        margin-bottom: 15px;
-        padding-bottom: 8px;
-        border-bottom: 1px solid #ddd; /* Darker border */
-        color: #222; /* Darker heading */
-    }
-    
-    .form-group {
-        margin-bottom: 15px;
-    }
-    
-    .form-group label {
-        display: block;
-        margin-bottom: 5px;
-        color: #333; /* Darker label text */
-        font-weight: 500;
-    }
-    
-    .form-group input[type="text"],
-    .form-group input[type="number"] {
-        width: 100%;
-        padding: 8px;
-        border: 1px solid #ccc; /* Darker border */
-        border-radius: var(--radius);
-        font-size: 0.9rem;
-        color: #222; /* Darker input text */
-    }
-    
-    .form-group small {
-        display: block;
-        color: #444; /* Darker help text */
-        font-size: 0.8rem;
-        margin-top: 3px;
-    }
-    
-    .time-filter,
-    .platform-filter,
-    .sort-filter {
-        display: flex;
-        flex-direction: column;
-        gap: 10px;
-    }
-    
-    .time-filter a,
-    .platform-filter a,
-    .sort-filter a {
-        padding: 8px 12px;
-        background: #f8f9fa;
-        color: #333; /* Darker link text */
-        text-decoration: none;
-        border-radius: var(--radius);
-        transition: all 0.2s;
-        font-weight: 500;
-    }
-    
-    .time-filter a:hover,
-    .platform-filter a:hover,
-    .sort-filter a:hover {
-        background: #e9ecef;
-    }
-    
-    .time-filter a.active,
-    .platform-filter a.active,
-    .sort-filter a.active {
-        background: var(--primary);
-        color: white;
-    }
-    
-    .posts-section {
-        flex-grow: 1;
-    }
-    
-    .posts-header {
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
-        margin-bottom: 20px;
-    }
-    
-    .posts-header h2 {
-        font-size: 1.5rem;
-        margin: 0;
-        color: #222; /* Darker heading */
-    }
-    
-    .posts-grid {
-        display: grid;
-        grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
-        gap: 20px;
-    }
-    
-    .post-card {
-        background: #fff;
-        border-radius: var(--radius);
-        box-shadow: var(--shadow);
-        overflow: hidden;
-        transition: transform 0.2s, box-shadow 0.2s;
-    }
-    
-    .post-card:hover {
-        transform: translateY(-5px);
-        box-shadow: 0 6px 12px rgba(0, 0, 0, 0.1);
-    }
-    
-    .post-header {
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
-        padding: 15px;
-        border-bottom: 1px solid #ddd; /* Darker border */
-    }
-    
-    .user-info {
-        display: flex;
-        align-items: center;
-        gap: 10px;
-    }
-    
-    .user-name {
-        font-weight: 600;
-        color: #222; /* Darker text */
-    }
-    
-    .platform-tag {
-        background: #f0f2f5;
-        color: #333; /* Darker tag text */
-        padding: 3px 8px;
-        border-radius: 12px;
-        font-size: 0.75rem;
-        font-weight: 600;
-    }
-    
-    .post-content {
-        padding: 15px;
-        color: #222; /* Darker content text */
-        font-size: 0.95rem; /* Slightly larger */
-        line-height: 1.5;
-    }
-    
-    .truncate-3-lines {
-        display: -webkit-box;
-        -webkit-line-clamp: 3;
-        -webkit-box-orient: vertical;
-        overflow: hidden;
-    }
-    
-    .post-image {
-        max-height: 200px;
-        width: 100%;
-        object-fit: cover;
-    }
-    
-    .post-metrics {
-        display: flex;
-        padding: 10px 15px;
-        border-top: 1px solid #ddd; /* Darker border */
-        font-size: 0.85rem;
-        color: #444; /* Darker metrics text */
-    }
-    
-    .metric {
-        display: flex;
-        align-items: center;
-        gap: 5px;
-        margin-right: 15px;
-    }
-    
-    .post-badges {
-        padding: 0 15px 15px;
-        display: flex;
-        flex-wrap: wrap;
-        gap: 5px;
-    }
-    
-    .post-footer {
-        padding: 10px 15px;
-        border-top: 1px solid #ddd; /* Darker border */
-        display: flex;
-        justify-content: space-between;
-    }
-    
-    .ml-metrics {
-        display: flex;
-        flex-wrap: wrap;
-        gap: 5px;
-        margin-bottom: 10px;
-    }
-    
-    .ml-metric {
-        display: flex;
-        align-items: center;
-        gap: 5px;
-        background: #f0f2f5;
-        padding: 3px 8px;
-        border-radius: 12px;
-        font-size: 0.75rem;
-        color: #333; /* Darker metric text */
-    }
-    
-    .pagination {
-        display: flex;
-        justify-content: center;
-        margin-top: 30px;
-        gap: 10px;
-    }
-    
-    .pagination a {
-        padding: 8px 15px;
-        background: #fff;
-        border-radius: var(--radius);
-        text-decoration: none;
-        color: var(--text);
-        transition: all 0.2s;
-        box-shadow: var(--shadow);
-    }
-    
-    .pagination a:hover {
-        background: #f0f2f5;
-    }
-    
-    .pagination a.active {
-        background: var(--primary);
-        color: white;
-    }
-    
-    .save-preset-section {
-        border-top: 1px solid #ddd; /* Darker border */
-        padding-top: 15px;
-        margin-top: 15px;
-    }
-    
-    .preset-buttons {
-        display: flex;
-        flex-wrap: wrap;
-        gap: 5px;
-        margin-bottom: 10px;
-    }
-    
-    .text-muted {
-        color: #444 !important; /* Darker muted text */
-    }
-    
-    .filter-presets h4 {
-        font-size: 1rem;
-        color: #333; /* Darker heading */
-    }
-    
-    /* Form styling */
-    .form-control {
-        color: #222; /* Darker input text */
-    }
-    
-    .form-check-label {
-        color: #333; /* Darker checkbox label */
-    }
-    
-    .sub-option {
-        margin-left: 20px;
-        margin-top: 5px;
-        padding: 5px;
-        border-left: 2px solid #ccc; /* Darker border */
-        color: #333; /* Darker option text */
-    }
-    
-    .sub-option.hidden {
-        display: none;
-    }
-    
-    .hidden {
-        display: none;
-    }
-    
-    #ml-status {
-        padding: 8px;
-        border-radius: 4px;
-        margin-top: 8px;
-    }
-    
-    #ml-status.success {
-        background-color: #E8F5E9;
-        color: #2E7D32; /* Darker success text */
-    }
-    
-    #ml-status.error {
-        background-color: #FFEBEE;
-        color: #C62828; /* Darker error text */
-    }
-    
-    /* Enhanced styling for friend and family badges */
-    .friend-badge, .family-badge {
-        display: inline-block;
-        padding: 2px 8px;
-        border-radius: 12px;
-        font-size: 0.8rem;
-        font-weight: 600;
-        margin-left: 5px;
-    }
-    
-    .friend-badge {
-        background-color: #e3f2fd;
-        color: #1976d2;
-        border: 1px solid #bbdefb;
-    }
-    
-    .family-badge {
-        background-color: #e8f5e9;
-        color: #388e3c;
-        border: 1px solid #c8e6c9;
-    }
-    
-    /* Highlighted styles for when filter modes are active */
-    .friends-mode-active .friend-badge {
-        background-color: #2196f3;
-        color: white;
-        border: 1px solid #1976d2;
-    }
-    
-    .family-mode-active .family-badge {
-        background-color: #4caf50;
-        color: white;
-        border: 1px solid #388e3c;
-    }
-    
-    /* Highlight the filter buttons when active */
-    input[name="friends_only"]:checked + span,
-    label:has(> input[name="friends_only"]:checked) {
-        color: #1976d2;
-        font-weight: 600;
-    }
-    
-    input[name="family_only"]:checked + span,
-    label:has(> input[name="family_only"]:checked) {
-        color: #388e3c;
-        font-weight: 600;
-    }
-    
-    /* Add a subtle indicator for friends-only and family-only modes */
-    .form-group label {
-        display: flex;
-        align-items: center;
-    }
-    
-    .active-filter-indicator {
-        width: 8px;
-        height: 8px;
-        border-radius: 50%;
-        margin-left: 5px;
-        display: none;
-    }
-    
-    input[name="friends_only"]:checked ~ .active-filter-indicator {
-        background-color: #1976d2;
-        display: block;
-    }
-    
-    input[name="family_only"]:checked ~ .active-filter-indicator {
-        background-color: #388e3c;
-        display: block;
-    }
-    
-    /* Toast notification styles */
-    .toast-container {
-        position: fixed;
-        top: 20px;
-        right: 20px;
-        z-index: 9999;
-    }
-    
-    .toast {
-        background-color: #fff;
-        color: #333;
-        padding: 15px 20px;
-        border-radius: 4px;
-        box-shadow: 0 4px 12px rgba(0,0,0,0.15);
-        margin-bottom: 10px;
-        display: flex;
-        align-items: center;
-        min-width: 280px;
-        max-width: 350px;
-        animation: slide-in 0.3s ease-out;
-    }
-    
-    .toast.success {
-        border-left: 4px solid #4caf50;
-    }
-    
-    .toast.info {
-        border-left: 4px solid #2196f3;
-    }
-    
-    .toast.warning {
-        border-left: 4px solid #ff9800;
-    }
-    
-    .toast.error {
-        border-left: 4px solid #f44336;
-    }
-    
-    .toast-icon {
-        margin-right: 10px;
-        font-size: 1.2rem;
-    }
-    
-    .toast-content {
-        flex: 1;
-    }
-    
-    .toast-title {
-        font-weight: 600;
-        margin-bottom: 3px;
-    }
-    
-    .toast-message {
-        font-size: 0.9rem;
-    }
-    
-    .toast-close {
-        cursor: pointer;
-        font-size: 1.1rem;
-        margin-left: 10px;
-        opacity: 0.7;
-    }
-    
-    .toast-close:hover {
-        opacity: 1;
-    }
-    
-    @keyframes slide-in {
-        from { transform: translateX(100%); opacity: 0; }
-        to { transform: translateX(0); opacity: 1; }
-    }
-    
-    @keyframes fade-out {
-        from { opacity: 1; }
-        to { opacity: 0; }
-    }
-    
-    /* Friend and family post card styling */
-    .post-card.friend-post {
-        border-left: 3px solid #1976d2;
-    }
-    
-    .post-card.family-post {
-        border-left: 3px solid #388e3c;
-    }
-    
-    /* When filters are active, make the cards more prominent */
-    .friends-mode-active .post-card.friend-post {
-        box-shadow: 0 0 0 1px #bbdefb, 0 4px 12px rgba(25, 118, 210, 0.15);
-    }
-    
-    .family-mode-active .post-card.family-post {
-        box-shadow: 0 0 0 1px #c8e6c9, 0 4px 12px rgba(56, 142, 60, 0.15);
-    }
-    
-    .action-btn.hide-btn {
-        color: #dc3545;
-    }
-    
-    .action-btn.hide-similar-btn {
-        color: #fd7e14;
-        font-size: 0.8rem; /* Make it a bit smaller to fit */
-    }
-    
-    .action-btn.detail-btn {
-        color: var(--primary);
-    }
-</style>
-{% endblock %}
-
-{% block extra_scripts %}
+{% block extra_js %}
 <script>
-    $(document).ready(function() {
-        // Set up CSRF token for AJAX requests
-        function getCookie(name) {
-            let cookieValue = null;
-            if (document.cookie && document.cookie !== '') {
-                const cookies = document.cookie.split(';');
-                for (let i = 0; i < cookies.length; i++) {
-                    const cookie = cookies[i].trim();
-                    if (cookie.substring(0, name.length + 1) === (name + '=')) {
-                        cookieValue = decodeURIComponent(cookie.substring(name.length + 1));
-                        break;
-                    }
-                }
-            }
-            return cookieValue;
+$(document).ready(function() {
+    // Toggle sub-options for checkbox filters
+    $('input[name="bizfluencer_filter"]').change(function() {
+        if($(this).is(':checked')) {
+            $(this).closest('.form-group').find('.sub-option').removeClass('d-none');
+        } else {
+            $(this).closest('.form-group').find('.sub-option').addClass('d-none');
         }
-        
-        const csrftoken = getCookie('csrftoken');
-        
-        $.ajaxSetup({
-            beforeSend: function(xhr, settings) {
-                if (!/^(GET|HEAD|OPTIONS|TRACE)$/i.test(settings.type) && !this.crossDomain) {
-                    xhr.setRequestHeader("X-CSRFToken", csrftoken);
-                }
-                xhr.setRequestHeader("X-Requested-With", "XMLHttpRequest");
-            }
-        });
-        
-        // Initialize tooltips
-        $('[data-toggle="tooltip"]').tooltip();
-        
-        // Enable alert dismissal
-        $('.alert .close').on('click', function() {
-            $(this).parent('.alert').fadeOut('fast');
-        });
-        
-        // Create toast container if it doesn't exist
-        if ($('.toast-container').length === 0) {
-            $('body').append('<div class="toast-container"></div>');
-        }
-        
-        // Function to show toast notifications
-        function showToast(type, title, message, duration = 5000) {
-            const icons = {
-                success: '<i class="fas fa-check-circle"></i>',
-                info: '<i class="fas fa-info-circle"></i>',
-                warning: '<i class="fas fa-exclamation-triangle"></i>',
-                error: '<i class="fas fa-times-circle"></i>'
-            };
-            
-            const toast = $(`
-                <div class="toast ${type}">
-                    <div class="toast-icon">${icons[type]}</div>
-                    <div class="toast-content">
-                        <div class="toast-title">${title}</div>
-                        <div class="toast-message">${message}</div>
-                    </div>
-                    <div class="toast-close"><i class="fas fa-times"></i></div>
-                </div>
-            `);
-            
-            $('.toast-container').append(toast);
-            
-            // Add click handler to close button
-            toast.find('.toast-close').on('click', function() {
-                removeToast(toast);
-            });
-            
-            // Auto-remove after duration
-            setTimeout(() => {
-                removeToast(toast);
-            }, duration);
-        }
-        
-        function removeToast(toast) {
-            toast.css('animation', 'fade-out 0.3s forwards');
-            setTimeout(() => {
-                toast.remove();
-            }, 300);
-        }
-        
-        // Handle family marking form submissions via AJAX
-        $('form[action^="{% url 'mark_family' 'placeholder' 'placeholder' %}'.replace(/placeholder\/placeholder/, "")]').submit(function(e) {
-            e.preventDefault();
-            const form = $(this);
-            const username = form.attr('action').split('/')[2]; // Extract username from URL
-            
-            $.ajax({
-                url: form.attr('action'),
-                method: 'POST',
-                data: form.serialize(),
-                success: function() {
-                    // Show success toast
-                    showToast('success', 'Family Member Added', `${username} has been marked as family.`);
-                    
-                    // Change the button to show status
-                    form.replaceWith('<span class="family-badge">Family</span>');
-                    
-                    // If using family-only mode, refresh the page after a delay
-                    if ($('input[name="family_only"]').is(':checked')) {
-                        setTimeout(() => {
-                            window.location.reload();
-                        }, 1500);
-                    }
-                },
-                error: function() {
-                    showToast('error', 'Error', 'Failed to mark as family member. Please try again.');
-                }
-            });
-        });
-        
-        // Toggle sub-options for filters with thresholds
-        $('input[name="bizfluencer_filter"]').change(function() {
-            if($(this).is(':checked')) {
-                $(this).closest('.form-group').find('.sub-option').removeClass('hidden');
-            } else {
-                $(this).closest('.form-group').find('.sub-option').addClass('hidden');
-            }
-        });
-        
-        $('input[name="high_sentiment_only"]').change(function() {
-            if($(this).is(':checked')) {
-                $(this).closest('.form-group').find('.sub-option').removeClass('hidden');
-            } else {
-                $(this).closest('.form-group').find('.sub-option').addClass('hidden');
-            }
-        });
-        
-        // Toggle preset options
-        $('#save-as-preset-toggle').change(function() {
-            if($(this).is(':checked')) {
-                $('#preset-options').slideDown();
-            } else {
-                $('#preset-options').slideUp();
-            }
-        });
-        
-        // Process ML posts button
-        $('#process-ml-btn').click(function() {
-            var btn = $(this);
-            var statusDiv = $('#ml-status');
-            
-            btn.prop('disabled', true).text('Processing...');
-            statusDiv.removeClass('hidden').html('<div class="progress"><div class="progress-bar progress-bar-striped progress-bar-animated" role="progressbar" style="width: 100%"></div></div>');
-            
-            $.ajax({
-                url: '/api/process-ml/',
-                method: 'POST',
-                data: { 
-                    csrfmiddlewaretoken: '{{ csrf_token }}',
-                    limit: 20
-                },
-                success: function(response) {
-                    statusDiv.html('<div class="alert alert-success">Processed ' + response.processed + ' posts successfully.</div>');
-                    setTimeout(function() {
-                        location.reload();
-                    }, 1500);
-                },
-                error: function() {
-                    statusDiv.html('<div class="alert alert-danger">Error processing posts. Please try again.</div>');
-                    btn.prop('disabled', false).text('Process More Posts');
-                }
-            });
-        });
-        
-        // Add class to body when friends or family modes are active
-        if($('input[name="friends_only"]').is(':checked')) {
-            $('.posts-container').addClass('friends-mode-active');
-        }
-        
-        if($('input[name="family_only"]').is(':checked')) {
-            $('.posts-container').addClass('family-mode-active');
-        }
-        
-        // Add active state when toggling filters
-        $('input[name="friends_only"]').change(function() {
-            if($(this).is(':checked')) {
-                $('.posts-container').addClass('friends-mode-active');
-            } else {
-                $('.posts-container').removeClass('friends-mode-active');
-            }
-        });
-        
-        $('input[name="family_only"]').change(function() {
-            if($(this).is(':checked')) {
-                $('.posts-container').addClass('family-mode-active');
-            } else {
-                $('.posts-container').removeClass('family-mode-active');
-            }
-        });
     });
+    
+    $('input[name="high_sentiment_only"]').change(function() {
+        if($(this).is(':checked')) {
+            $(this).closest('.form-group').find('.sub-option').removeClass('d-none');
+        } else {
+            $(this).closest('.form-group').find('.sub-option').addClass('d-none');
+        }
+    });
+    
+    // Toggle preset options
+    $('#save-as-preset-toggle').change(function() {
+        if($(this).is(':checked')) {
+            $('#preset-options').slideDown();
+        } else {
+            $('#preset-options').slideUp();
+        }
+    });
+    
+    // Enable tooltips
+    $('[data-toggle="tooltip"]').tooltip();
+});
 </script>
 {% endblock %}

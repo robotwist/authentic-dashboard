@@ -257,9 +257,92 @@ chrome.runtime.onMessage.addListener(function(request, sender, sendResponse) {
                     error: error.message
                 });
             });
+        return true; // Keep the message channel open for the async response
+    } else if (request.action === 'checkConnection') {
+        // Check connection to server
+        window.authDashboardAPI.checkAvailability(true)
+            .then(status => {
+                if (status.available) {
+                    sendResponse({
+                        status: 'connected',
+                        endpoint: status.endpoint
+                    });
+                } else {
+                    sendResponse({
+                        status: 'disconnected',
+                        error: 'Server is not available'
+                    });
+                }
+            })
+            .catch(error => {
+                sendResponse({
+                    status: 'error',
+                    error: error.message
+                });
+            });
+        return true; // Keep the message channel open for the async response
+    } else if (request.action === 'sendPosts') {
+        // This is a new handler for the content script to send posts through the background script
+        console.log("Background script received sendPosts message:", request.platform, request.posts.length);
         
-        // Return true to indicate we'll send a response asynchronously
-        return true;
+        // Use the API client to send the posts
+        if (window.authDashboardAPI) {
+            window.authDashboardAPI.sendPosts(request.posts, request.platform)
+                .then(result => {
+                    console.log("Successfully sent posts via API client:", result);
+                    sendResponse({
+                        success: true, 
+                        message: `Successfully sent ${request.posts.length} posts from ${request.platform}`,
+                        result: result
+                    });
+                })
+                .catch(error => {
+                    console.error("Error sending posts via API client:", error);
+                    sendResponse({
+                        success: false,
+                        error: error.message
+                    });
+                });
+        } else {
+            // Direct fetch as fallback if API client isn't available
+            const apiKey = request.apiKey || '42ad72779a934c2d8005992bbecb6772';
+            const apiEndpoint = request.apiEndpoint || 'http://localhost:8000';
+            
+            fetch(`${apiEndpoint}/api/collect-posts/`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-API-Key': apiKey
+                },
+                body: JSON.stringify({
+                    platform: request.platform,
+                    posts: request.posts
+                })
+            })
+            .then(response => {
+                if (!response.ok) {
+                    throw new Error(`HTTP error! Status: ${response.status}`);
+                }
+                return response.json();
+            })
+            .then(data => {
+                console.log("Successfully sent posts:", data);
+                sendResponse({
+                    success: true,
+                    message: `Successfully sent ${request.posts.length} posts from ${request.platform}`,
+                    result: data
+                });
+            })
+            .catch(error => {
+                console.error("Error sending posts:", error);
+                sendResponse({
+                    success: false,
+                    error: error.message
+                });
+            });
+        }
+        
+        return true; // Keep the message channel open for the async response
     } else if (request.action === 'getStats') {
         chrome.storage.local.get(['stats'], function(result) {
             sendResponse({

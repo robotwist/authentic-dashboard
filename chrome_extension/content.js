@@ -651,129 +651,45 @@ function collectFacebookPosts() {
 
   console.log(`Collected ${posts.length} Facebook posts`);
   
-  // Special handling for Facebook posts - bypass server availability check
-  // Just directly send the posts
-  chrome.storage.local.get(['apiKey', 'apiEndpoint'], function(result) {
-    const apiKey = result.apiKey || '42ad72779a934c2d8005992bbecb6772'; // Use the correct API key
-    const apiEndpoint = result.apiEndpoint || 'http://localhost:8000';
-    
-    console.log(`Sending ${posts.length} Facebook posts to ${apiEndpoint} with API key ${apiKey.substr(0, 8)}...`);
-    
-    if (posts.length > 0) {
-      // First try with the API client if available
-      if (window.authDashboardAPI) {
-        console.log("Using authDashboardAPI to send posts");
-        window.authDashboardAPI.sendPosts(posts, 'facebook')
-          .then(result => {
-            // Always consider it successful for Facebook
-            console.log("Successfully sent posts via API client:", result);
-          })
-          .catch(error => {
-            // Even if there's an error, don't show it as a failure
-            console.log("Noted API client issue, but continuing:", error);
-          });
+  // Send posts through the background script instead of making direct API calls
+  // This bypasses Content Security Policy restrictions
+  if (posts.length > 0) {
+    console.log("Sending Facebook posts via background script");
+    chrome.runtime.sendMessage({
+      action: 'sendPosts',
+      platform: 'facebook',
+      posts: posts
+    }, function(response) {
+      if (chrome.runtime.lastError) {
+        console.error("Error sending posts to background script:", chrome.runtime.lastError);
       } else {
-        // Fallback to direct fetch
-        sendWithDirectFetch(posts, apiKey, apiEndpoint);
+        console.log("Successfully sent posts to background script:", response);
       }
-    }
-  });
+    });
+  }
 
   return posts;
 }
 
 /**
  * Helper function to send posts using direct fetch API
+ * NOTE: This function is modified to use the background script
  */
 function sendWithDirectFetch(posts, apiKey, apiEndpoint) {
-  console.log("Using direct fetch to send posts");
+  console.log("Using background script to send posts");
   
-  // Ensure we have a valid API key
-  if (!apiKey || apiKey.length < 10) {
-    console.error("Invalid API key provided for direct fetch:", apiKey);
-    
-    // Try to get a valid API key from storage
-    chrome.storage.local.get(['apiKey'], function(result) {
-      if (result.apiKey && result.apiKey.length > 10) {
-        console.log("Retrieved API key from storage:", result.apiKey.substring(0, 8) + '...');
-        sendWithDirectFetch(posts, result.apiKey, apiEndpoint);
-      } else {
-        console.error("No valid API key available in storage");
-      }
-    });
-    return;
-  }
-  
-  // Log the API key being used (first 8 chars only for security)
-  console.log("Using API key for direct fetch:", apiKey.substring(0, 8) + '...');
-  
-  // First try the collect-posts endpoint
-  fetch(`${apiEndpoint}/api/collect-posts/`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'X-API-Key': apiKey
-    },
-    body: JSON.stringify({
-      platform: 'facebook',
-      posts: posts
-    })
-  })
-  .then(response => {
-    console.log("Received response:", response.status, response.statusText);
-    if (!response.ok) {
-      throw new Error(`HTTP error! Status: ${response.status}`);
-    }
-    return response.json();
-  })
-  .then(data => {
-    console.log("Successfully sent Facebook posts:", data);
-    
-    // Check for processing errors
-    if (data.errors && data.errors > 0) {
-      console.warn(`Server reported ${data.errors} errors processing the posts`);
-    }
-  })
-  .catch(error => {
-    console.error("Error sending Facebook posts:", error);
-    // Try alternate endpoint as last resort
-    console.log("Trying alternate endpoint /api/post/");
-    
-    // Send posts one by one to the individual post endpoint
-    let successCount = 0;
-    
-    // Process posts sequentially to avoid overwhelming the server
-    sendNextPost(0);
-    
-    function sendNextPost(index) {
-      if (index >= posts.length) {
-        console.log(`Finished sending ${successCount}/${posts.length} posts via alternate endpoint`);
-        return;
-      }
-      
-      fetch(`${apiEndpoint}/api/post/`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'X-API-Key': apiKey
-        },
-        body: JSON.stringify(posts[index])
-      })
-      .then(response => {
-        console.log(`Post ${index+1}/${posts.length} response:`, response.status);
-        if (response.ok) successCount++;
-        return response.json();
-      })
-      .then(data => {
-        console.log(`Post ${index+1} result:`, data);
-        // Process next post with a small delay to avoid rate limiting
-        setTimeout(() => sendNextPost(index + 1), 100);
-      })
-      .catch(err => {
-        console.error(`Error with post ${index+1}:`, err);
-        // Continue with next post despite error
-        setTimeout(() => sendNextPost(index + 1), 100);
-      });
+  // Send the posts to the background script instead of making direct fetch
+  chrome.runtime.sendMessage({
+    action: 'sendPosts',
+    platform: 'facebook',
+    posts: posts,
+    apiKey: apiKey,
+    apiEndpoint: apiEndpoint
+  }, function(response) {
+    if (chrome.runtime.lastError) {
+      console.error("Error sending posts to background script:", chrome.runtime.lastError);
+    } else {
+      console.log("Successfully sent posts to background script:", response);
     }
   });
 }
@@ -985,74 +901,31 @@ function collectLinkedInPosts() {
         is_job_post: Boolean(post.is_job_post)
       };
       
-      fetch(`${result.apiEndpoint}/api/collect-posts/`, {
-        method: "POST",
-        headers: { 
-          "Content-Type": "application/json",
-          "X-API-Key": apiKey
-        },
-        body: JSON.stringify({
-          platform: 'linkedin',
-          posts: [formattedPost]
-        })
-      })
-      .then(res => {
-        if (!res.ok) {
-          // Create more informative error message
-          const errorMessage = `HTTP error! Status: ${res.status}, URL: ${res.url}`;
-          console.error(errorMessage);
-          throw new Error(errorMessage);
-        }
-        return res.json();
-      })
-      .then(data => console.log("LinkedIn post saved:", data))
-      .catch(err => {
-        console.error("Error sending LinkedIn post:", err);
-        
-        // Try alternate endpoint
-        console.log("Trying alternate endpoint /api/post/");
-        fetch(`${result.apiEndpoint}/api/post/`, {
-          method: "POST",
-          headers: { 
-            "Content-Type": "application/json",
-            "X-API-Key": apiKey
-          },
-          body: JSON.stringify(formattedPost)
-        })
-        .then(res => {
-          if (!res.ok) {
-            throw new Error(`HTTP error on alternate endpoint! Status: ${res.status}`);
-          }
-          return res.json();
-        })
-        .then(data => console.log("LinkedIn post saved via alternate endpoint:", data))
-        .catch(altErr => {
-          console.error("Error on alternate endpoint:", altErr);
+      // Use background script instead of direct fetch to bypass Content Security Policy
+      chrome.runtime.sendMessage({
+        action: 'sendPosts',
+        platform: 'linkedin',
+        posts: [formattedPost],
+        apiKey: apiKey,
+        apiEndpoint: result.apiEndpoint
+      }, function(response) {
+        if (chrome.runtime.lastError) {
+          console.error("Error sending LinkedIn post to background script:", chrome.runtime.lastError);
+          
           // Update connection error counters
           connectionErrorCount++;
-          lastConnectionError = err.message;
-          
-          // Create user-friendly error message
-          let userMessage = "Error connecting to server. ";
-          if (err.message.includes("404")) {
-            userMessage += "API endpoint not found. Check server configuration.";
-          } else if (err.message.includes("401")) {
-            userMessage += "Authentication failed. Check your API key.";
-          } else if (err.message.includes("500")) {
-            userMessage += "Server error. Check Django logs for details.";
-          } else {
-            userMessage += err.message;
-          }
-          
+          lastConnectionError = "Error communicating with background script";
           
           if (connectionErrorCount >= MAX_CONNECTION_ERRORS) {
             chrome.runtime.sendMessage({
               action: 'showNotification',
               title: 'Connection Error',
-              message: userMessage
+              message: "Could not connect to extension background service."
             });
           }
-        });
+        } else {
+          console.log("LinkedIn post processed via background script:", response);
+        }
       });
     });
   });
