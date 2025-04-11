@@ -238,107 +238,202 @@ chrome.webNavigation.onBeforeNavigate.addListener(
 
 // Listen for messages from content scripts or popup
 chrome.runtime.onMessage.addListener(function(request, sender, sendResponse) {
+    console.log("Background script received message:", request.action);
+    
     if (request.action === 'showNotification') {
         showNotification(request.title, request.message, request.type);
         sendResponse({success: true});
     } else if (request.action === 'checkAPIEndpoint') {
         // Force a check of the API availability
-        window.authDashboardAPI.checkAvailability(true)
-            .then(status => {
-                sendResponse({
-                    success: true,
-                    available: status.available,
-                    endpoint: status.endpoint
-                });
-            })
-            .catch(error => {
-                sendResponse({
-                    success: false,
-                    error: error.message
-                });
-            });
-        return true; // Keep the message channel open for the async response
-    } else if (request.action === 'checkConnection') {
-        // Check connection to server
-        window.authDashboardAPI.checkAvailability(true)
-            .then(status => {
-                if (status.available) {
-                    sendResponse({
-                        status: 'connected',
-                        endpoint: status.endpoint
-                    });
-                } else {
-                    sendResponse({
-                        status: 'disconnected',
-                        error: 'Server is not available'
-                    });
-                }
-            })
-            .catch(error => {
-                sendResponse({
-                    status: 'error',
-                    error: error.message
-                });
-            });
-        return true; // Keep the message channel open for the async response
-    } else if (request.action === 'sendPosts') {
-        // This is a new handler for the content script to send posts through the background script
-        console.log("Background script received sendPosts message:", request.platform, request.posts.length);
-        
-        // Use the API client to send the posts
         if (window.authDashboardAPI) {
-            window.authDashboardAPI.sendPosts(request.posts, request.platform)
-                .then(result => {
-                    console.log("Successfully sent posts via API client:", result);
+            window.authDashboardAPI.checkAvailability(request.forceCheck || true)
+                .then(status => {
                     sendResponse({
-                        success: true, 
-                        message: `Successfully sent ${request.posts.length} posts from ${request.platform}`,
-                        result: result
+                        success: true,
+                        available: status.available,
+                        endpoint: status.endpoint,
+                        apiKey: status.apiKey
                     });
                 })
                 .catch(error => {
-                    console.error("Error sending posts via API client:", error);
                     sendResponse({
                         success: false,
                         error: error.message
                     });
                 });
         } else {
-            // Direct fetch as fallback if API client isn't available
-            const apiKey = request.apiKey || '42ad72779a934c2d8005992bbecb6772';
-            const apiEndpoint = request.apiEndpoint || 'http://localhost:8000';
-            
-            fetch(`${apiEndpoint}/api/collect-posts/`, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'X-API-Key': apiKey
-                },
-                body: JSON.stringify({
-                    platform: request.platform,
-                    posts: request.posts
+            // Fallback if API client isn't available
+            checkAPIAvailabilityDirectly()
+                .then(result => {
+                    sendResponse({
+                        success: true,
+                        available: result.available,
+                        endpoint: result.endpoint,
+                        apiKey: result.apiKey
+                    });
                 })
-            })
-            .then(response => {
-                if (!response.ok) {
-                    throw new Error(`HTTP error! Status: ${response.status}`);
-                }
-                return response.json();
-            })
+                .catch(error => {
+                    sendResponse({
+                        success: false,
+                        error: error.message
+                    });
+                });
+        }
+        return true; // Keep the message channel open for the async response
+    } else if (request.action === 'healthCheck') {
+        // Simple API health check
+        const endpoint = request.endpoint || 'http://localhost:8000';
+        const apiKey = request.apiKey;
+        
+        fetch(`${endpoint}/api/health-check/`)
+            .then(response => response.json())
             .then(data => {
-                console.log("Successfully sent posts:", data);
                 sendResponse({
                     success: true,
-                    message: `Successfully sent ${request.posts.length} posts from ${request.platform}`,
-                    result: data
+                    data: data,
+                    status: 'API is operational'
                 });
             })
             .catch(error => {
-                console.error("Error sending posts:", error);
                 sendResponse({
                     success: false,
                     error: error.message
                 });
+            });
+        return true;
+    } else if (request.action === 'verifyApiKey') {
+        // Verify an API key
+        const endpoint = request.endpoint || 'http://localhost:8000';
+        const apiKey = request.apiKey;
+        
+        if (!apiKey) {
+            sendResponse({
+                success: false,
+                error: 'No API key provided'
+            });
+            return true;
+        }
+        
+        fetch(`${endpoint}/api/verify-key/`, {
+            headers: {
+                'X-API-Key': apiKey
+            }
+        })
+            .then(response => response.json())
+            .then(data => {
+                sendResponse({
+                    success: true,
+                    valid: data.valid === true,
+                    data: data
+                });
+            })
+            .catch(error => {
+                sendResponse({
+                    success: false,
+                    error: error.message
+                });
+            });
+        return true;
+    } else if (request.action === 'checkConnection') {
+        // Check connection to server
+        try {
+            // Simple response to tell content script that background script is responsive
+            // This doesn't actually check the API yet - just confirms background script is working
+            sendResponse({
+                status: 'connected',
+                backgroundScriptWorking: true
+            });
+            
+            // Then also check actual API connection if requested
+            if (request.checkApi && window.authDashboardAPI) {
+                window.authDashboardAPI.checkAvailability(true)
+                    .then(status => {
+                        console.log("API connection check result:", status);
+                    })
+                    .catch(error => {
+                        console.error("API connection check error:", error);
+                    });
+            }
+        } catch (error) {
+            console.error("Error in checkConnection handler:", error);
+            sendResponse({
+                status: 'error',
+                error: error.message
+            });
+        }
+        return true;
+    } else if (request.action === 'sendPosts') {
+        // This is a new handler for the content script to send posts through the background script
+        console.log("Background script received sendPosts message:", request.platform, 
+                    request.posts ? request.posts.length : 0);
+        
+        // Validate the request
+        if (!request.posts || !Array.isArray(request.posts) || request.posts.length === 0) {
+            console.error("Invalid posts data received");
+            sendResponse({
+                success: false,
+                error: "Invalid posts data"
+            });
+            return true;
+        }
+        
+        if (!request.platform) {
+            console.error("Missing platform in sendPosts request");
+            sendResponse({
+                success: false,
+                error: "Missing platform"
+            });
+            return true;
+        }
+        
+        // Format boolean fields properly (ensure they are actual booleans)
+        const formattedPosts = request.posts.map(post => ({
+            ...post,
+            is_friend: Boolean(post.is_friend),
+            is_family: Boolean(post.is_family),
+            verified: Boolean(post.verified),
+            is_sponsored: Boolean(post.is_sponsored),
+            is_job_post: Boolean(post.is_job_post)
+        }));
+        
+        // Use the API client to send the posts
+        try {
+            if (window.authDashboardAPI) {
+                window.authDashboardAPI.sendPosts(formattedPosts, request.platform)
+                    .then(result => {
+                        console.log("Successfully sent posts via API client:", result);
+                        sendResponse({
+                            success: true, 
+                            message: `Successfully sent ${formattedPosts.length} posts from ${request.platform}`,
+                            result: result
+                        });
+                    })
+                    .catch(error => {
+                        console.error("Error sending posts via API client:", error);
+                        // Try direct fetch as fallback
+                        return sendPostsWithDirectFetch(
+                            formattedPosts, 
+                            request.platform, 
+                            request.apiKey, 
+                            request.apiEndpoint,
+                            sendResponse
+                        );
+                    });
+            } else {
+                // Direct fetch as fallback if API client isn't available
+                return sendPostsWithDirectFetch(
+                    formattedPosts, 
+                    request.platform, 
+                    request.apiKey, 
+                    request.apiEndpoint,
+                    sendResponse
+                );
+            }
+        } catch (error) {
+            console.error("Exception in sendPosts handler:", error);
+            sendResponse({
+                success: false,
+                error: error.message
             });
         }
         
@@ -355,6 +450,161 @@ chrome.runtime.onMessage.addListener(function(request, sender, sendResponse) {
         return true;
     }
 });
+
+// Helper function to check API availability directly
+function checkAPIAvailabilityDirectly() {
+    return new Promise((resolve, reject) => {
+        chrome.storage.local.get(['apiEndpoint', 'apiKey'], function(result) {
+            const apiEndpoint = result.apiEndpoint || 'http://localhost:8000';
+            const apiKey = result.apiKey;
+            
+            // Try the health check endpoint
+            fetch(`${apiEndpoint}/api/health-check/`)
+                .then(response => {
+                    if (response.ok) {
+                        // API is available
+                        chrome.storage.local.set({
+                            apiAvailable: true,
+                            apiLastCheck: Date.now()
+                        });
+                        
+                        resolve({
+                            available: true,
+                            endpoint: apiEndpoint,
+                            apiKey: apiKey
+                        });
+                    } else {
+                        // API returned an error
+                        throw new Error(`API returned status ${response.status}`);
+                    }
+                })
+                .catch(error => {
+                    console.error("Direct API check failed:", error);
+                    
+                    // Try alternative endpoints
+                    const alternativeEndpoints = [
+                        'http://localhost:8000',
+                        'http://127.0.0.1:8000',
+                        'http://0.0.0.0:8000'
+                    ].filter(ep => ep !== apiEndpoint);
+                    
+                    // Try each alternative
+                    tryNextEndpoint(0, alternativeEndpoints);
+                });
+                
+            function tryNextEndpoint(index, endpoints) {
+                if (index >= endpoints.length) {
+                    // All alternatives failed
+                    chrome.storage.local.set({
+                        apiAvailable: false,
+                        apiLastCheck: Date.now()
+                    });
+                    
+                    reject(new Error("All API endpoints are unavailable"));
+                    return;
+                }
+                
+                const endpoint = endpoints[index];
+                
+                fetch(`${endpoint}/api/health-check/`)
+                    .then(response => {
+                        if (response.ok) {
+                            // Found a working endpoint
+                            chrome.storage.local.set({
+                                apiAvailable: true,
+                                apiLastCheck: Date.now(),
+                                apiEndpoint: endpoint
+                            });
+                            
+                            resolve({
+                                available: true,
+                                endpoint: endpoint,
+                                apiKey: apiKey
+                            });
+                        } else {
+                            // Try next endpoint
+                            tryNextEndpoint(index + 1, endpoints);
+                        }
+                    })
+                    .catch(() => {
+                        // Try next endpoint
+                        tryNextEndpoint(index + 1, endpoints);
+                    });
+            }
+        });
+    });
+}
+
+// Helper function to send posts with direct fetch API
+function sendPostsWithDirectFetch(posts, platform, apiKey, apiEndpoint, sendResponse) {
+    // Default values if not provided
+    const key = apiKey || '42ad72779a934c2d8005992bbecb6772';
+    const endpoint = apiEndpoint || 'http://localhost:8000';
+    
+    console.log(`Using direct fetch to send ${posts.length} posts to ${endpoint}`);
+    
+    // Implement retry logic for API calls
+    let retryCount = 0;
+    const maxRetries = 3;
+    const initialDelay = 1000; // 1 second
+    
+    function attemptFetch(delay) {
+        console.log(`API call attempt ${retryCount + 1}/${maxRetries + 1} for ${platform} posts`);
+        
+        fetch(`${endpoint}/api/collect-posts/`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-API-Key': key
+            },
+            body: JSON.stringify({
+                platform: platform,
+                posts: posts
+            })
+        })
+        .then(response => {
+            if (!response.ok) {
+                if (response.status === 429) {
+                    // Rate limited - longer backoff
+                    throw new Error(`Rate limited! Status: ${response.status}`);
+                }
+                throw new Error(`HTTP error! Status: ${response.status}`);
+            }
+            return response.json();
+        })
+        .then(data => {
+            console.log("Successfully sent posts with direct fetch:", data);
+            sendResponse({
+                success: true,
+                message: `Successfully sent ${posts.length} posts from ${platform}`,
+                result: data
+            });
+        })
+        .catch(error => {
+            console.error(`Error sending posts (attempt ${retryCount + 1}):`, error);
+            
+            if (retryCount < maxRetries) {
+                retryCount++;
+                const nextDelay = delay * 2; // Exponential backoff
+                console.log(`Retrying in ${nextDelay}ms...`);
+                setTimeout(() => attemptFetch(nextDelay), nextDelay);
+            } else {
+                console.error("Max retries exceeded. Giving up.");
+                sendResponse({
+                    success: false,
+                    error: error.message,
+                    message: `Failed to send posts after ${maxRetries + 1} attempts`
+                });
+            }
+        });
+    }
+    
+    // Start the first attempt
+    attemptFetch(initialDelay);
+    
+    // Return true to keep the message channel open for the async response
+    return true;
+}
 
 // Improved function to show notifications
 function showNotification(title, message, type = 'info') {

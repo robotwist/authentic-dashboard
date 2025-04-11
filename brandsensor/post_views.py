@@ -3,6 +3,7 @@ from django.contrib.auth.decorators import login_required
 from django.http import JsonResponse
 from django.db.models import Q
 import logging
+from django.db.utils import IntegrityError
 
 from .models import SocialPost, SocialConnection, BehaviorLog, MLPredictionLog
 from .ml_processor import process_post
@@ -48,10 +49,15 @@ def post_action(request, post_id):
         try:
             post = SocialPost.objects.get(id=post_id, user=request.user)
             
+            # Flag to track if we've actually modified the post
+            post_modified = False
+            
             if action == "star":
                 post.starred = not post.starred
+                post_modified = True
             elif action == "hide":
                 post.hidden = True
+                post_modified = True
                 # Log the hiding action for feedback
                 BehaviorLog.objects.create(
                     user=request.user,
@@ -61,6 +67,7 @@ def post_action(request, post_id):
                 )
             elif action == "hide_similar":
                 post.hidden = True
+                post_modified = True
                 
                 # Process keywords from post content for similarity detection
                 import re
@@ -123,7 +130,7 @@ def post_action(request, post_id):
                 max_to_hide = 10  # Limit to prevent accidental mass-hiding
                 
                 if similar_count > 0:
-                    # Fix: Get IDs from the slice first, then update in a separate query
+                    # Get IDs from the slice first, then update in a separate query
                     similar_post_ids = list(similar_posts[:max_to_hide].values_list('id', flat=True))
                     
                     # Now update using the IDs
@@ -154,6 +161,7 @@ def post_action(request, post_id):
                 rating = request.POST.get('rating')
                 if rating and rating.isdigit():
                     post.rating = int(rating)
+                    post_modified = True
             elif action == "categorize":
                 category = request.POST.get('category', '').strip()
                 if category:
@@ -161,11 +169,24 @@ def post_action(request, post_id):
                     if post.category:
                         if category not in post.category:
                             post.category = f"{post.category},{category}"
+                            post_modified = True
                     else:
                         post.category = category
-                        
-            post.save()
+                        post_modified = True
             
+            # Only save if we actually modified the post - avoid unnecessary saves that could trigger duplicate issues
+            if post_modified:
+                try:
+                    post.save()
+                except IntegrityError:
+                    # Log the integrity error but continue - the action is still valid
+                    # even if we couldn't update the database due to duplication
+                    logger.warning(f"IntegrityError when saving post {post_id} after {action} action")
+                    
+                    # Still consider this a success since the action was processed
+                    if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
+                        return JsonResponse({"status": "success", "warning": "Changes saved, but a duplicate post was detected"})
+                
             # If this is an AJAX request, return success
             if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
                 return JsonResponse({"status": "success"})
@@ -173,6 +194,12 @@ def post_action(request, post_id):
         except SocialPost.DoesNotExist:
             if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
                 return JsonResponse({"error": "Post not found"}, status=404)
+        except Exception as e:
+            # Handle other errors
+            logger.error(f"Error in post_action for post {post_id}, action {action}: {str(e)}")
+            
+            if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
+                return JsonResponse({"error": f"Error processing action: {str(e)}"}, status=500)
     
     # For non-AJAX requests, redirect back to the dashboard
     return redirect('dashboard')

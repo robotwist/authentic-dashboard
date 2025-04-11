@@ -99,99 +99,24 @@ function checkServerAvailability(callback) {
         return;
     }
     
-    // Fallback to legacy method if API client isn't available
-    chrome.storage.local.get(['apiEndpoint', 'apiKey'], function(result) {
-        // Always do a fresh check, don't use cached results
-        const apiEndpoint = result.apiEndpoint || 'http://localhost:8000';
-        const apiKey = result.apiKey;
+    // Use message passing to communicate with background script for server availability check
+    chrome.runtime.sendMessage({
+        action: 'checkAPIEndpoint',
+        forceCheck: true
+    }, response => {
+        if (chrome.runtime.lastError) {
+            console.error("Error communicating with background script:", chrome.runtime.lastError);
+            callback(false, null, null);
+            return;
+        }
         
-        console.log("Testing connection to API endpoint:", apiEndpoint);
-        
-        fetch(`${apiEndpoint}/api/health-check/`, {
-            method: 'GET',
-            headers: {
-                'Content-Type': 'application/json',
-                'X-API-Key': apiKey || ''
-            }
-        })
-        .then(response => {
-            const available = response.ok;
-            
-            // Store the result and timestamp
-            chrome.storage.local.set({
-                apiAvailable: available,
-                apiLastCheck: Date.now(),
-                apiEndpoint: apiEndpoint
-            }, function() {
-                console.log(`Server available: ${available}`);
-                callback(available, apiEndpoint, apiKey);
-            });
-        })
-        .catch(error => {
-            console.error("Error checking server:", error);
-            
-            // Try alternative endpoints
-            const alternativeEndpoints = [
-                'http://localhost:8000',
-                'http://127.0.0.1:8000',
-                'http://0.0.0.0:8000'
-            ].filter(ep => ep !== apiEndpoint);
-            
-            console.log("Trying alternative endpoints:", alternativeEndpoints);
-            
-            // Try each alternative in sequence
-            tryNextEndpoint(0, alternativeEndpoints);
-            
-            function tryNextEndpoint(index, endpoints) {
-                if (index >= endpoints.length) {
-                    // All alternatives failed
-                    storeUnavailableResult();
-                    return;
-                }
-                
-                const endpoint = endpoints[index];
-                console.log(`Trying alternative endpoint: ${endpoint}`);
-                
-                fetch(`${endpoint}/api/health-check/`, {
-                    method: 'GET',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        'X-API-Key': apiKey || ''
-                    }
-                })
-                .then(response => {
-                    if (response.ok) {
-                        // Found a working endpoint
-                        chrome.storage.local.set({
-                            apiAvailable: true,
-                            apiLastCheck: Date.now(),
-                            apiEndpoint: endpoint
-                        }, function() {
-                            console.log(`Alternative endpoint available: ${endpoint}`);
-                            callback(true, endpoint, apiKey);
-                        });
-                    } else {
-                        // Try next endpoint
-                        tryNextEndpoint(index + 1, endpoints);
-                    }
-                })
-                .catch(() => {
-                    // Try next endpoint
-                    tryNextEndpoint(index + 1, endpoints);
-                });
-            }
-            
-            function storeUnavailableResult() {
-                // Store unavailable result
-                chrome.storage.local.set({
-                    apiAvailable: false,
-                    apiLastCheck: Date.now()
-                }, function() {
-                    console.log("All servers unavailable");
-                    callback(false, apiEndpoint, apiKey);
-                });
-            }
-        });
+        if (response && response.success) {
+            console.log("Server availability check via background script:", response);
+            callback(response.available, response.endpoint, response.apiKey);
+        } else {
+            console.error("Background script returned error:", response?.error || "Unknown error");
+            callback(false, null, null);
+        }
     });
 }
 
@@ -222,10 +147,26 @@ async function collectWithRateLimitProtection(platform, collectionFunction) {
   // Store last collection time
   localStorage.setItem(lastCollectionKey, now.toString());
   
-  // Call the actual collection function
+  // Call the actual collection function with error handling
   let allPosts = [];
   try {
-    allPosts = await collectionFunction();
+    // Use Promise with timeout to prevent hanging
+    const timeoutPromise = new Promise((_, reject) => {
+      setTimeout(() => reject(new Error('Collection timed out')), 10000); // 10 second timeout
+    });
+    
+    const collectionPromise = new Promise(resolve => {
+      try {
+        const result = collectionFunction();
+        resolve(result);
+      } catch (e) {
+        console.error(`Error in ${platform} collection function:`, e);
+        resolve([]);
+      }
+    });
+    
+    // Race the collection against the timeout
+    allPosts = await Promise.race([collectionPromise, timeoutPromise]);
   } catch (e) {
     console.error(`Error in ${platform} collection:`, e);
     return [];
@@ -280,202 +221,202 @@ function markPostAsProcessed(fingerprint) {
   });
 }
 
-// Then modify the collectInstagramPosts function to use fingerprinting
-function collectInstagramPosts(dataPreferences) {
-  console.log("Starting Instagram post collection with error prevention");
-  
-  // Default to all enabled if not specified
-  const prefs = dataPreferences || {
-    collectContent: true,
-    collectEngagement: true,
-    collectUsers: true,
-    collectHashtags: true,
-    collectLocalML: true
-  };
-  
-  // Existing post collection code, but respect preferences
+// Enhanced Instagram post collector
+function collectInstagramPosts() {
+  console.log("Starting Instagram post collection...");
   const posts = [];
-  const postElements = document.querySelectorAll('article');
   
-  console.log(`Found ${postElements.length} potential Instagram posts`);
-  
-  if (postElements.length === 0) {
-    console.log("No Instagram posts found on page");
-    return Promise.resolve([]);
-  }
-
-  const processedPromises = [];
-
-  postElements.forEach((el, index) => {
-    try {
-      // Check if element exists before accessing properties
-      if (!el) {
-        console.log(`Skipping invalid post element at index ${index}`);
-        return;
-      }
-      
-      // Get content safely
-      let content = "";
-      try {
-        content = prefs.collectContent ? (el.innerText || "") : "";
-      } catch (err) {
-        console.warn(`Error getting content for post ${index}:`, err);
-        content = "";
-      }
-      
-      // Get username safely with null checking
-      let username = "unknown";
-      try {
-        const headerElement = el.querySelector('header');
-        const usernameElement = headerElement ? headerElement.querySelector('a') : null;
-        username = (usernameElement && usernameElement.innerText) ? usernameElement.innerText.trim() : "unknown";
-      } catch (err) {
-        console.warn(`Error getting username for post ${index}:`, err);
-      }
-      
-      // If we couldn't get basic content or username, skip this post
-      if (!content && username === "unknown") {
-        console.log(`Skipping post ${index} due to missing content and username`);
-        return;
-      }
-      
-      console.log(`Processing Instagram post ${index} from user ${username}, content length: ${content.length}`);
-      
-      // Rest of the function remains the same, but wrapped in try/catch
-      try {
-        // Enhanced friend detection logic
-        let isFriend = false;
-        if (prefs.collectUsers) {
-          // Check for following status in buttons
-          const followButton = el.querySelector('header button');
-          if (followButton) {
-            const buttonText = followButton.innerText.toLowerCase();
-            isFriend = buttonText.includes('following') || 
-                      buttonText.includes('unfollow') ||
-                      buttonText.includes('requested');
-          }
-          
-          // Also check for follow status text
-          if (!isFriend && el.querySelector('header')) {
-            const headerText = el.querySelector('header').innerText.toLowerCase();
-            isFriend = headerText.includes('following') || 
-                      headerText.includes('follows you') ||
-                      headerText.includes('mutual');
-          }
-        }
-        
-        // Collect engagement data based on preference
-        let likes = 0;
-        let comments = 0;
-      
-        if (prefs.collectEngagement) {
-          // Look for like count
-          const likeElement = el.querySelector('section span');
-          if (likeElement && likeElement.innerText) {
-            const likeText = likeElement.innerText;
-            if (likeText.includes('like') || likeText.includes('heart')) {
-              const match = likeText.match(/\d+/);
-              if (match) likes = parseInt(match[0]);
-            }
-          }
-          
-          // Look for comment count
-          const commentElement = el.querySelector('a[href*="comments"]');
-          if (commentElement && commentElement.innerText) {
-            const commentText = commentElement.innerText;
-            if (commentText.includes('comment')) {
-              const match = commentText.match(/\d+/);
-              if (match) comments = parseInt(match[0]);
-            }
-          }
-        }
+  try {
+    // Find all post containers
+    const articleElements = document.querySelectorAll('article');
     
-        // Only collect hashtags if preference enabled
-        const hashtags = [];
-        const mentions = [];
-        
-        if (prefs.collectHashtags && content) {
-          // Extract hashtags
-          const hashtagMatches = content.match(/#[\w]+/g);
-          if (hashtagMatches) {
-            hashtagMatches.forEach(tag => {
-              if (!hashtags.includes(tag)) hashtags.push(tag);
-            });
-          }
-          
-          // Extract mentions
-          const mentionMatches = content.match(/@[\w.]+/g);
-          if (mentionMatches) {
-            mentionMatches.forEach(mention => {
-              if (!mentions.includes(mention)) mentions.push(mention);
-            });
-          }
-        }
-        
-        // Only do ML analysis if enabled
-        let sentimentScore = 0;
-        let manipulativePatterns = [];
-        
-        if (prefs.collectLocalML && content) {
-          // Simple sentiment analysis
-          const mlAnalysis = analyzeContentWithML(content, 'instagram');
-          sentimentScore = mlAnalysis.sentiment_score;
-          manipulativePatterns = mlAnalysis.manipulative_patterns;
-        }
-  
-        if (content.length > 0) {
-          // Generate fingerprint for this post
-          const fingerprint = generatePostFingerprint('instagram', username, content, '');
-          
-          // Check if we've already processed this post
-          const processedPromise = isPostAlreadyProcessed(fingerprint).then(isProcessed => {
-            if (isProcessed) {
-              console.log(`Skipping already processed Instagram post: ${fingerprint}`);
-              return null; // Skip this post
-            }
-            
-            // Build an object with only the enabled data fields
-            const post = {
-              platform: 'instagram',
-              collected_at: new Date().toISOString()
-            };
-            
-            // Add all the fields we collected
-            post.content = content;
-            post.content_length = content.length;
-            post.user = username;
-            post.verified = el.querySelector('header svg[aria-label="Verified"]') !== null;
-            post.is_friend = Boolean(isFriend);
-            post.is_family = false;
-            post.likes = likes;
-            post.comments = comments;
-            post.hashtags = hashtags.join(',');
-            post.mentions = mentions.join(',');
-            post.category = hashtags.join(',');
-            post.sentiment_score = sentimentScore;
-            
-            // Mark this post as processed
-            markPostAsProcessed(fingerprint);
-            console.log(`Added Instagram post to collection from ${username}`);
-            return post;
-          });
-          
-          processedPromises.push(processedPromise);
-        }
-      } catch (innerError) {
-        console.error(`Error processing Instagram post ${index} details:`, innerError);
-      }
-    } catch (outerError) {
-      console.error(`Error processing Instagram post ${index}:`, outerError);
+    console.log(`Found ${articleElements.length} potential Instagram posts`);
+    
+    if (!articleElements || articleElements.length === 0) {
+      console.log("No Instagram posts found on page");
+      return [];
     }
-  });
+    
+    articleElements.forEach((article, index) => {
+      try {
+        // Get the content text
+        let content = "";
+        const contentElement = article.querySelector('h1 + div, div._a9zr > div');
+        
+        if (contentElement) {
+          content = contentElement.innerText || "";
+        }
+        
+        // Skip if content is too short (likely not a real post)
+        if (!content || content.length < 5) {
+          return;
+        }
+        
+        // Extract user information
+        let user = "unknown";
+        const userElement = article.querySelector('header span > a, header h2 a');
+        if (userElement) {
+          user = userElement.innerText.trim();
+        }
+        
+        // Check if verified
+        const verifiedBadge = article.querySelector('header span.coreSpriteVerifiedBadge, svg[aria-label="Verified"]');
+        const isVerified = verifiedBadge !== null;
+        
+        // Check friendship status (look for "Follow" button)
+        const followButton = article.querySelector('button:not(.following)');
+        const isFriend = followButton === null || followButton.innerText !== 'Follow';
+        
+        // Check for sponsored content
+        const isSponsored = article.innerText.includes('Sponsored') || 
+                          article.innerText.includes('Paid partnership');
+        
+        // Get engagement metrics
+        let likes = 0;
+        const likeElement = article.querySelector('section span > div:first-child');
+        if (likeElement) {
+          const likeText = likeElement.innerText.trim();
+          likes = parseSocialCount(likeText);
+        }
+        
+        // Extract images
+        const imageUrls = [];
+        article.querySelectorAll('img[srcset], img[src*="instagram"]').forEach(img => {
+          if (img.src && !imageUrls.includes(img.src)) {
+            imageUrls.push(img.src);
+          }
+        });
+        
+        // Extract hashtags and mentions
+        const hashtags = extractHashtags(content);
+        
+        const mentions = [];
+        const mentionMatches = content.match(/@[\w.]+/g);
+        if (mentionMatches) {
+          mentionMatches.forEach(mention => {
+            if (!mentions.includes(mention)) mentions.push(mention);
+          });
+        }
+        
+        // Simple sentiment analysis
+        let sentimentScore = 0;
+        let positiveCount = 0;
+        let negativeCount = 0;
+        
+        const lowerContent = content.toLowerCase();
+        
+        // Check positive words
+        const positiveWords = ['love', 'happy', 'beautiful', 'amazing', 'great', 'awesome', 'perfect'];
+        positiveWords.forEach(word => {
+          const regex = new RegExp('\\b' + word + '\\b', 'gi');
+          const matches = lowerContent.match(regex);
+          if (matches) positiveCount += matches.length;
+        });
+        
+        // Check negative words
+        const negativeWords = ['hate', 'sad', 'angry', 'terrible', 'awful', 'worst', 'disappointed'];
+        negativeWords.forEach(word => {
+          const regex = new RegExp('\\b' + word + '\\b', 'gi');
+          const matches = lowerContent.match(regex);
+          if (matches) negativeCount += matches.length;
+        });
+        
+        // Calculate sentiment score
+        const totalSentiment = positiveCount + negativeCount;
+        if (totalSentiment > 0) {
+          sentimentScore = (positiveCount - negativeCount) / totalSentiment;
+        }
+        
+        // Create post object
+        posts.push({
+          content: content,
+          platform: 'instagram',
+          user: user,
+          is_friend: isFriend,
+          is_family: false,
+          verified: isVerified,
+          image_urls: imageUrls.slice(0, 3).join(','),
+          collected_at: new Date().toISOString(),
+          likes: likes,
+          comments: 0, // Instagram doesn't show comment counts reliably
+          hashtags: hashtags.join(','),
+          mentions: mentions.join(','),
+          sentiment_score: sentimentScore,
+          sentiment_indicators: {
+            positive: positiveCount,
+            negative: negativeCount
+          },
+          is_sponsored: isSponsored,
+          content_length: content.length
+        });
+        
+        console.log(`Added Instagram post from ${user}`);
+      } catch (err) {
+        console.error(`Error processing Instagram post ${index}:`, err);
+      }
+    });
+    
+    console.log(`Collected ${posts.length} Instagram posts`);
+    
+    // Send posts via background script if we collected any
+    if (posts.length > 0) {
+      // Get API key and endpoint from storage
+      chrome.storage.local.get(['apiKey', 'apiEndpoint'], function(result) {
+        const apiKey = result.apiKey || '42ad72779a934c2d8005992bbecb6772'; // Default fallback API key
+        const apiEndpoint = result.apiEndpoint || 'http://localhost:8000';
+        
+        try {
+          console.log(`Sending ${posts.length} Instagram posts to background script`);
+          sendMessageWithRetry({
+            action: 'sendPosts',
+            platform: 'instagram',
+            posts: posts,
+            apiKey: apiKey,
+            apiEndpoint: apiEndpoint
+          }, 3)
+          .then(response => {
+            console.log("Instagram posts processed successfully:", response);
+          })
+          .catch(error => {
+            console.error("Error sending Instagram posts:", error);
+            // Update connection error counter
+            connectionErrorCount++;
+            lastConnectionError = error.message || "Error sending posts";
+            
+            if (connectionErrorCount >= MAX_CONNECTION_ERRORS) {
+              console.error(`Too many connection errors (${connectionErrorCount}). Last error: ${lastConnectionError}`);
+            }
+          });
+        } catch (err) {
+          console.error("Exception when sending Instagram posts:", err);
+        }
+      });
+    }
+    
+    return posts;
+  } catch (err) {
+    console.error("Fatal error in Instagram collection:", err);
+    return [];
+  }
+}
+
+// Helper function to parse social media counts (e.g., "1.2K likes")
+function parseSocialCount(text) {
+  if (!text) return 0;
   
-  // Wait for all promise checks to complete and return only non-null posts
-  return Promise.all(processedPromises).then(posts => {
-    const validPosts = posts.filter(post => post !== null);
-    console.log(`Collected ${validPosts.length} Instagram posts successfully`);
-    return validPosts;
-  });
+  // Remove non-numeric parts
+  const numericPart = text.replace(/[^0-9.KkMm]/g, '');
+  
+  if (!numericPart) return 0;
+  
+  // Parse K/M suffixes
+  if (numericPart.includes('K') || numericPart.includes('k')) {
+    return Math.round(parseFloat(numericPart) * 1000);
+  } else if (numericPart.includes('M') || numericPart.includes('m')) {
+    return Math.round(parseFloat(numericPart) * 1000000);
+  } else {
+    return parseInt(numericPart, 10) || 0;
+  }
 }
 
 // Enhanced Facebook post collector
@@ -483,145 +424,174 @@ function collectFacebookPosts() {
   console.log("Starting Facebook post collection...");
   const posts = [];
   
-  // Find post elements on the page
-  const postElements = document.querySelectorAll('div[aria-posinset]');
-  console.log(`Found ${postElements.length} potential Facebook posts`);
-  
-  postElements.forEach((el, index) => {
-    try {
-      const content = el.innerText || "";
-      
-      // Skip empty posts or very short content
-      if (content.length < 20) {
-        console.log(`Skipping post ${index} due to insufficient content length (${content.length} chars)`);
-        return;
-      }
+  try {
+    // Find all post containers
+    const postElements = document.querySelectorAll('[data-pagelet^="FeedUnit"]');
+    
+    console.log(`Found ${postElements.length} potential Facebook posts`);
+    
+    if (!postElements || postElements.length === 0) {
+      console.log("No Facebook posts found on page");
+      return [];
+    }
 
-      // Extract user information
-      let user = "unknown";
-      let isVerified = false;
-      let isFriend = false;
-      const userElement = el.querySelector('h4 a, h3 a, span a');
-      if (userElement) {
-        user = userElement.innerText.trim();
-        // Check if verified (has verified badge)
-        isVerified = !!el.querySelector('svg[aria-label*="Verified"]');
-        // For Facebook, we'll assume most posts in feed are from friends
-        isFriend = true;
-      }
-      
-      // Extract post metadata
-      let likes = 0;
-      let comments = 0;
-      let shares = 0;
-      
-      // Try to find reaction counts
-      const reactionElements = el.querySelectorAll('[aria-label*="reaction"]');
-      if (reactionElements.length > 0) {
-        const reactionText = reactionElements[0].getAttribute('aria-label');
-        const match = reactionText && reactionText.match(/(\d+)/);
-        if (match) likes = parseInt(match[1]);
-      }
-      
-      // Try to extract comment and share counts
-      const commentElements = el.querySelectorAll('[aria-label*="comment"]');
-      if (commentElements.length > 0) {
-        const commentText = commentElements[0].textContent;
-        const match = commentText && commentText.match(/(\d+)/);
-        if (match) comments = parseInt(match[1]);
-      }
-      
-      const shareElements = el.querySelectorAll('[aria-label*="share"]');
-      if (shareElements.length > 0) {
-        const shareText = shareElements[0].textContent;
-        const match = shareText && shareText.match(/(\d+)/);
-        if (match) shares = parseInt(match[1]);
-      }
-      
-      // Extract category
-      let category = "";
-      const categoryElement = el.querySelector('[data-testid="story-subtitle"] a');
-      if (categoryElement) {
-        category = categoryElement.textContent.trim();
-      }
-      
-      // Extract image URLs
-      const imageUrls = [];
-      const images = el.querySelectorAll('img[src*="scontent"]');
-      images.forEach(img => {
-        if (img.src && !imageUrls.includes(img.src)) {
-          imageUrls.push(img.src);
+    // Process each post with proper error handling
+    postElements.forEach((el, index) => {
+      try {
+        if (!el) return; // Skip invalid elements
+        
+        // Get the content safely
+        let content = "";
+        try {
+          // Try different content container selectors
+          const contentContainer = 
+            el.querySelector('[data-ad-comet-preview="message"]') || 
+            el.querySelector('[data-ad-preview="message"]') ||
+            el.querySelector('[dir="auto"]');
+          
+          if (contentContainer) {
+            content = contentContainer.innerText || "";
+          }
+        } catch (err) {
+          console.warn(`Error getting FB post content for post ${index}:`, err);
         }
-      });
-      
-      // Extract timestamp
-      let timestamp = "";
-      const timestampElement = el.querySelector('[data-testid="story-subtitle"] [role="link"] > span');
-      if (timestampElement) {
-        timestamp = timestampElement.textContent.trim();
-      }
-      
-      // Check for sponsored content
-      let isSponsored = false;
-      const sponsoredElement = el.querySelector('[data-testid="story-subtitle"] span');
-      if (sponsoredElement && sponsoredElement.textContent.includes('Sponsored')) {
-        isSponsored = true;
-      }
-      
-      // Extract mentions
-      const mentions = [];
-      const mentionElements = el.querySelectorAll('a[href*="/user/"]');
-      mentionElements.forEach(mention => {
-        if (mention.textContent.startsWith('@')) {
-          mentions.push(mention.textContent);
+        
+        // Skip if content is too short
+        if (!content || content.length < 10) {
+          return;
         }
-      });
-      
-      // Extract hashtags
-      const hashtags = [];
-      const words = content.split(/\s+/);
-      words.forEach(word => {
-        if (word.startsWith('#') && word.length > 1) {
-          hashtags.push(word);
+        
+        console.log(`Collecting Facebook post ${index} from user , length: ${content.length} chars`);
+        
+        // Extract other post attributes safely
+        let user = "unknown";
+        let isVerified = false;
+        let isFamily = false;
+        let isSponsored = false;
+        let likes = 0;
+        let comments = 0;
+        let shares = 0;
+        let timestamp = '';
+        let imageUrls = [];
+        let hashtags = [];
+        let mentions = [];
+        let externalLinks = [];
+        
+        try {
+          // Extract user name
+          const nameElement = el.querySelector('a[role="link"] > strong') ||
+                             el.querySelector('span[dir="auto"] > span.xt0psk2');
+          
+          if (nameElement) {
+            user = nameElement.innerText.trim();
+          }
+          
+          // Check for verified badge
+          isVerified = el.querySelector('svg.n00je7tq.arfg74bv.qs9ysxi8.k77z8yql.bi6gxh9e') !== null;
+          
+          // Check for sponsored content
+          isSponsored = content.includes('#ad') || 
+                        content.includes('#sponsored') ||
+                        el.innerText.includes('Sponsored');
+          
+          // Check for family status (look for family-related text)
+          isFamily = content.toLowerCase().includes('my family') || 
+                    content.toLowerCase().includes('our family');
+                    
+          // Get likes count
+          const likeCountElement = el.querySelector('span.gpro0wi8');
+          if (likeCountElement) {
+            likes = parseFacebookCount(likeCountElement.innerText);
+          }
+          
+          // Get comments and shares
+          const engagementRow = el.querySelector('span.d2edcug0.hpfvmrgz');
+          if (engagementRow) {
+            const engagementText = engagementRow.innerText;
+            
+            if (engagementText.includes('comment')) {
+              const commentMatch = engagementText.match(/(\d+)\s*comment/);
+              if (commentMatch) comments = parseInt(commentMatch[1]);
+            }
+            
+            if (engagementText.includes('share')) {
+              const shareMatch = engagementText.match(/(\d+)\s*share/);
+              if (shareMatch) shares = parseInt(shareMatch[1]);
+            }
+          }
+          
+          // Get timestamp
+          const timeElement = el.querySelector('a.qi72231t > span.gvxzyvdx.aeinzg81.t7p7dqev.gh25dzvf');
+          if (timeElement) {
+            timestamp = timeElement.innerText;
+          }
+          
+          // Extract image URLs
+          el.querySelectorAll('img.i09qtzwb').forEach(img => {
+            if (img.src && !img.src.includes('emoji') && !imageUrls.includes(img.src)) {
+              imageUrls.push(img.src);
+            }
+          });
+          
+          // Extract hashtags, mentions and external links
+          hashtags = extractHashtags(content);
+          
+          const mentionMatches = content.match(/@[\w.]+/g);
+          if (mentionMatches) {
+            mentions = Array.from(new Set(mentionMatches));
+          }
+          
+          // Look for links
+          el.querySelectorAll('a[href^="http"]').forEach(link => {
+            const href = link.href;
+            if (!href.includes('facebook.com') && !externalLinks.includes(href)) {
+              externalLinks.push(href);
+            }
+          });
+        } catch (err) {
+          console.warn(`Error processing Facebook post ${index} metadata:`, err);
         }
-      });
-      
-      // Extract external links
-      const externalLinks = [];
-      const links = el.querySelectorAll('a[href*="http"]');
-      links.forEach(link => {
-        if (link.href && link.href.startsWith('http') && !link.href.includes('facebook.com')) {
-          externalLinks.push(link.href);
+        
+        // Sentiment analysis
+        let sentimentScore = 0;
+        let positiveCount = 0;
+        let negativeCount = 0;
+        
+        try {
+          // Simple sentiment analysis
+          const positiveWords = ['happy', 'great', 'love', 'excited', 'amazing', 'wonderful', 'thank'];
+          const negativeWords = ['sad', 'angry', 'hate', 'terrible', 'awful', 'disappointing', 'upset'];
+          
+          const lowerContent = content.toLowerCase();
+          
+          positiveWords.forEach(word => {
+            const regex = new RegExp('\\b' + word + '\\b', 'gi');
+            const matches = lowerContent.match(regex);
+            if (matches) positiveCount += matches.length;
+          });
+          
+          negativeWords.forEach(word => {
+            const regex = new RegExp('\\b' + word + '\\b', 'gi');
+            const matches = lowerContent.match(regex);
+            if (matches) negativeCount += matches.length;
+          });
+          
+          // Calculate sentiment score
+          const totalSentiment = positiveCount + negativeCount;
+          if (totalSentiment > 0) {
+            sentimentScore = (positiveCount - negativeCount) / totalSentiment;
+          }
+        } catch (err) {
+          console.warn(`Error processing sentiment for Facebook post ${index}:`, err);
         }
-      });
-      
-      // Basic sentiment analysis
-      let positiveCount = 0;
-      let negativeCount = 0;
-      const positiveWords = ['good', 'great', 'awesome', 'fantastic', 'excellent', 'happy', 'love', 'like', 'beautiful'];
-      const negativeWords = ['bad', 'terrible', 'awful', 'horrible', 'sad', 'hate', 'dislike', 'ugly', 'wrong'];
-      
-      words.forEach(word => {
-        const normalizedWord = word.toLowerCase().replace(/[^a-z]/g, '');
-        if (positiveWords.includes(normalizedWord)) positiveCount++;
-        if (negativeWords.includes(normalizedWord)) negativeCount++;
-      });
-      
-      let sentimentScore = 0;
-      if (positiveCount + negativeCount > 0) {
-        sentimentScore = (positiveCount - negativeCount) / (positiveCount + negativeCount);
-      }
-      
-      console.log(`Collecting Facebook post ${index} from user ${user}, length: ${content.length} chars`);
-      
-      if (content.length > 20) {  // Only capture meaningful posts
+        
+        // Create post object
         const post = {
-          content,
+          content: content,
           platform: 'facebook',
           user: user,
-          is_friend: isFriend,
-          is_family: false,  // Requires user input
-          category: category || "",
+          is_friend: el.querySelector('.sv5sfqaa') !== null,
+          is_family: isFamily,
           verified: isVerified,
           image_urls: imageUrls.slice(0, 3).join(','),
           timestamp: timestamp,
@@ -643,32 +613,55 @@ function collectFacebookPosts() {
         
         posts.push(post);
         console.log(`Added Facebook post to collection: ${content.substr(0, 50)}...`);
-      }
-    } catch (err) {
-      console.error(`Error processing Facebook post ${index}:`, err);
-    }
-  });
-
-  console.log(`Collected ${posts.length} Facebook posts`);
-  
-  // Send posts through the background script instead of making direct API calls
-  // This bypasses Content Security Policy restrictions
-  if (posts.length > 0) {
-    console.log("Sending Facebook posts via background script");
-    chrome.runtime.sendMessage({
-      action: 'sendPosts',
-      platform: 'facebook',
-      posts: posts
-    }, function(response) {
-      if (chrome.runtime.lastError) {
-        console.error("Error sending posts to background script:", chrome.runtime.lastError);
-      } else {
-        console.log("Successfully sent posts to background script:", response);
+      } catch (err) {
+        console.error(`Error processing Facebook post ${index}:`, err);
       }
     });
-  }
 
-  return posts;
+    console.log(`Collected ${posts.length} Facebook posts`);
+  
+    // Send posts through background script if any were collected
+    if (posts.length > 0) {
+      // Use message passing to send posts to background script which will handle the API call
+      chrome.storage.local.get(['apiKey', 'apiEndpoint'], function(result) {
+        const apiKey = result.apiKey || '42ad72779a934c2d8005992bbecb6772'; // Default fallback API key
+        const apiEndpoint = result.apiEndpoint || 'http://localhost:8000';
+        
+        console.log(`Sending ${posts.length} Facebook posts to background script`);
+        
+        try {
+          // Use the retry-enabled message passing function for reliability
+          sendMessageWithRetry({
+            action: 'sendPosts',
+            platform: 'facebook',
+            posts: posts,
+            apiKey: apiKey,
+            apiEndpoint: apiEndpoint
+          }, 3)
+          .then(response => {
+            console.log("Facebook posts processed successfully:", response);
+          })
+          .catch(error => {
+            console.error("Error sending Facebook posts:", error);
+            // Update connection error counter
+            connectionErrorCount++;
+            lastConnectionError = error.message || "Error sending posts";
+            
+            if (connectionErrorCount >= MAX_CONNECTION_ERRORS) {
+              console.error(`Too many connection errors (${connectionErrorCount}). Last error: ${lastConnectionError}`);
+            }
+          });
+        } catch (err) {
+          console.error("Exception when sending Facebook posts:", err);
+        }
+      });
+    }
+
+    return posts;
+  } catch (err) {
+    console.error("Fatal error in Facebook collection:", err);
+    return [];
+  }
 }
 
 /**
@@ -696,242 +689,273 @@ function sendWithDirectFetch(posts, apiKey, apiEndpoint) {
 
 // Enhanced LinkedIn collector
 function collectLinkedInPosts() {
+  console.log("Starting LinkedIn post collection...");
   const posts = [];
   
-  // LinkedIn post containers
-  const postElements = document.querySelectorAll('.feed-shared-update-v2');
-  
-  postElements.forEach((el) => {
-    const content = el.querySelector('.feed-shared-update-v2__description')?.innerText || "";
+  try {
+    // LinkedIn post containers
+    const postElements = document.querySelectorAll('.feed-shared-update-v2');
     
-    // Extract user information
-    const userElement = el.querySelector('.feed-shared-actor__name');
-    const user = userElement?.innerText.trim() || "unknown";
+    console.log(`Found ${postElements.length} potential LinkedIn posts`);
     
-    // Check for verified badge (Premium)
-    const isVerified = el.querySelector('.premium-icon') !== null;
-    
-    // Enhanced connection status detection (1st, 2nd, 3rd)
-    let connectionDegree = 0;
-    let isFriend = false;
-    
-    const connectionElement = el.querySelector('.feed-shared-actor__sub-description');
-    if (connectionElement) {
-      const connectionText = connectionElement.innerText;
-      
-      // Check for 1st-degree connection indicators
-      if (connectionText.includes('1st')) {
-        connectionDegree = 1;
-        isFriend = true;
-      } else if (connectionText.includes('2nd')) {
-        connectionDegree = 2;
-      } else if (connectionText.includes('3rd')) {
-        connectionDegree = 3;
-      }
-      
-      // Additional check for connections you follow
-      if (!isFriend && (
-          connectionText.includes('Following') || 
-          connectionText.includes('You follow') ||
-          el.querySelector('.feed-shared-actor__follow-button') !== null
-      )) {
-        isFriend = true;
-      }
+    if (!postElements || postElements.length === 0) {
+      console.log("No LinkedIn posts found on page");
+      return [];
     }
     
-    // Fallback check for connected status
-    if (!isFriend) {
-      const followButton = el.querySelector('.feed-shared-actor__follow-button');
-      if (followButton && (
-        followButton.innerText.includes('Following') || 
-        followButton.innerText.includes('Connected')
-      )) {
-        isFriend = true;
-      }
-    }
-    
-    // Extract timestamp
-    let timestamp = '';
-    const timeElement = el.querySelector('.feed-shared-actor__sub-description time');
-    if (timeElement && timeElement.dateTime) {
-      timestamp = timeElement.dateTime;
-    }
-    
-    // Get engagement metrics
-    let likes = 0;
-    let comments = 0;
-    
-    // Parse reaction counts
-    const reactionElement = el.querySelector('.social-details-social-counts__reactions-count');
-    if (reactionElement && reactionElement.innerText) {
-      const match = reactionElement.innerText.match(/\d+/);
-      if (match) likes = parseInt(match[0]);
-    }
-    
-    // Parse comment counts
-    const commentElement = el.querySelector('.social-details-social-counts__comments-count');
-    if (commentElement && commentElement.innerText) {
-      const match = commentElement.innerText.match(/\d+/);
-      if (match) comments = parseInt(match[0]);
-    }
-    
-    // Extract image URLs
-    const imageUrls = [];
-    el.querySelectorAll('img').forEach(img => {
-      if (img.src && 
-          img.width > 100 && 
-          !img.src.includes('profile-pic') && 
-          !img.src.includes('profile-display-pic') && 
-          !imageUrls.includes(img.src)) {
-        imageUrls.push(img.src);
-      }
-    });
-    
-    // Extract mentioned companies, people, and hashtags
-    const hashtags = [];
-    const mentions = [];
-    
-    // Extract hashtags
-    const hashtagMatches = content.match(/#[\w]+/g);
-    if (hashtagMatches) {
-      hashtagMatches.forEach(tag => {
-        if (!hashtags.includes(tag)) hashtags.push(tag);
-      });
-    }
-    
-    // Extract mentions
-    const mentionMatches = content.match(/@[\w.]+/g);
-    if (mentionMatches) {
-      mentionMatches.forEach(mention => {
-        if (!mentions.includes(mention)) mentions.push(mention);
-      });
-    }
-    
-    // Check for bizfluencer language
-    const bizfluencerWords = [
-      'synergy', 'disrupt', 'innovate', 'leverage', 'pivot', 'growth hacking', 
-      'thought leader', 'paradigm shift', 'bleeding edge', 'best practices', 'scalable', 
-      'next-level', 'move the needle', 'value add', 'actionable insights', 'ecosystem',
-      'drill down', 'low hanging fruit', 'empower', 'bandwidth', 'deliverable'
-    ];
-    
-    let bizfluencerScore = 0;
-    const lowerContent = content.toLowerCase();
-    
-    bizfluencerWords.forEach(word => {
-      const regex = new RegExp('\\b' + word + '\\b', 'gi');
-      const matches = lowerContent.match(regex);
-      if (matches) bizfluencerScore += matches.length;
-    });
-    
-    // Simple sentiment analysis
-    const sentimentIndicators = {
-      positive: ['excited', 'honored', 'thrilled', 'proud', 'happy', 'delighted', 'pleased', 
-                'grateful', 'thankful', 'appreciate', 'excellent', 'amazing', 'opportunity'],
-      negative: ['unfortunately', 'regret', 'sad', 'disappointed', 'difficult', 'challenge', 
-                'problem', 'issue', 'concerned', 'worry']
-    };
-    
-    let positiveCount = 0;
-    let negativeCount = 0;
-    
-    sentimentIndicators.positive.forEach(term => {
-      const regex = new RegExp('\\b' + term + '\\b', 'gi');
-      const matches = lowerContent.match(regex);
-      if (matches) positiveCount += matches.length;
-    });
-    
-    sentimentIndicators.negative.forEach(term => {
-      const regex = new RegExp('\\b' + term + '\\b', 'gi');
-      const matches = lowerContent.match(regex);
-      if (matches) negativeCount += matches.length;
-    });
-    
-    // Calculate sentiment score
-    let sentimentScore = 0;
-    const totalSentiment = positiveCount + negativeCount;
-    if (totalSentiment > 0) {
-      sentimentScore = (positiveCount - negativeCount) / totalSentiment;
-    }
-    
-    // Check if it's a job posting
-    const isJobPost = lowerContent.includes('hiring') || 
-                      lowerContent.includes('job opening') || 
-                      lowerContent.includes('apply now') ||
-                      lowerContent.includes('we are looking for') ||
-                      lowerContent.includes('job opportunity');
-    
-    if (content.length > 30) {  // Only capture posts with sufficient content
-      posts.push({
-        content,
-        platform: 'linkedin',
-        user: user,
-        is_friend: isFriend,  // 1st connections and followed accounts are "friends"
-        is_family: false,
-        category: hashtags.join(','),
-        verified: isVerified,
-        image_urls: imageUrls.slice(0, 3).join(','),
-        collected_at: new Date().toISOString(),
-        timestamp: timestamp,
-        likes: likes,
-        comments: comments,
-        connection_degree: connectionDegree,
-        mentions: mentions.join(','),
-        hashtags: hashtags.join(','),
-        sentiment_score: sentimentScore,
-        bizfluencer_score: bizfluencerScore,
-        is_job_post: isJobPost,
-        content_length: content.length
-      });
-    }
-  });
-  
-  // Get API key and send posts
-  chrome.storage.local.get(['apiKey', 'apiEndpoint'], function(result) {
-    const apiKey = result.apiKey || '8484e01c2e0b4d368eb9a0f9b89807ad'; // Default fallback API key
-
-    posts.forEach(post => {
-      // Ensure boolean fields are correctly formatted
-      const formattedPost = {
-        ...post,
-        is_friend: Boolean(post.is_friend),
-        is_family: Boolean(post.is_family),
-        verified: Boolean(post.verified),
-        is_sponsored: Boolean(post.is_sponsored),
-        is_job_post: Boolean(post.is_job_post)
-      };
-      
-      // Use background script instead of direct fetch to bypass Content Security Policy
-      chrome.runtime.sendMessage({
-        action: 'sendPosts',
-        platform: 'linkedin',
-        posts: [formattedPost],
-        apiKey: apiKey,
-        apiEndpoint: result.apiEndpoint
-      }, function(response) {
-        if (chrome.runtime.lastError) {
-          console.error("Error sending LinkedIn post to background script:", chrome.runtime.lastError);
+    postElements.forEach((el) => {
+      try {
+        if (!el) return; // Skip invalid elements
+        
+        const content = el.querySelector('.feed-shared-update-v2__description')?.innerText || "";
+        
+        // Skip posts with insufficient content
+        if (!content || content.length < 20) {
+          return;
+        }
+        
+        // Extract user information safely
+        let user = "unknown";
+        try {
+          const userElement = el.querySelector('.feed-shared-actor__name');
+          user = userElement?.innerText?.trim() || "unknown";
+        } catch (err) {
+          console.warn("Error getting LinkedIn user:", err);
+        }
+        
+        // Check for verified badge (Premium) safely
+        let isVerified = false;
+        try {
+          isVerified = el.querySelector('.premium-icon') !== null;
+        } catch (err) {
+          console.warn("Error detecting verified status:", err);
+        }
+        
+        // Enhanced connection status detection (1st, 2nd, 3rd)
+        let connectionDegree = 0;
+        let isFriend = false;
+        
+        try {
+          const connectionElement = el.querySelector('.feed-shared-actor__sub-description');
+          if (connectionElement) {
+            const connectionText = connectionElement.innerText;
+            
+            // Check for 1st-degree connection indicators
+            if (connectionText.includes('1st')) {
+              connectionDegree = 1;
+              isFriend = true;
+            } else if (connectionText.includes('2nd')) {
+              connectionDegree = 2;
+            } else if (connectionText.includes('3rd')) {
+              connectionDegree = 3;
+            }
+            
+            // Additional check for connections you follow
+            if (!isFriend && (
+                connectionText.includes('Following') || 
+                connectionText.includes('You follow') ||
+                el.querySelector('.feed-shared-actor__follow-button') !== null
+            )) {
+              isFriend = true;
+            }
+          }
           
-          // Update connection error counters
-          connectionErrorCount++;
-          lastConnectionError = "Error communicating with background script";
+          // Fallback check for connected status
+          if (!isFriend) {
+            const followButton = el.querySelector('.feed-shared-actor__follow-button');
+            if (followButton && (
+              followButton.innerText.includes('Following') || 
+              followButton.innerText.includes('Connected')
+            )) {
+              isFriend = true;
+            }
+          }
+        } catch (err) {
+          console.warn("Error detecting connection status:", err);
+        }
+        
+        // Process remaining post data with error handling...
+        let timestamp = '';
+        let likes = 0;
+        let comments = 0;
+        let imageUrls = [];
+        let hashtags = [];
+        let mentions = [];
+        let bizfluencerScore = 0;
+        let sentimentScore = 0;
+        let isJobPost = false;
+        
+        try {
+          // Extract timestamp
+          const timeElement = el.querySelector('.feed-shared-actor__sub-description time');
+          if (timeElement && timeElement.dateTime) {
+            timestamp = timeElement.dateTime;
+          }
           
-          if (connectionErrorCount >= MAX_CONNECTION_ERRORS) {
-            chrome.runtime.sendMessage({
-              action: 'showNotification',
-              title: 'Connection Error',
-              message: "Could not connect to extension background service."
+          // Get engagement metrics
+          const reactionElement = el.querySelector('.social-details-social-counts__reactions-count');
+          if (reactionElement && reactionElement.innerText) {
+            const match = reactionElement.innerText.match(/\d+/);
+            if (match) likes = parseInt(match[0]);
+          }
+          
+          const commentElement = el.querySelector('.social-details-social-counts__comments-count');
+          if (commentElement && commentElement.innerText) {
+            const match = commentElement.innerText.match(/\d+/);
+            if (match) comments = parseInt(match[0]);
+          }
+          
+          // Extract image URLs
+          el.querySelectorAll('img').forEach(img => {
+            if (img.src && 
+                img.width > 100 && 
+                !img.src.includes('profile-pic') && 
+                !img.src.includes('profile-display-pic') && 
+                !imageUrls.includes(img.src)) {
+              imageUrls.push(img.src);
+            }
+          });
+          
+          // Extract hashtags and mentions
+          const hashtagMatches = content.match(/#[\w]+/g);
+          if (hashtagMatches) {
+            hashtagMatches.forEach(tag => {
+              if (!hashtags.includes(tag)) hashtags.push(tag);
             });
           }
-        } else {
-          console.log("LinkedIn post processed via background script:", response);
+          
+          const mentionMatches = content.match(/@[\w.]+/g);
+          if (mentionMatches) {
+            mentionMatches.forEach(mention => {
+              if (!mentions.includes(mention)) mentions.push(mention);
+            });
+          }
+          
+          // Check for bizfluencer language
+          const bizfluencerWords = [
+            'synergy', 'disrupt', 'innovate', 'leverage', 'pivot', 'growth hacking', 
+            'thought leader', 'paradigm shift', 'bleeding edge', 'best practices', 'scalable', 
+            'next-level', 'move the needle', 'value add', 'actionable insights', 'ecosystem',
+            'drill down', 'low hanging fruit', 'empower', 'bandwidth', 'deliverable'
+          ];
+          
+          const lowerContent = content.toLowerCase();
+          
+          bizfluencerWords.forEach(word => {
+            const regex = new RegExp('\\b' + word + '\\b', 'gi');
+            const matches = lowerContent.match(regex);
+            if (matches) bizfluencerScore += matches.length;
+          });
+          
+          // Simple sentiment analysis
+          const positiveWords = ['good', 'great', 'excellent', 'amazing', 'love', 'best', 'happy'];
+          const negativeWords = ['bad', 'terrible', 'awful', 'hate', 'worst', 'sad', 'disappointed'];
+          
+          let positiveCount = 0;
+          let negativeCount = 0;
+          
+          positiveWords.forEach(word => {
+            const regex = new RegExp('\\b' + word + '\\b', 'gi');
+            const matches = lowerContent.match(regex);
+            if (matches) positiveCount += matches.length;
+          });
+          
+          negativeWords.forEach(word => {
+            const regex = new RegExp('\\b' + word + '\\b', 'gi');
+            const matches = lowerContent.match(regex);
+            if (matches) negativeCount += matches.length;
+          });
+          
+          // Calculate sentiment score
+          const totalSentiment = positiveCount + negativeCount;
+          if (totalSentiment > 0) {
+            sentimentScore = (positiveCount - negativeCount) / totalSentiment;
+          }
+          
+          // Check if it's a job posting
+          isJobPost = lowerContent.includes('hiring') || 
+                        lowerContent.includes('job opening') || 
+                        lowerContent.includes('apply now') ||
+                        lowerContent.includes('we are looking for') ||
+                        lowerContent.includes('job opportunity');
+        } catch (err) {
+          console.warn("Error processing LinkedIn post data:", err);
+        }
+        
+        // Create post object with all collected data
+        if (content.length > 30) {  // Only capture posts with sufficient content
+          posts.push({
+            content,
+            platform: 'linkedin',
+            user: user,
+            is_friend: isFriend,
+            is_family: false,
+            category: hashtags.join(','),
+            verified: isVerified,
+            image_urls: imageUrls.slice(0, 3).join(','),
+            collected_at: new Date().toISOString(),
+            timestamp: timestamp,
+            likes: likes,
+            comments: comments,
+            connection_degree: connectionDegree,
+            mentions: mentions.join(','),
+            hashtags: hashtags.join(','),
+            sentiment_score: sentimentScore,
+            bizfluencer_score: bizfluencerScore,
+            is_job_post: isJobPost,
+            content_length: content.length
+          });
+        }
+      } catch (err) {
+        console.error("Error processing LinkedIn post:", err);
+      }
+    });
+    
+    console.log(`Collected ${posts.length} LinkedIn posts`);
+    
+    // Send all posts at once in a batch instead of one by one
+    if (posts.length > 0) {
+      // Get API key and endpoint from storage
+      chrome.storage.local.get(['apiKey', 'apiEndpoint'], function(result) {
+        const apiKey = result.apiKey || '8484e01c2e0b4d368eb9a0f9b89807ad'; // Default fallback API key
+        
+        // Format post boolean values
+        const formattedPosts = posts.map(post => ({
+          ...post,
+          is_friend: Boolean(post.is_friend),
+          is_family: Boolean(post.is_family),
+          verified: Boolean(post.verified),
+          is_sponsored: Boolean(post.is_sponsored),
+          is_job_post: Boolean(post.is_job_post)
+        }));
+        
+        // Send posts through background script
+        try {
+          console.log(`Sending ${formattedPosts.length} LinkedIn posts to background script`);
+          sendMessageWithRetry({
+            action: 'sendPosts',
+            platform: 'linkedin',
+            posts: formattedPosts,
+            apiKey: apiKey,
+            apiEndpoint: result.apiEndpoint
+          }, 3)
+          .then(response => {
+            console.log("LinkedIn posts processed successfully:", response);
+          })
+          .catch(error => {
+            console.error("Error sending LinkedIn posts:", error);
+          });
+        } catch (err) {
+          console.error("Exception when sending LinkedIn posts:", err);
         }
       });
-    });
-  });
-  
-  console.log(`Collected ${posts.length} LinkedIn posts`);
-  return posts;
+    }
+    
+    return posts;
+  } catch (err) {
+    console.error("Fatal error in LinkedIn collection:", err);
+    return [];
+  }
 }
 
 // Add manual scan button functionality
@@ -980,33 +1004,42 @@ function injectScanButton() {
 }
 
 // Send a message to background script on load to check connection
-chrome.runtime.sendMessage({ action: 'checkConnection' }, function(response) {
-  if (chrome.runtime.lastError) {
-    console.error('Extension connection error:', chrome.runtime.lastError);
-    // Don't try to auto-collect on page load if we have connection issues
-    return;
-  }
-  
-  // If we get here, the connection is good
-  // Auto-detect platform and run appropriate collector
-  const url = window.location.href;
-  if (url.includes('instagram.com')) {
-    setTimeout(() => {
-      collectWithRateLimitProtection('Instagram', () => collectInstagramPosts());
-    }, 1500);
-  } else if (url.includes('facebook.com')) {
-    setTimeout(() => {
-      collectWithRateLimitProtection('Facebook', () => collectFacebookPosts());
-    }, 1500);
-  } else if (url.includes('linkedin.com')) {
-    setTimeout(() => {
-      collectWithRateLimitProtection('LinkedIn', () => collectLinkedInPosts());
-    }, 1500);
-  }
-  
-  // Add scan button for manual refresh
-  injectScanButton();
-});
+// Use the retry-enabled sendMessage function
+sendMessageWithRetry({ action: 'checkConnection' })
+  .then(response => {
+    if (response && response.status === 'connected') {
+      console.log('Connection to background script established');
+      
+      // Auto-detect platform and run appropriate collector with try-catch protection
+      const url = window.location.href;
+      setTimeout(() => {
+        try {
+          if (url.includes('instagram.com')) {
+            collectWithRateLimitProtection('Instagram', () => collectInstagramPosts());
+          } else if (url.includes('facebook.com')) {
+            collectWithRateLimitProtection('Facebook', () => collectFacebookPosts());
+          } else if (url.includes('linkedin.com')) {
+            collectWithRateLimitProtection('LinkedIn', () => collectLinkedInPosts());
+          }
+        } catch (e) {
+          console.error('Error running initial collection:', e);
+        }
+      }, 2000);  // Increased delay to ensure page is fully loaded
+    } else {
+      console.warn('Background connection check returned unexpected result:', response);
+    }
+  })
+  .catch(error => {
+    console.error('Failed to establish connection to background script:', error);
+  })
+  .finally(() => {
+    // Always try to inject the scan button, regardless of connection status
+    try {
+      injectScanButton();
+    } catch (e) {
+      console.error('Error injecting scan button:', e);
+    }
+  });
 
 // Also run scan when scrolling stops to capture new content
 let isScrolling;
@@ -1017,12 +1050,17 @@ window.addEventListener('scroll', function() {
   // Set a timeout to run after scrolling ends
   isScrolling = setTimeout(function() {
     const url = window.location.href;
-    if (url.includes('instagram.com')) {
-      collectWithRateLimitProtection('Instagram', () => collectInstagramPosts());
-    } else if (url.includes('facebook.com')) {
-      collectWithRateLimitProtection('Facebook', () => collectFacebookPosts());
-    } else if (url.includes('linkedin.com')) {
-      collectWithRateLimitProtection('LinkedIn', () => collectLinkedInPosts());
+    // Use try-catch to prevent context invalidation errors
+    try {
+      if (url.includes('instagram.com')) {
+        collectWithRateLimitProtection('Instagram', () => collectInstagramPosts());
+      } else if (url.includes('facebook.com')) {
+        collectWithRateLimitProtection('Facebook', () => collectFacebookPosts());
+      } else if (url.includes('linkedin.com')) {
+        collectWithRateLimitProtection('LinkedIn', () => collectLinkedInPosts());
+      }
+    } catch (e) {
+      console.error('Error initiating collection after scroll:', e);
     }
   }, 300);
 }, false);
@@ -1288,18 +1326,16 @@ function analyzeContentWithML(text, platform) {
 // Helper functions
 
 // Extract hashtags from content
-function extractHashtags(text) {
-    if (!text) return [];
-    
-    const hashtagRegex = /#(\w+)/g;
-    const hashtags = [];
-    let match;
-    
-    while ((match = hashtagRegex.exec(text)) !== null) {
-        hashtags.push(match[0]);
-    }
-    
-    return hashtags;
+function extractHashtags(content) {
+  if (!content) return [];
+  
+  const hashtagMatches = content.match(/#[\w\u0590-\u05fe\u0600-\u06ff\u0750-\u077f\u1100-\u11ff\u3130-\u3185\uac00-\ud7af\u3040-\u30ff\u4e00-\u9fff]+/g);
+  
+  if (hashtagMatches) {
+    return Array.from(new Set(hashtagMatches));
+  }
+  
+  return [];
 }
 
 // Parse Facebook counts like "1K" or "1.5K"
@@ -1386,64 +1422,36 @@ chrome.runtime.onMessage.addListener(function(request, sender, sendResponse) {
   }
 });
 
-// Function to handle messaging errors with retry logic
-function sendMessageWithRetry(message, retries = 3) {
+// Function to send a message to the background script with retry capability
+function sendMessageWithRetry(message, maxRetries = 3, retryDelay = 1000) {
   return new Promise((resolve, reject) => {
-    try {
-      chrome.runtime.sendMessage(message, function(response) {
+    let retryCount = 0;
+    
+    const sendMessage = () => {
+      console.log(`Sending message to background script (attempt ${retryCount + 1}/${maxRetries + 1}):`, message.action);
+      
+      chrome.runtime.sendMessage(message, (response) => {
         if (chrome.runtime.lastError) {
-          console.error('Message error:', chrome.runtime.lastError);
-          if (retries > 0) {
-            setTimeout(() => {
-              sendMessageWithRetry(message, retries - 1)
-                .then(resolve)
-                .catch(reject);
-            }, 500);
+          const error = chrome.runtime.lastError;
+          console.error(`Error sending message (attempt ${retryCount + 1}):`, error);
+          
+          if (retryCount < maxRetries) {
+            retryCount++;
+            console.log(`Retrying in ${retryDelay}ms...`);
+            setTimeout(sendMessage, retryDelay);
           } else {
-            reject(chrome.runtime.lastError);
+            reject(error);
           }
         } else {
+          console.log(`Message sent successfully after ${retryCount + 1} attempt(s):`, message.action);
           resolve(response);
         }
       });
-    } catch (error) {
-      console.error('Exception in sendMessage:', error);
-      reject(error);
-    }
+    };
+    
+    sendMessage();
   });
 }
-
-// Replace the original window.addEventListener load with our retry-enabled version
-window.addEventListener("load", () => {
-  // Using the retry-enabled message sending
-  sendMessageWithRetry({ action: 'checkConnection' })
-    .then(() => {
-      // Rest of your code for platform detection and collection
-      // Auto-detect platform and run appropriate collector with delay
-      const url = window.location.href;
-      if (url.includes('instagram.com')) {
-        setTimeout(() => {
-          collectWithRateLimitProtection('Instagram', () => collectInstagramPosts());
-        }, 1500);
-      } else if (url.includes('facebook.com')) {
-        setTimeout(() => {
-          collectWithRateLimitProtection('Facebook', () => collectFacebookPosts());
-        }, 1500);
-      } else if (url.includes('linkedin.com')) {
-        setTimeout(() => {
-          collectWithRateLimitProtection('LinkedIn', () => collectLinkedInPosts());
-        }, 1500);
-      }
-      
-      // Add scan button for manual refresh
-      injectScanButton();
-    })
-    .catch(error => {
-      console.error('Failed to establish connection:', error);
-      // Still try to inject the scan button for manual operation
-      injectScanButton();
-    });
-});
 
 // Function to start the auto-scanning process
 function startAutoScanning() {
