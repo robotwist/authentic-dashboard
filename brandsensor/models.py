@@ -142,6 +142,7 @@ class SocialPost(models.Model):
     engagement_prediction = models.FloatField(null=True, blank=True)  # Predicted engagement score
     relevance_score = models.FloatField(null=True, blank=True)  # Relevance to user interests
     toxicity_score = models.FloatField(null=True, blank=True)  # Content toxicity score
+    authenticity_score = models.FloatField(null=True, blank=True)  # Pure Feed score (0-100)
     
     def __str__(self):
         return f"{self.original_user} - {self.platform} post"

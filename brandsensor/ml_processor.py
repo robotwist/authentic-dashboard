@@ -61,14 +61,18 @@ except ImportError:
 try:
     import torch
     HAS_TORCH = True
+    logger.info("PyTorch is available for advanced image processing")
 except ImportError:
     HAS_TORCH = False
+    logger.info("PyTorch is not available, advanced image processing will be limited")
 
 try:
     from PIL import Image
     HAS_PIL = True
+    logger.info("Pillow (PIL) is available for basic image processing")
 except ImportError:
     HAS_PIL = False
+    logger.info("Pillow (PIL) is not available, image processing will be disabled")
 
 # Check for transformers library
 try:
@@ -320,6 +324,154 @@ def calculate_toxicity(text):
     # Normalize score between 0 and 1
     return min(1.0, toxicity_count / 10)
 
+def calculate_image_authenticity(image_results):
+    """
+    Calculate an authenticity factor from image analysis results
+    Returns a value from -20 to +20 to adjust authenticity score
+    """
+    if not image_results or len(image_results) == 0:
+        return 0
+        
+    # Start with neutral factor
+    authenticity_factor = 0
+    
+    # Analyze aesthetic scores
+    avg_aesthetic = 0
+    aesthetic_count = 0
+    
+    for result in image_results:
+        # Get aesthetic score
+        aesthetic_score = 0
+        
+        # Handle different result formats
+        if isinstance(result.get('aesthetic_score'), dict):
+            aesthetic_value = result.get('aesthetic_score', {}).get('aesthetic_score', 0)
+            if aesthetic_value:
+                aesthetic_score = float(aesthetic_value)
+        elif result.get('aesthetic_score'):
+            aesthetic_score = float(result.get('aesthetic_score', 0))
+            
+        if aesthetic_score > 0:
+            avg_aesthetic += aesthetic_score
+            aesthetic_count += 1
+    
+    # Calculate average aesthetic score
+    if aesthetic_count > 0:
+        avg_aesthetic = avg_aesthetic / aesthetic_count
+        
+        # Convert 1-10 aesthetic score to authenticity factor
+        # Higher quality images get a positive boost
+        if avg_aesthetic > 7:  # Excellent quality
+            authenticity_factor += 15
+        elif avg_aesthetic > 5:  # Good quality
+            authenticity_factor += 10
+        elif avg_aesthetic < 3:  # Poor quality
+            authenticity_factor -= 5
+    
+    # In the future, add more factors like:
+    # - Natural vs. artificial images
+    # - Professional stock photos vs. personal photos
+    # - Corporate vs. personal content in images
+    
+    return authenticity_factor
+
+def calculate_authenticity_score(post):
+    """
+    Calculate the Pure Feed authenticity score for a post.
+    
+    Returns a score from 0-100 where:
+    90-100: Pure soul. Vulnerable, funny, deep, unique.
+    70-89: Insightful, honest, charmingly human.
+    40-69: Neutral. Meh. Safe but not manipulative.
+    20-39: Performative, cringe, bland, try-hard.
+    0-19: Obvious spam, ads, outrage bait, AI slop.
+    """
+    # Start with a neutral score
+    score = 50
+    
+    # Negative signals reduce authenticity
+    
+    # 1. Sponsored/ad content is a strong negative
+    if post.is_sponsored:
+        score -= 30
+    
+    # 2. Bizfluencer content reduces authenticity
+    if post.bizfluencer_score:
+        score -= min(30, post.bizfluencer_score * 3)
+    
+    # 3. High toxicity reduces authenticity
+    if post.toxicity_score:
+        score -= min(20, post.toxicity_score * 50)
+    
+    # 4. Very promotional content is less authentic
+    if post.content and any(term in post.content.lower() for term in 
+                          ['buy now', 'limited time', 'exclusive offer', 'discount', 'sale', 'promo']):
+        score -= 15
+    
+    # 5. Excessive use of hashtags tends to be less authentic
+    if post.hashtags:
+        hashtag_count = len(post.hashtags.split(','))
+        if hashtag_count > 5:
+            score -= min(15, hashtag_count)
+    
+    # Positive signals increase authenticity
+    
+    # 1. Personal, vulnerable content is more authentic
+    if post.content and any(term in post.content.lower() for term in 
+                          ['i feel', 'i think', 'my experience', 'i learned', 'i realized']):
+        score += 15
+    
+    # 2. Content from family and close friends is often more authentic
+    if post.is_family:
+        score += 20
+    elif post.is_friend:
+        score += 10
+    
+    # 3. Content with humor tends to be more authentic
+    if post.content and any(term in post.content.lower() for term in 
+                          ['lol', 'haha', '😂', '🤣', 'funny', 'joke', 'lmao']):
+        score += 10
+    
+    # 4. Positive sentiment content might be more authentic
+    if post.sentiment_score:
+        # Convert from -1 to 1 scale to 0 to 10 boost
+        sentiment_boost = ((post.sentiment_score + 1) / 2) * 10
+        score += sentiment_boost
+    
+    # 5. Questions and engagement with followers can be more authentic
+    if post.content and ('?' in post.content or any(term in post.content.lower() for term in 
+                                              ['what do you think', 'what about you', 'your thoughts'])):
+        score += 10
+        
+    # 6. Process image analysis if available
+    try:
+        if hasattr(post, 'image_analysis') and post.image_analysis:
+            import json
+            image_data = json.loads(post.image_analysis)
+            
+            # Extract image factors that influence authenticity
+            if isinstance(image_data, dict):
+                # Use the authenticity factor from image analysis
+                if 'authenticity_factor' in image_data:
+                    score += image_data['authenticity_factor']
+                
+                # Add points for high aesthetic quality
+                if 'avg_aesthetic_score' in image_data:
+                    aesthetic_score = image_data['avg_aesthetic_score']
+                    if aesthetic_score > 7:
+                        score += 10
+                    elif aesthetic_score > 5:
+                        score += 5
+    except Exception as e:
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.warning(f"Error processing image analysis for authenticity: {str(e)}")
+    
+    # Ensure score stays within 0-100 range
+    score = max(0, min(100, score))
+    
+    return score
+
 def predict_engagement(post):
     """
     Predict the engagement level for a post
@@ -443,6 +595,10 @@ def process_post(post):
         # Calculate relevance score (personalized to user)
         if post.relevance_score is None:
             post.relevance_score = calculate_relevance(post, post.user_id)
+        
+        # Calculate authenticity score (Pure Feed score)
+        if post.authenticity_score is None:
+            post.authenticity_score = calculate_authenticity_score(post)
         
         # Process post images - Activate this feature
         if (post.image_urls and not post.image_analysis) or (post.image_urls and not post.image_caption):
@@ -623,46 +779,85 @@ def generate_image_caption(image):
 
 def analyze_image_aesthetics(image):
     """
-    Analyze image aesthetics (placeholder for AVA model)
-    In a real implementation, we would use a model trained on the AVA dataset
+    Analyze the aesthetic quality of an image
+    Returns a score from 1-10
+    Works with basic PIL, no ML required
     """
-    if not HAS_PIL:
-        return {"aesthetic_score": 5.0}  # Default score
-    
     try:
-        # Simple aesthetic score based on image properties
-        # In a real implementation, use a trained model instead
+        if not HAS_PIL:
+            return {"aesthetic_score": 5.0, "reason": "PIL not available"}
+            
+        # Get basic image stats
         width, height = image.size
-        aspect_ratio = width / height
+        aspect_ratio = width / height if height > 0 else 0
         
-        # Ideal aspect ratios (approximate golden ratio)
-        ideal_ratio = 1.618
-        ratio_score = 10 - min(abs(aspect_ratio - ideal_ratio), abs(1/aspect_ratio - ideal_ratio)) * 5
+        # Convert to RGB if not already
+        if image.mode != 'RGB':
+            try:
+                image = image.convert('RGB')
+            except Exception:
+                return {"aesthetic_score": 5.0, "reason": "Failed to convert to RGB"}
         
-        # Brightness and contrast assessment
-        if HAS_NUMPY:
-            import numpy as np
-            img_array = np.array(image.convert('L'))
-            brightness = img_array.mean() / 255  # Normalized to 0-1
-            contrast = img_array.std() / 128     # Normalized
+        # Get image statistics - simple technical quality metrics
+        # These are basic properties that correlate with perceived image quality
+        try:
+            # Calculate image statistics
+            pixels = list(image.getdata())
             
-            # Higher scores for moderate brightness (not too dark or bright)
-            brightness_score = 10 - abs(brightness - 0.5) * 10
-            # Higher scores for good contrast
-            contrast_score = min(contrast * 10, 10)
+            # Calculate color diversity (number of unique colors as percentage)
+            unique_colors = len(set(pixels))
+            color_diversity = min(1.0, unique_colors / 10000) if len(pixels) > 0 else 0
             
-            final_score = (ratio_score + brightness_score + contrast_score) / 3
-        else:
-            # Simplified version without numpy
-            final_score = ratio_score
+            # Calculate contrast - simple approximation using min/max values
+            brightness_values = [sum(p)/3 for p in pixels]
+            contrast = (max(brightness_values) - min(brightness_values)) / 255 if brightness_values else 0
             
-        return {
-            "aesthetic_score": round(final_score, 2),
-            "aspect_ratio": round(aspect_ratio, 3),
-        }
+            # Calculate resolution quality score
+            resolution_score = min(1.0, (width * height) / (1920 * 1080))
+            
+            # Calculate aspect ratio quality (preference for standard ratios)
+            aspect_ratio_quality = 0.5
+            # Common aspect ratios: 1:1 (square), 4:3, 16:9, 3:2
+            if 0.9 < aspect_ratio < 1.1:  # Square
+                aspect_ratio_quality = 0.9
+            elif 1.3 < aspect_ratio < 1.4:  # 4:3
+                aspect_ratio_quality = 0.85
+            elif 1.7 < aspect_ratio < 1.8:  # 16:9
+                aspect_ratio_quality = 0.95
+            elif 1.4 < aspect_ratio < 1.5:  # 3:2
+                aspect_ratio_quality = 0.9
+            
+            # Calculate final score (1-10 scale)
+            aesthetic_score = (
+                3.0 +  # Base score
+                (color_diversity * 2) +  # 0-2 points for color diversity
+                (contrast * 2) +  # 0-2 points for contrast
+                (resolution_score * 2) +  # 0-2 points for resolution
+                aspect_ratio_quality  # 0-1 points for aspect ratio
+            )
+            
+            # Ensure score is in range 1-10
+            aesthetic_score = max(1.0, min(10.0, aesthetic_score))
+            
+            return {
+                "aesthetic_score": aesthetic_score,
+                "details": {
+                    "width": width,
+                    "height": height,
+                    "aspect_ratio": aspect_ratio,
+                    "color_diversity": color_diversity,
+                    "contrast": contrast,
+                    "resolution": resolution_score
+                }
+            }
+            
+        except Exception as e:
+            logger.warning(f"Error calculating image statistics: {str(e)}")
+            return {"aesthetic_score": 5.0, "reason": f"Error in statistics: {str(e)}"}
+            
     except Exception as e:
-        logger.error(f"Error analyzing image aesthetics: {str(e)}")
-        return {"aesthetic_score": 5.0}  # Default on error
+        logger.warning(f"Error in aesthetic analysis: {str(e)}")
+        return {"aesthetic_score": 5.0, "reason": str(e)}
 
 def analyze_faces_in_image(image):
     """Analyze faces in the image using DeepFace"""
@@ -720,12 +915,26 @@ def analyze_image(image_url):
     Complete image analysis function
     Returns a dictionary with all analysis results
     """
+    # If we're missing basic dependencies, return a basic result
+    if not HAS_PIL:
+        return {
+            "success": False,
+            "url": image_url,
+            "error": "Required image processing libraries not available",
+            "caption": None,
+            "aesthetic_score": {"aesthetic_score": 5.0},  # Default neutral score
+            "perceptual_hash": None,
+            "clip_scores": None,
+            "faces": None,
+            "objects": None
+        }
+    
     results = {
         "success": False,
         "url": image_url,
         "error": None,
         "caption": None,
-        "aesthetic_score": None,
+        "aesthetic_score": {"aesthetic_score": 5.0},  # Default neutral score
         "perceptual_hash": None,
         "clip_scores": None,
         "faces": None,
@@ -752,41 +961,59 @@ def analyze_image(image_url):
     results["success"] = True
     
     # Generate perceptual hash
-    results["perceptual_hash"] = get_perceptual_hash(image)
+    try:
+        results["perceptual_hash"] = get_perceptual_hash(image)
+    except Exception as e:
+        logger.warning(f"Error generating perceptual hash: {str(e)}")
     
     # Generate caption with BLIP
     if HAS_BLIP:
-        results["caption"] = generate_image_caption(image)
+        try:
+            results["caption"] = generate_image_caption(image)
+        except Exception as e:
+            logger.warning(f"Error generating image caption: {str(e)}")
     
     # Analyze with CLIP
     if HAS_CLIP:
-        # Categories to check image against
-        categories = [
-            "a photo of food", 
-            "a selfie", 
-            "a landscape photo",
-            "a product advertisement", 
-            "a screenshot", 
-            "a meme",
-            "professional photography", 
-            "artificial image",
-            "a photo of a person", 
-            "a photo of an animal",
-            "a photo of text", 
-            "a graph or chart"
-        ]
-        results["clip_scores"] = analyze_image_with_clip(image, categories)
+        try:
+            # Categories to check image against
+            categories = [
+                "a photo of food", 
+                "a selfie", 
+                "a landscape photo",
+                "a product advertisement", 
+                "a screenshot", 
+                "a meme",
+                "professional photography", 
+                "artificial image",
+                "a photo of a person", 
+                "a photo of an animal",
+                "a photo of text", 
+                "a graph or chart"
+            ]
+            results["clip_scores"] = analyze_image_with_clip(image, categories)
+        except Exception as e:
+            logger.warning(f"Error analyzing image with CLIP: {str(e)}")
     
     # Aesthetic analysis
-    results["aesthetic_score"] = analyze_image_aesthetics(image)
+    try:
+        results["aesthetic_score"] = analyze_image_aesthetics(image)
+    except Exception as e:
+        logger.warning(f"Error analyzing image aesthetics: {str(e)}")
     
     # Face analysis
     if HAS_DEEPFACE:
-        results["faces"] = analyze_faces_in_image(image)
+        try:
+            results["faces"] = analyze_faces_in_image(image)
+        except Exception as e:
+            logger.warning(f"Error analyzing faces: {str(e)}")
     
     # Object detection
     if HAS_YOLO:
-        results["objects"] = detect_objects_in_image(image)
+        try:
+            results["objects"] = detect_objects_in_image(image)
+        except Exception as e:
+            logger.warning(f"Error detecting objects: {str(e)}")
     
     return results
 
@@ -806,6 +1033,34 @@ def process_post_images(post):
         try:
             analysis = analyze_image(url)
             results.append(analysis)
+            
+            # If this is the first successful image analysis, store it in the post
+            if analysis['success'] and not post.image_analysis:
+                # Store the analysis results as JSON
+                post.image_analysis = json.dumps(analysis)
+                
+                # If we have a caption, store it
+                if analysis.get('caption'):
+                    post.image_caption = analysis.get('caption')
+                    
+                # Update authenticity score based on image quality if not already set
+                if post.authenticity_score is None and analysis.get('aesthetic_score'):
+                    aesthetic_score = analysis.get('aesthetic_score', {}).get('aesthetic_score', 5.0)
+                    # Aesthetic score is 1-10, convert to 0-20 boost for authenticity
+                    aesthetic_boost = (aesthetic_score - 1) * 2.5  # Convert 1-10 to 0-20 scale
+                    
+                    # Calculate base authenticity score if needed
+                    if post.authenticity_score is None:
+                        post.authenticity_score = calculate_authenticity_score(post)
+                    
+                    # Add the boost from image quality (max 20 points)
+                    post.authenticity_score += min(20, aesthetic_boost)
+                    # Ensure we don't exceed 100
+                    post.authenticity_score = min(100, post.authenticity_score)
+                
+                # Save the post with the image analysis
+                post.save()
+                
         except Exception as e:
             logger.error(f"Error analyzing image {url}: {str(e)}")
     
@@ -864,3 +1119,88 @@ def process_social_post(post_id):
     except Exception as e:
         logger.error(f"Error processing post {post_id}: {str(e)}")
         return None
+
+def process_image_analysis(post):
+    """
+    Process images from a post for ML analysis
+    Returns a dictionary of results
+    """
+    if not post.image_urls:
+        return None
+    
+    image_urls = post.image_urls.split(',')
+    if not image_urls:
+        return None
+    
+    from .utils import download_image
+    
+    # Log that we're starting image processing
+    logger.info(f"Processing {len(image_urls)} images for post {post.id}")
+    
+    all_results = []
+    
+    try:
+        # Only process the first few images to avoid overloading
+        for i, url in enumerate(image_urls[:3]):  # Limit to 3 images
+            url = url.strip()
+            if not url:
+                continue
+                
+            # Try to download the image
+            try:
+                image_path = download_image(url)
+                if not image_path:
+                    logger.warning(f"Failed to download image from {url}")
+                    continue
+            except Exception as e:
+                logger.warning(f"Error downloading image from {url}: {str(e)}")
+                continue
+            
+            # Try to open the image with PIL
+            try:
+                if not HAS_PIL:
+                    logger.warning("PIL not available, skipping image analysis")
+                    continue
+                    
+                from PIL import Image
+                image = Image.open(image_path)
+                
+                # Process the image
+                results = analyze_image(image)
+                results['url'] = url
+                all_results.append(results)
+                
+                # Log success
+                logger.info(f"Successfully analyzed image {i+1} for post {post.id}")
+                
+            except Exception as e:
+                logger.warning(f"Error analyzing image: {str(e)}")
+                # Continue to next image
+                continue
+            finally:
+                # Clean up downloaded image file
+                try:
+                    import os
+                    if os.path.exists(image_path):
+                        os.remove(image_path)
+                except:
+                    pass
+    except Exception as e:
+        logger.error(f"Error in overall image processing: {str(e)}")
+    
+    # If we have at least one successful result, return combined analysis
+    if all_results:
+        # Get the average aesthetic score
+        avg_aesthetic_score = sum(r.get('aesthetic_score', {}).get('aesthetic_score', 5.0) if isinstance(r.get('aesthetic_score'), dict) else r.get('aesthetic_score', 5.0) for r in all_results) / len(all_results)
+        
+        # Combine all results
+        combined_results = {
+            "images_analyzed": len(all_results),
+            "avg_aesthetic_score": avg_aesthetic_score,
+            "authenticity_factor": calculate_image_authenticity(all_results),
+            "detailed_results": all_results
+        }
+        
+        return combined_results
+    
+    return None

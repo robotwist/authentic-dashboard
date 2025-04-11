@@ -248,3 +248,56 @@ def analyze_all_post_images(user_id, limit=100):
                 count += 1
     
     return count
+
+def download_image(url):
+    """
+    Download an image from URL to a temporary file
+    Returns path to the temporary file, or None on error
+    """
+    import os
+    import tempfile
+    import requests
+    from urllib.parse import urlparse
+    import logging
+    
+    logger = logging.getLogger(__name__)
+    
+    if not url:
+        return None
+        
+    try:
+        # Parse URL to get file extension
+        parsed_url = urlparse(url)
+        path = parsed_url.path
+        ext = os.path.splitext(path)[1]
+        
+        # Default to .jpg if no extension
+        if not ext:
+            ext = '.jpg'
+            
+        # Create a temporary file with the right extension
+        temp_file = tempfile.NamedTemporaryFile(suffix=ext, delete=False)
+        temp_path = temp_file.name
+        temp_file.close()
+        
+        # Download the image
+        response = requests.get(url, timeout=10)
+        if response.status_code != 200:
+            os.unlink(temp_path)  # Clean up
+            logger.warning(f"Failed to download image: HTTP {response.status_code}")
+            return None
+            
+        # Write the image data to the temporary file
+        with open(temp_path, 'wb') as f:
+            f.write(response.content)
+            
+        return temp_path
+    except Exception as e:
+        logger.error(f"Error downloading image from {url}: {str(e)}")
+        # Clean up if temp file was created
+        if 'temp_path' in locals() and os.path.exists(temp_path):
+            try:
+                os.unlink(temp_path)
+            except:
+                pass
+        return None

@@ -1072,61 +1072,103 @@ def ml_insights(request):
     
     return render(request, "brandsensor/ml_insights.html", context)
 
-# ------------------------------
-# Filter Preset Management
-# ------------------------------
-
 @login_required
-def filter_presets(request):
-    """View to manage filter presets"""
-    presets = FilterPreset.objects.filter(user=request.user)
-    
-    if request.method == "POST":
-        action = request.POST.get('action')
-        
-        if action == 'delete':
-            preset_id = request.POST.get('preset_id')
-            if preset_id:
-                FilterPreset.objects.filter(id=preset_id, user=request.user).delete()
-        
-        elif action == 'set_default':
-            preset_id = request.POST.get('preset_id')
-            if preset_id:
-                preset = get_object_or_404(FilterPreset, id=preset_id, user=request.user)
-                preset.is_default = True
-                preset.save()
-    
-    return render(request, "brandsensor/filter_presets.html", {
-        "presets": presets
-    })
-
-@login_required
-def apply_preset(request, preset_id):
-    """Apply a filter preset and redirect to dashboard"""
-    preset = get_object_or_404(FilterPreset, id=preset_id, user=request.user)
-    
+def pure_feed(request):
+    """
+    Pure Feed view - displays social posts ranked by authenticity score
+    Using the 0-100 scale:
+    90-100: Pure soul. Vulnerable, funny, deep, unique.
+    70-89: Insightful, honest, charmingly human.
+    40-69: Neutral. Meh. Safe but not manipulative.
+    20-39: Performative, cringe, bland, try-hard.
+    0-19: Obvious spam, ads, outrage bait, AI slop.
+    """
+    # Process any unprocessed posts
     try:
-        preferences = request.user.userpreference
-    except UserPreference.DoesNotExist:
-        preferences = UserPreference.objects.create(user=request.user)
+        process_user_posts(request.user.id, limit=100)
+    except Exception as e:
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.error(f"Error processing posts for pure feed: {str(e)}")
     
-    # Apply preset to current preferences
-    preferences = preset.apply_to_preferences(preferences)
-    preferences.save()
+    # Get filters from URL parameters
+    days_filter = request.GET.get('days', '30')
+    try:
+        days_ago = int(days_filter)
+    except ValueError:
+        days_ago = 30
     
-    # Get current filter parameters
-    platform = request.GET.get('platform', '')
-    days = request.GET.get('days', '30')
-    sort = request.GET.get('sort', '')
+    platform_filter = request.GET.get('platform', '')
+    min_score = request.GET.get('min_score', '')
+    max_score = request.GET.get('max_score', '')
     
-    # Redirect to dashboard with filters
-    redirect_url = f'/dashboard/?days={days}'
-    if platform:
-        redirect_url += f'&platform={platform}'
-    if sort:
-        redirect_url += f'&sort={sort}'
+    since_date = timezone.now() - datetime.timedelta(days=days_ago)
     
-    return redirect(redirect_url)
+    # Base query - all posts in time range
+    posts = SocialPost.objects.filter(
+        user=request.user,
+        created_at__gte=since_date,
+        hidden=False  # Don't show posts the user has hidden
+    )
+    
+    # Apply platform filter if specified
+    if platform_filter:
+        posts = posts.filter(platform=platform_filter)
+    
+    # Filter by score range if specified
+    if min_score and min_score.isdigit():
+        posts = posts.filter(authenticity_score__gte=int(min_score))
+    
+    if max_score and max_score.isdigit():
+        posts = posts.filter(authenticity_score__lte=int(max_score))
+    
+    # Order by authenticity score (highest first)
+    posts = posts.order_by('-authenticity_score', '-collected_at')
+    
+    # Count posts by score bracket
+    score_brackets = [
+        {'name': 'Pure soul (90-100)', 'min': 90, 'max': 100, 'description': 'Vulnerable, funny, deep, unique'},
+        {'name': 'Insightful (70-89)', 'min': 70, 'max': 89, 'description': 'Honest, charmingly human'},
+        {'name': 'Neutral (40-69)', 'min': 40, 'max': 69, 'description': 'Meh. Safe but not manipulative'},
+        {'name': 'Performative (20-39)', 'min': 20, 'max': 39, 'description': 'Cringe, bland, try-hard'},
+        {'name': 'Spam/Ads (0-19)', 'min': 0, 'max': 19, 'description': 'Obvious spam, ads, outrage bait, AI slop'}
+    ]
+    
+    # Add counts to each bracket
+    for bracket in score_brackets:
+        bracket['count'] = posts.filter(
+            authenticity_score__gte=bracket['min'],
+            authenticity_score__lte=bracket['max']
+        ).count()
+    
+    # Get platform stats
+    platform_stats = []
+    for platform_code, platform_name in SocialPost.PLATFORM_CHOICES:
+        platform_posts = SocialPost.objects.filter(
+            user=request.user,
+            platform=platform_code
+        )
+        platform_stats.append({
+            'platform': platform_name,
+            'code': platform_code,
+            'count': platform_posts.count(),
+            'avg_authenticity': platform_posts.filter(authenticity_score__isnull=False).aggregate(
+                Avg('authenticity_score'))['authenticity_score__avg'] or 0,
+        })
+    
+    context = {
+        "posts": posts[:50],  # Limit to 50 posts
+        "post_count": posts.count(),
+        "days_filter": days_filter,
+        "platforms": SocialPost.PLATFORM_CHOICES,
+        "current_platform": platform_filter,
+        "min_score": min_score,
+        "max_score": max_score,
+        "score_brackets": score_brackets,
+        "platform_stats": platform_stats,
+    }
+    
+    return render(request, "brandsensor/pure_feed.html", context)
 
 # API Endpoints
 @csrf_exempt

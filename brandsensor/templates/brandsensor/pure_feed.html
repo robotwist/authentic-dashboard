@@ -1,0 +1,427 @@
+{% extends "brandsensor/base.html" %}
+
+{% block title %}Pure Feed - Authentic Dashboard{% endblock %}
+
+{% block content %}
+<div class="dashboard-container">
+    <div class="sidebar">
+        <div class="sidebar-section">
+            <h3>Pure Feed Guide</h3>
+            <div class="authenticity-scale-guide">
+                <div class="scale-item">
+                    <div class="score-badge score-badge-90">90-100</div>
+                    <div class="scale-desc">
+                        <strong>Pure soul.</strong> 
+                        <p>Vulnerable, funny, deep, unique.</p>
+                    </div>
+                </div>
+                <div class="scale-item">
+                    <div class="score-badge score-badge-70">70-89</div>
+                    <div class="scale-desc">
+                        <strong>Insightful.</strong> 
+                        <p>Honest, charmingly human.</p>
+                    </div>
+                </div>
+                <div class="scale-item">
+                    <div class="score-badge score-badge-40">40-69</div>
+                    <div class="scale-desc">
+                        <strong>Neutral.</strong> 
+                        <p>Meh. Safe but not manipulative.</p>
+                    </div>
+                </div>
+                <div class="scale-item">
+                    <div class="score-badge score-badge-20">20-39</div>
+                    <div class="scale-desc">
+                        <strong>Performative.</strong> 
+                        <p>Cringe, bland, try-hard.</p>
+                    </div>
+                </div>
+                <div class="scale-item">
+                    <div class="score-badge score-badge-0">0-19</div>
+                    <div class="scale-desc">
+                        <strong>Spam/Ads.</strong> 
+                        <p>Obvious spam, ads, outrage bait, AI slop.</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="sidebar-section">
+            <h3>Score Distribution</h3>
+            <div class="score-distribution">
+                {% for bracket in score_brackets %}
+                <div class="bracket-item">
+                    <div class="bracket-label">{{ bracket.name }}</div>
+                    <div class="progress">
+                        <div class="progress-bar bg-{% if bracket.min >= 90 %}success{% elif bracket.min >= 70 %}info{% elif bracket.min >= 40 %}secondary{% elif bracket.min >= 20 %}warning{% else %}danger{% endif %}" 
+                             style="width: {% if post_count > 0 %}{{ bracket.count|floatformat:0 }}{% else %}0{% endif %}%">
+                            {{ bracket.count }}
+                        </div>
+                    </div>
+                </div>
+                {% endfor %}
+            </div>
+        </div>
+
+        <div class="sidebar-section">
+            <h3>Filter by Score</h3>
+            <form action="{% url 'pure_feed' %}" method="get" class="score-filter-form">
+                <div class="form-group">
+                    <label for="min_score">Minimum Score</label>
+                    <input type="number" name="min_score" id="min_score" value="{{ min_score }}" min="0" max="100" class="form-control">
+                </div>
+                <div class="form-group">
+                    <label for="max_score">Maximum Score</label>
+                    <input type="number" name="max_score" id="max_score" value="{{ max_score }}" min="0" max="100" class="form-control">
+                </div>
+                
+                {% if days_filter %}
+                <input type="hidden" name="days" value="{{ days_filter }}">
+                {% endif %}
+                
+                {% if current_platform %}
+                <input type="hidden" name="platform" value="{{ current_platform }}">
+                {% endif %}
+                
+                <button type="submit" class="btn btn-primary">Apply Filter</button>
+                <a href="{% url 'pure_feed' %}" class="btn btn-outline-secondary">Reset</a>
+            </form>
+        </div>
+
+        <div class="sidebar-section">
+            <h3>Time Period</h3>
+            <div class="time-filter">
+                <a href="?days=1{% if current_platform %}&platform={{ current_platform }}{% endif %}{% if min_score %}&min_score={{ min_score }}{% endif %}{% if max_score %}&max_score={{ max_score }}{% endif %}" class="{% if days_filter == '1' %}active{% endif %}">Today</a>
+                <a href="?days=7{% if current_platform %}&platform={{ current_platform }}{% endif %}{% if min_score %}&min_score={{ min_score }}{% endif %}{% if max_score %}&max_score={{ max_score }}{% endif %}" class="{% if days_filter == '7' %}active{% endif %}">Last Week</a>
+                <a href="?days=30{% if current_platform %}&platform={{ current_platform }}{% endif %}{% if min_score %}&min_score={{ min_score }}{% endif %}{% if max_score %}&max_score={{ max_score }}{% endif %}" class="{% if days_filter == '30' %}active{% endif %}">Last Month</a>
+                <a href="?days=90{% if current_platform %}&platform={{ current_platform }}{% endif %}{% if min_score %}&min_score={{ min_score }}{% endif %}{% if max_score %}&max_score={{ max_score }}{% endif %}" class="{% if days_filter == '90' %}active{% endif %}">Last 3 Months</a>
+                <a href="?days=365{% if current_platform %}&platform={{ current_platform }}{% endif %}{% if min_score %}&min_score={{ min_score }}{% endif %}{% if max_score %}&max_score={{ max_score }}{% endif %}" class="{% if days_filter == '365' %}active{% endif %}">Last Year</a>
+            </div>
+        </div>
+        
+        <div class="sidebar-section">
+            <h3>Platform</h3>
+            <div class="platform-filter">
+                <a href="?{% if days_filter %}days={{ days_filter }}{% endif %}{% if min_score %}&min_score={{ min_score }}{% endif %}{% if max_score %}&max_score={{ max_score }}{% endif %}" class="{% if not current_platform %}active{% endif %}">All</a>
+                {% for platform_code, platform_name in platforms %}
+                <a href="?platform={{ platform_code }}{% if days_filter %}&days={{ days_filter }}{% endif %}{% if min_score %}&min_score={{ min_score }}{% endif %}{% if max_score %}&max_score={{ max_score }}{% endif %}" class="{% if current_platform == platform_code %}active{% endif %}">{{ platform_name }}</a>
+                {% endfor %}
+            </div>
+        </div>
+        
+        <div class="sidebar-section">
+            <h3>Platform Stats</h3>
+            <div class="platform-stats">
+                {% for stat in platform_stats %}
+                <div class="platform-stat-item">
+                    <div class="stat-label">{{ stat.platform }}</div>
+                    <div class="stat-value">{{ stat.count }} posts</div>
+                    <div class="stat-detail">Avg Authenticity: {{ stat.avg_authenticity|floatformat:1 }}</div>
+                </div>
+                {% endfor %}
+            </div>
+        </div>
+    </div>
+
+    <div class="content">
+        <div class="content-header">
+            <h1>Pure Feed</h1>
+            <div class="content-filters">
+                <span class="filter-label">Viewing:</span>
+                <span class="filter-value">
+                    {% if min_score and max_score %}
+                        Posts with scores {{ min_score }}-{{ max_score }}
+                    {% elif min_score %}
+                        Posts with scores {{ min_score }}+
+                    {% elif max_score %}
+                        Posts with scores under {{ max_score }}
+                    {% else %}
+                        All posts by authenticity
+                    {% endif %}
+                </span>
+                
+                <span class="filter-label">Platform:</span>
+                <span class="filter-value">
+                    {% if current_platform %}
+                        {{ current_platform|title }}
+                    {% else %}
+                        All Platforms
+                    {% endif %}
+                </span>
+                
+                <span class="filter-label">Time:</span>
+                <span class="filter-value">
+                    {% if days_filter == '1' %}
+                        Today
+                    {% elif days_filter == '7' %}
+                        Last Week
+                    {% elif days_filter == '30' %}
+                        Last Month
+                    {% elif days_filter == '90' %}
+                        Last 3 Months
+                    {% elif days_filter == '365' %}
+                        Last Year
+                    {% else %}
+                        Last {{ days_filter }} Days
+                    {% endif %}
+                </span>
+            </div>
+        </div>
+
+        <div class="posts-container">
+            {% if posts %}
+                {% for post in posts %}
+                <div class="post-card">
+                    <div class="post-header">
+                        <div class="post-user">
+                            {% if post.verified %}
+                            <span class="verified-badge" title="Verified Account"><i class="fas fa-check-circle"></i></span>
+                            {% endif %}
+                            <span class="post-username">{{ post.original_user }}</span>
+                            {% if post.is_friend %}
+                            <span class="friend-badge" title="You follow this account"><i class="fas fa-user-friends"></i></span>
+                            {% endif %}
+                            {% if post.is_family %}
+                            <span class="family-badge" title="Family Member"><i class="fas fa-home"></i></span>
+                            {% endif %}
+                        </div>
+                        <div class="post-meta">
+                            <span class="post-platform platform-{{ post.platform }}">{{ post.platform|title }}</span>
+                            <span class="post-date">{{ post.collected_at|date:"M d, Y" }}</span>
+                        </div>
+                    </div>
+                    
+                    <div class="post-authenticity-score">
+                        <span class="score-badge score-badge-{% if post.authenticity_score >= 90 %}90{% elif post.authenticity_score >= 70 %}70{% elif post.authenticity_score >= 40 %}40{% elif post.authenticity_score >= 20 %}20{% else %}0{% endif %}">
+                            {{ post.authenticity_score|floatformat:0 }}
+                        </span>
+                        
+                        <span class="score-label">
+                            {% if post.authenticity_score >= 90 %}
+                                Pure soul
+                            {% elif post.authenticity_score >= 70 %}
+                                Insightful
+                            {% elif post.authenticity_score >= 40 %}
+                                Neutral
+                            {% elif post.authenticity_score >= 20 %}
+                                Performative
+                            {% else %}
+                                Spam/Ads
+                            {% endif %}
+                        </span>
+                    </div>
+                    
+                    <div class="post-content">
+                        {{ post.content|linebreaks }}
+                    </div>
+                    
+                    {% if post.image_urls %}
+                    <div class="post-images">
+                        {% with first_image=post.image_urls.split|first %}
+                        <img src="{{ first_image }}" alt="Post image" class="post-image">
+                        {% endwith %}
+                        {% if post.image_urls.split|length > 1 %}
+                        <div class="more-images-badge">+{{ post.image_urls.split|length|add:"-1" }} more</div>
+                        {% endif %}
+                    </div>
+                    {% endif %}
+                    
+                    <div class="post-footer">
+                        <div class="post-stats">
+                            {% if post.likes > 0 %}
+                            <span class="post-likes"><i class="far fa-heart"></i> {{ post.likes }}</span>
+                            {% endif %}
+                            {% if post.comments > 0 %}
+                            <span class="post-comments"><i class="far fa-comment"></i> {{ post.comments }}</span>
+                            {% endif %}
+                            {% if post.shares > 0 %}
+                            <span class="post-shares"><i class="far fa-share-square"></i> {{ post.shares }}</span>
+                            {% endif %}
+                        </div>
+                        
+                        <div class="post-actions">
+                            <a href="{% url 'post_detail' post.id %}" class="post-detail-link"><i class="fas fa-info-circle"></i> Details</a>
+                            
+                            <form action="{% url 'post_action' post.id %}" method="post" class="inline-form">
+                                {% csrf_token %}
+                                <input type="hidden" name="action" value="star">
+                                <button type="submit" class="star-button {% if post.starred %}starred{% endif %}">
+                                    <i class="{% if post.starred %}fas{% else %}far{% endif %} fa-star"></i>
+                                </button>
+                            </form>
+                            
+                            <form action="{% url 'post_action' post.id %}" method="post" class="inline-form">
+                                {% csrf_token %}
+                                <input type="hidden" name="action" value="hide">
+                                <button type="submit" class="hide-button" title="Hide this post">
+                                    <i class="far fa-eye-slash"></i>
+                                </button>
+                            </form>
+                        </div>
+                    </div>
+                    
+                    {% if post.automated_category or post.sentiment_score or post.toxicity_score %}
+                    <div class="post-ml-insights">
+                        {% if post.automated_category %}
+                        <span class="ml-tag">Category: {{ post.automated_category|title }}</span>
+                        {% endif %}
+                        
+                        {% if post.sentiment_score %}
+                        <span class="ml-tag sentiment-tag {% if post.sentiment_score > 0.2 %}positive{% elif post.sentiment_score < -0.2 %}negative{% else %}neutral{% endif %}">
+                            Sentiment: {{ post.sentiment_score|floatformat:2 }}
+                        </span>
+                        {% endif %}
+                        
+                        {% if post.toxicity_score %}
+                        <span class="ml-tag toxicity-tag {% if post.toxicity_score > 0.5 %}high{% elif post.toxicity_score > 0.2 %}medium{% else %}low{% endif %}">
+                            Toxicity: {{ post.toxicity_score|floatformat:2 }}
+                        </span>
+                        {% endif %}
+                    </div>
+                    {% endif %}
+                </div>
+                {% endfor %}
+            {% else %}
+                <div class="no-posts-message">
+                    <i class="far fa-sad-tear"></i>
+                    <h3>No posts found</h3>
+                    <p>Try adjusting your filters or collecting more social media content.</p>
+                </div>
+            {% endif %}
+        </div>
+    </div>
+</div>
+
+<style>
+.authenticity-scale-guide {
+    margin-bottom: 20px;
+}
+
+.scale-item {
+    display: flex;
+    align-items: center;
+    margin-bottom: 10px;
+    padding: 5px;
+    border-radius: 4px;
+}
+
+.score-badge {
+    display: inline-block;
+    width: 60px;
+    text-align: center;
+    padding: 4px 8px;
+    border-radius: 4px;
+    font-weight: bold;
+    color: white;
+    margin-right: 10px;
+}
+
+.score-badge-90 {
+    background-color: #4CAF50; /* Green */
+}
+
+.score-badge-70 {
+    background-color: #2196F3; /* Blue */
+}
+
+.score-badge-40 {
+    background-color: #9E9E9E; /* Grey */
+}
+
+.score-badge-20 {
+    background-color: #FF9800; /* Orange */
+}
+
+.score-badge-0 {
+    background-color: #F44336; /* Red */
+}
+
+.scale-desc {
+    flex: 1;
+}
+
+.scale-desc p {
+    margin: 0;
+    font-size: 0.8rem;
+    color: #666;
+}
+
+.post-authenticity-score {
+    display: flex;
+    align-items: center;
+    margin: 10px 0;
+}
+
+.score-label {
+    margin-left: 10px;
+    font-weight: 500;
+}
+
+.score-distribution .bracket-item {
+    margin-bottom: 10px;
+}
+
+.score-distribution .bracket-label {
+    display: flex;
+    justify-content: space-between;
+    font-size: 0.8rem;
+    margin-bottom: 2px;
+}
+
+.post-ml-insights {
+    margin-top: 10px;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 5px;
+}
+
+.ml-tag {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 4px;
+    font-size: 0.75rem;
+    background-color: #f0f0f0;
+    color: #333;
+}
+
+.sentiment-tag.positive {
+    background-color: #E8F5E9;
+    color: #2E7D32;
+}
+
+.sentiment-tag.negative {
+    background-color: #FFEBEE;
+    color: #C62828;
+}
+
+.toxicity-tag.high {
+    background-color: #FFEBEE;
+    color: #C62828;
+}
+
+.toxicity-tag.medium {
+    background-color: #FFF8E1;
+    color: #F57F17;
+}
+
+.platform-stat-item {
+    margin-bottom: 8px;
+    padding-bottom: 8px;
+    border-bottom: 1px solid #eee;
+}
+
+.platform-stat-item:last-child {
+    border-bottom: none;
+}
+
+.stat-value {
+    font-weight: bold;
+}
+
+.stat-detail {
+    font-size: 0.8rem;
+    color: #666;
+}
+</style>
+
+{% endblock %} 

@@ -474,6 +474,11 @@
             </a>
           </li>
           <li class="nav-item">
+            <a class="nav-link {% if 'pure-feed' in request.path %}active{% endif %}" href="{% url 'pure_feed' %}">
+              <i class="fas fa-filter"></i> Pure Feed
+            </a>
+          </li>
+          <li class="nav-item">
             <a class="nav-link {% if 'user_settings' in request.path %}active{% endif %}" href="{% url 'user_settings' %}">
               <i class="fas fa-user-cog"></i> Settings
             </a>

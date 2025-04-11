@@ -26,6 +26,7 @@ urlpatterns = [
     path('filter-presets/', dashboard_views.filter_presets, name='filter_presets'),
     path('apply-preset/<int:preset_id>/', dashboard_views.apply_preset, name='apply_preset'),
     path('analyze-images/', dashboard_views.analyze_images, name='analyze_images'),
+    path('pure-feed/', dashboard_views.pure_feed, name='pure_feed'),
     
     # Post related views
     path('post/<int:post_id>/', post_views.post_detail, name='post_detail'),
