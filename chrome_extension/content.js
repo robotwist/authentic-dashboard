@@ -1,6 +1,16 @@
 /**
- * Authentic Dashboard Content Script
- * Runs on Facebook, LinkedIn, and Instagram to collect post data
+ * Authentic Dashboard Chrome Extension Content Script
+ * 
+ * This script runs in the context of social media sites to collect and analyze posts.
+ * It uses a standardized approach across all platforms (Instagram, Facebook, and LinkedIn):
+ * 
+ * 1. Auto-scrolling: Each platform uses simulateInfiniteScroll to load more content
+ * 2. Collection: Platform-specific collection functions extract post data from the DOM
+ * 3. Processing: Posts are analyzed, ranked, and prepared for the API
+ * 4. Communication: All API calls go through the background script to bypass CSP restrictions
+ * 
+ * The script is designed to be resilient to various platform layouts and changes,
+ * with fallback mechanisms and extensive error handling.
  */
 
 // Test function to diagnose CSP issues
@@ -40,13 +50,29 @@ function testApiConnections() {
  * @returns {Promise} - Promise that resolves with the API response
  */
 function communicateWithAPI(endpoint, options = {}) {
-  console.log(`communicateWithAPI: Starting API call to ${endpoint}`, options);
+  const requestId = generateRequestId();
+  const startTime = performance.now();
+  const requestMethod = options.method || 'GET';
+  
+  console.log(`[API:${requestId}] Starting ${requestMethod} request to ${endpoint}`);
+  
+  // Track telemetry for this request
+  const telemetry = {
+    requestId,
+    endpoint,
+    method: requestMethod,
+    startTime,
+    retryCount: 0,
+    success: false,
+    error: null,
+    duration: 0
+  };
   
   return new Promise((resolve, reject) => {
-    // Ensure endpoint starts with a slash if not provided
+    // Normalize the endpoint
     if (!endpoint.startsWith('/') && !endpoint.startsWith('http')) {
       endpoint = '/' + endpoint;
-      console.log(`communicateWithAPI: Added leading slash to endpoint: ${endpoint}`);
+      console.log(`[API:${requestId}] Normalized endpoint: ${endpoint}`);
     }
     
     // Extract API domain from endpoint if it's a full URL
@@ -58,46 +84,346 @@ function communicateWithAPI(endpoint, options = {}) {
         const url = new URL(endpoint);
         domain = url.origin;
         apiPath = url.pathname + url.search;
-        console.log(`communicateWithAPI: Parsed URL - domain: ${domain}, path: ${apiPath}`);
+        console.log(`[API:${requestId}] Parsed URL - domain: ${domain}, path: ${apiPath}`);
       } catch (error) {
-        console.error(`communicateWithAPI: Error parsing URL ${endpoint}`, error);
-        reject(`Invalid URL: ${endpoint}`);
+        const errorMsg = `Invalid URL: ${endpoint}`;
+        console.error(`[API:${requestId}] ${errorMsg}`, error);
+        
+        // Complete telemetry
+        telemetry.success = false;
+        telemetry.error = errorMsg;
+        telemetry.duration = performance.now() - startTime;
+        reportTelemetry(telemetry);
+        
+        reject(errorMsg);
         return;
       }
     }
     
     const fullEndpoint = domain + apiPath;
-    console.log(`communicateWithAPI: Full endpoint: ${fullEndpoint}`);
     
-    // Use the more robust sendMessageWithRetry function
-    sendMessageWithRetry({
-      action: 'proxyApiCall',
-      endpoint: fullEndpoint,
-      method: options.method || 'GET',
-      headers: options.headers || {},
-      body: options.body || null
-    }, 3, 1000) // 3 retries, 1 second between retries
-    .then(response => {
+    // Log request details at debug level
+    const bodySize = options.body ? JSON.stringify(options.body).length : 0;
+    console.log(`[API:${requestId}] Request details:`, {
+      url: fullEndpoint,
+      method: requestMethod,
+      bodySize: formatBytes(bodySize),
+      hasHeaders: !!options.headers,
+      timestamp: new Date().toISOString()
+    });
+    
+    // Create a timer to detect potential service worker inactivity
+    const timeoutDuration = options.timeout || 15000; // 15 seconds default, configurable
+    const timeoutId = setTimeout(() => {
+      console.warn(`[API:${requestId}] No response after ${timeoutDuration}ms, service worker may be inactive`);
+      
+      // Try to wake up the service worker
+      wakeServiceWorker()
+        .then(() => {
+          console.log(`[API:${requestId}] Service worker wakened, retrying request`);
+          telemetry.retryCount++;
+          
+          // Retry the original request after waking with increased timeout
+          return sendMessageWithRetry({
+            action: 'proxyApiCall',
+            requestId,
+            endpoint: fullEndpoint,
+            method: requestMethod,
+            headers: options.headers || {},
+            body: options.body || null
+          }, 3, 1500); // Longer delay after wake
+        })
+        .then(response => processResponse(response))
+            .catch(error => {
+          const errorMsg = `Failed to communicate after wake attempt: ${error}`;
+          console.error(`[API:${requestId}] ${errorMsg}`);
+          
+          // Complete telemetry
+          telemetry.success = false;
+          telemetry.error = errorMsg;
+          telemetry.duration = performance.now() - startTime;
+          reportTelemetry(telemetry);
+          
+          reject(errorMsg);
+        });
+    }, timeoutDuration);
+    
+    // Helper to process response consistently
+    const processResponse = (response) => {
+      clearTimeout(timeoutId); // Clear the timeout if we got a response
+      const duration = performance.now() - startTime;
+      
       if (!response) {
-        console.error("communicateWithAPI: Received empty response from background script");
-        reject("Empty response from background script");
+        const errorMsg = "Empty response from background script";
+        console.error(`[API:${requestId}] ${errorMsg}`);
+        
+        // Complete telemetry
+        telemetry.success = false;
+        telemetry.error = errorMsg;
+        telemetry.duration = duration;
+        reportTelemetry(telemetry);
+        
+        reject(errorMsg);
         return;
       }
       
-      console.log(`communicateWithAPI: Received response from background script:`, response);
+      // Log response metrics
+      const responseSize = response.data ? JSON.stringify(response.data).length : 0;
+      console.log(`[API:${requestId}] Response received in ${duration.toFixed(2)}ms:`, {
+        success: response.success,
+        size: formatBytes(responseSize),
+        status: response.status || 'unknown'
+      });
       
       if (response.success) {
-        console.log("communicateWithAPI: API call successful");
+        // Complete telemetry for success
+        telemetry.success = true;
+        telemetry.duration = duration;
+        reportTelemetry(telemetry);
+        
         resolve(response.data);
       } else {
-        console.error("communicateWithAPI: API call failed:", response.error);
-        reject(response.error || 'Unknown error');
+        const errorMsg = response.error || 'Unknown API error';
+        console.error(`[API:${requestId}] Request failed: ${errorMsg}`);
+        
+        // Check for specific error types that warrant special handling
+        if (typeof errorMsg === 'string') {
+          // Handle rate limiting
+          if (errorMsg.includes('429') || errorMsg.toLowerCase().includes('rate limit')) {
+            console.warn(`[API:${requestId}] Rate limited - backing off`);
+            // Store rate limit status in session storage
+            try {
+              sessionStorage.setItem('api_rate_limited', 'true');
+              sessionStorage.setItem('api_rate_limit_until', Date.now() + (60 * 1000));
+            } catch (e) {
+              // Session storage might not be available
+            }
+          }
+          
+          // Handle authentication errors
+          if (errorMsg.includes('401') || errorMsg.includes('403') || errorMsg.toLowerCase().includes('unauthorized')) {
+            console.warn(`[API:${requestId}] Authentication error - may need to re-authenticate`);
+            // Notify UI to potentially prompt for re-auth
+            chrome.runtime.sendMessage({
+              action: 'authenticationError',
+              endpoint: fullEndpoint
+            });
+          }
+        }
+        
+        // Complete telemetry for error
+        telemetry.success = false;
+        telemetry.error = errorMsg;
+        telemetry.duration = duration;
+        reportTelemetry(telemetry);
+        
+        reject(errorMsg);
       }
-    })
+    };
+    
+    // Check for active rate limiting before making request
+    let isRateLimited = false;
+    try {
+      const rateLimitUntil = parseInt(sessionStorage.getItem('api_rate_limit_until') || '0');
+      if (rateLimitUntil > Date.now()) {
+        isRateLimited = true;
+        const secondsLeft = Math.ceil((rateLimitUntil - Date.now()) / 1000);
+        console.warn(`[API:${requestId}] Rate limit active for ${secondsLeft}s more`);
+      } else if (sessionStorage.getItem('api_rate_limited')) {
+        // Clear expired rate limit
+        sessionStorage.removeItem('api_rate_limited');
+        sessionStorage.removeItem('api_rate_limit_until');
+      }
+  } catch (e) {
+      // Session storage might not be available
+    }
+    
+    // Don't attempt if rate limited
+    if (isRateLimited && !options.ignoreRateLimit) {
+      const errorMsg = 'Request blocked due to active rate limiting';
+      console.error(`[API:${requestId}] ${errorMsg}`);
+      
+      // Complete telemetry
+      telemetry.success = false;
+      telemetry.error = errorMsg;
+      telemetry.duration = performance.now() - startTime;
+      reportTelemetry(telemetry);
+      
+      reject(errorMsg);
+      return;
+    }
+    
+    // Use the enhanced sendMessageWithRetry function with the request ID
+    sendMessageWithRetry({
+      action: 'proxyApiCall',
+      requestId,
+      endpoint: fullEndpoint,
+      method: requestMethod,
+      headers: options.headers || {},
+      body: options.body || null
+    }, 
+    options.maxRetries || 3,
+    options.retryDelay || 1000)
+    .then(response => processResponse(response))
     .catch(error => {
-      console.error("communicateWithAPI: Error sending message to background script:", error);
-      reject(error || "Failed to communicate with background script");
+      clearTimeout(timeoutId);
+      
+      const errorMsg = `Error communicating with background script: ${error}`;
+      console.error(`[API:${requestId}] ${errorMsg}`);
+      
+      // Complete telemetry
+      telemetry.success = false;
+      telemetry.error = errorMsg;
+      telemetry.duration = performance.now() - startTime;
+      reportTelemetry(telemetry);
+      
+      reject(errorMsg);
     });
+  });
+}
+
+/**
+ * Generate a unique ID for API request tracking
+ * @returns {string} A unique request ID
+ */
+function generateRequestId() {
+  return `req_${Date.now().toString(36)}_${Math.random().toString(36).substr(2, 5)}`;
+}
+
+/**
+ * Format bytes to human-readable size
+ * @param {number} bytes - Number of bytes
+ * @returns {string} Formatted size with units
+ */
+function formatBytes(bytes) {
+  if (bytes < 1024) return bytes + " bytes";
+  else if (bytes < 1048576) return (bytes / 1024).toFixed(1) + " KB";
+  else return (bytes / 1048576).toFixed(1) + " MB";
+}
+
+/**
+ * Report telemetry data for API calls
+ * @param {Object} telemetry - Telemetry data to report
+ */
+function reportTelemetry(telemetry) {
+  // Store recent API calls for performance tracking
+  try {
+    // Get existing API call history
+    const apiCallsJson = sessionStorage.getItem('api_calls_history') || '[]';
+    const apiCalls = JSON.parse(apiCallsJson);
+    
+    // Add this call
+    apiCalls.push({
+      id: telemetry.requestId,
+      endpoint: telemetry.endpoint,
+      method: telemetry.method,
+      time: new Date().toISOString(),
+      duration: telemetry.duration,
+      success: telemetry.success,
+      retries: telemetry.retryCount
+    });
+    
+    // Keep only last 50 calls
+    if (apiCalls.length > 50) {
+      apiCalls.shift();
+    }
+    
+    // Save back to storage
+    sessionStorage.setItem('api_calls_history', JSON.stringify(apiCalls));
+    
+    // Calculate and store performance metrics
+    const successCalls = apiCalls.filter(call => call.success);
+    const avgDuration = successCalls.reduce((sum, call) => sum + call.duration, 0) / 
+                       (successCalls.length || 1);
+    const successRate = (successCalls.length / apiCalls.length) * 100;
+    
+    sessionStorage.setItem('api_performance', JSON.stringify({
+      avgResponseTime: avgDuration,
+      successRate: successRate,
+      totalCalls: apiCalls.length,
+      lastUpdated: new Date().toISOString()
+    }));
+  } catch (error) {
+    // Session storage might not be available
+    console.log("Error storing API telemetry:", error);
+  }
+  
+  // Also report to background page for long-term storage/analysis
+  if (chrome.runtime) {
+    try {
+      chrome.runtime.sendMessage({
+        action: 'logApiTelemetry',
+        telemetry: {
+          ...telemetry,
+          userAgent: navigator.userAgent,
+          timestamp: new Date().toISOString()
+        }
+      });
+    } catch (e) {
+      // Background page communication might fail
+    }
+  }
+}
+
+// Function to wake up the service worker if it's inactive
+function wakeServiceWorker() {
+  console.log("Attempting to wake service worker...");
+  return new Promise((resolve, reject) => {
+    // Send a simple ping message to wake up the service worker
+    chrome.runtime.sendMessage({action: 'ping'}, response => {
+      if (chrome.runtime.lastError) {
+        console.error("Error waking service worker:", chrome.runtime.lastError);
+        // Even if there's an error, the attempt itself might wake up the worker
+        // so we'll resolve anyway after a short delay
+        setTimeout(resolve, 500);
+      } else {
+        console.log("Service worker wake successful:", response);
+        resolve(response);
+      }
+    });
+  });
+}
+
+// Enhanced version of sendMessageWithRetry with better logging
+function sendMessageWithRetry(message, maxRetries = 3, retryDelay = 1000) {
+  console.log(`Sending message to background script (attempt 1/${maxRetries + 1}):`, message.action);
+  
+  return new Promise((resolve, reject) => {
+    let currentRetry = 0;
+    
+    const sendMessage = () => {
+      // Add timestamp to help with debugging
+      message.timestamp = Date.now();
+      
+      chrome.runtime.sendMessage(message, (response) => {
+        // Check if there was an error communicating with the background script
+        if (chrome.runtime.lastError) {
+          const errorMsg = chrome.runtime.lastError.message || "Unknown error";
+          console.error(`Error sending message (attempt ${currentRetry + 1}/${maxRetries + 1}):`, errorMsg);
+          
+          // Check if we should retry
+          if (currentRetry < maxRetries) {
+            currentRetry++;
+            console.log(`Retrying in ${retryDelay}ms (attempt ${currentRetry + 1}/${maxRetries + 1})...`);
+            
+            // Wait and retry with exponential backoff
+            setTimeout(sendMessage, retryDelay * Math.pow(2, currentRetry - 1));
+            return;
+          }
+          
+          // Maximum retries reached, reject the promise
+          reject(new Error(`Failed to send message after ${maxRetries + 1} attempts: ${errorMsg}`));
+          return;
+        }
+        
+        // No error, resolve with the response
+        console.log(`Message ${message.action} received response:`, response ? "success" : "empty");
+        resolve(response);
+      });
+    };
+    
+    // Start the first attempt
+    sendMessage();
   });
 }
 
@@ -146,6 +472,325 @@ function loadPureFeedModule() {
 
 // Load Pure Feed module for post ranking and classification
 loadPureFeedModule();
+
+/**
+ * Standardized function to send collected posts to the API through the background script
+ * with comprehensive logging and error handling.
+ * 
+ * @param {Array} posts - Array of collected posts to send
+ * @param {string} platform - The platform the posts were collected from (e.g., 'instagram', 'facebook', 'linkedin')
+ * @param {Object} options - Optional settings for the request
+ * @returns {Promise} - Promise that resolves with API response or rejects with error
+ */
+function sendPostsToAPI(posts, platform, options = {}) {
+  return new Promise((resolve, reject) => {
+    const startTime = performance.now();
+    const batchId = generateBatchId();
+    
+    // Validate inputs
+    if (!posts || !Array.isArray(posts)) {
+      console.error(`[PostAPI:${batchId}] Invalid posts data: not an array`);
+      reject(new Error("Posts must be a valid array"));
+      return;
+    }
+    
+    if (!platform) {
+      console.error(`[PostAPI:${batchId}] Missing platform parameter`);
+      reject(new Error("Platform is required"));
+      return;
+    }
+    
+    // Filter out invalid posts
+    const validPosts = posts.filter(post => {
+      if (!post) return false;
+      
+      // Ensure minimal required fields exist
+      if (!post.content && !post.image_urls && !post.images) {
+        console.warn(`[PostAPI:${batchId}] Skipping post with no content or images`);
+        return false;
+      }
+      
+      return true;
+    });
+    
+    const totalPosts = posts.length;
+    const validPostCount = validPosts.length;
+    const skippedCount = totalPosts - validPostCount;
+    
+    if (validPostCount === 0) {
+      console.warn(`[PostAPI:${batchId}] No valid posts to send (${skippedCount} invalid posts filtered out)`);
+      resolve({ success: false, message: "No valid posts to send", totalPosts, validPostCount, skippedCount });
+      return;
+    }
+    
+    console.log(`[PostAPI:${batchId}] Preparing to send ${validPostCount} ${platform} posts (${skippedCount} filtered out)`);
+    
+    // Group posts by certain attributes for logging
+    const sponsoredCount = validPosts.filter(p => p.is_sponsored).length;
+    const imageCount = validPosts.filter(p => p.image_urls || p.images).length;
+    const avgContentLength = validPosts.reduce((sum, p) => sum + (p.content ? p.content.length : 0), 0) / validPostCount;
+    
+    console.log(`[PostAPI:${batchId}] Post details: ${sponsoredCount} sponsored, ${imageCount} with images, avg content length: ${avgContentLength.toFixed(1)} chars`);
+    
+    // Get API settings from storage
+    chrome.storage.local.get(['apiKey', 'apiEndpoint', 'settings'], function(result) {
+      const apiKey = result.apiKey;
+      const apiEndpoint = result.apiEndpoint || 'http://127.0.0.1:8000';
+      const settings = result.settings || {};
+      
+      // Check if collection is enabled for this type of content
+      if (platform === 'instagram' && settings.disableInstagram) {
+        console.warn(`[PostAPI:${batchId}] Instagram collection is disabled in settings`);
+        resolve({ success: false, message: "Instagram collection is disabled", disabled: true });
+        return;
+      }
+      
+      if (platform === 'facebook' && settings.disableFacebook) {
+        console.warn(`[PostAPI:${batchId}] Facebook collection is disabled in settings`);
+        resolve({ success: false, message: "Facebook collection is disabled", disabled: true });
+        return;
+      }
+      
+      if (platform === 'linkedin' && settings.disableLinkedIn) {
+        console.warn(`[PostAPI:${batchId}] LinkedIn collection is disabled in settings`);
+        resolve({ success: false, message: "LinkedIn collection is disabled", disabled: true });
+        return;
+      }
+      
+      // Add collection timestamp and batch ID
+      const timestamp = new Date().toISOString();
+      const enhancedPosts = validPosts.map(post => ({
+        ...post,
+        platform: platform,
+        collected_at: post.collected_at || timestamp,
+        batch_id: batchId,
+        extension_version: chrome.runtime.getManifest().version
+      }));
+      
+      // Log request size estimation
+      const requestSize = JSON.stringify({
+        platform: platform,
+        posts: enhancedPosts
+      }).length;
+      
+      console.log(`[PostAPI:${batchId}] Request size: ${formatBytes(requestSize)}`);
+      
+      // Use the standardized communicateWithAPI function
+      communicateWithAPI(`${apiEndpoint}/api/collect-posts/`, {
+        method: 'POST',
+        headers: { 'X-API-Key': apiKey },
+        body: {
+          platform: platform,
+          posts: enhancedPosts,
+          batch_id: batchId,
+          metadata: {
+            browser: navigator.userAgent,
+            url: window.location.href,
+          timestamp: timestamp,
+            collection_method: 'extension'
+          }
+        },
+        timeout: 30000, // Longer timeout for large post batches
+        maxRetries: 3
+      })
+      .then(response => {
+        const duration = performance.now() - startTime;
+        
+        // Handle successful response
+        console.log(`[PostAPI:${batchId}] Successfully sent ${validPostCount} posts in ${duration.toFixed(0)}ms:`, {
+          success: true,
+          processedCount: response.processed || validPostCount,
+          newCount: response.new || 0,
+          duration: `${duration.toFixed(0)}ms`,
+          batchId: batchId
+        });
+        
+        // Show in-page notification if enabled
+        if (!options.suppressNotification) {
+          showInPageNotification(
+            `Collected ${validPostCount} posts from ${platform}`,
+            `${response.new || 0} new posts added to your dashboard.`
+          );
+        }
+        
+        // Store this successful collection in history
+        saveCollectionToHistory(platform, validPostCount, response.new || 0);
+        
+        // Update any UI elements showing post collection stats
+        updatePostCountDisplay(platform, validPostCount);
+        
+        resolve({
+          success: true,
+          message: `Successfully sent ${validPostCount} posts`,
+          processed: response.processed || validPostCount,
+          new: response.new || 0,
+          duration: duration,
+          batchId: batchId,
+          ...response
+        });
+        })
+        .catch(error => {
+        const duration = performance.now() - startTime;
+        
+        console.error(`[PostAPI:${batchId}] Error sending ${platform} posts (${duration.toFixed(0)}ms):`, error);
+        
+        // Show error notification if enabled and if the error wasn't due to disabled collection
+        if (!options.suppressNotification && !error.toString().includes('disabled')) {
+          showInPageNotification(
+            `Error collecting posts`,
+            `Could not send ${validPostCount} ${platform} posts: ${error}`,
+            'error'
+          );
+        }
+        
+        reject({
+          success: false,
+          message: `Failed to send posts: ${error}`,
+          error: error,
+          duration: duration,
+          batchId: batchId
+          });
+        });
+    });
+  });
+}
+
+/**
+ * Generate a unique ID for post batches
+ * @returns {string} A unique batch ID
+ */
+function generateBatchId() {
+  return `batch_${Date.now().toString(36)}_${Math.random().toString(36).substring(2, 7)}`;
+}
+
+/**
+ * Show a notification overlaid on the page that fades out
+ * @param {string} title - Title of the notification
+ * @param {string} message - Message content
+ * @param {string} type - 'success', 'error', or 'info'
+ */
+function showInPageNotification(title, message, type = 'success') {
+  try {
+    // Create the notification element
+    const notification = document.createElement('div');
+    notification.className = `authentic-notification authentic-notification-${type}`;
+    notification.innerHTML = `
+      <div class="authentic-notification-header">
+        <span class="authentic-notification-title">${title}</span>
+        <span class="authentic-notification-close">×</span>
+      </div>
+      <div class="authentic-notification-content">${message}</div>
+    `;
+    
+    // Style the notification
+    notification.style.position = 'fixed';
+    notification.style.bottom = '20px';
+    notification.style.right = '20px';
+    notification.style.backgroundColor = type === 'error' ? '#fee' : '#efd';
+    notification.style.border = `1px solid ${type === 'error' ? '#f99' : '#aea'}`;
+    notification.style.borderRadius = '8px';
+    notification.style.padding = '12px';
+    notification.style.boxShadow = '0 2px 10px rgba(0,0,0,0.1)';
+    notification.style.zIndex = '9999999';
+    notification.style.maxWidth = '300px';
+    notification.style.fontSize = '14px';
+    notification.style.fontFamily = 'system-ui, -apple-system, BlinkMacSystemFont, sans-serif';
+    notification.style.transition = 'opacity 0.5s ease-in-out';
+    
+    // Style the header
+    const header = notification.querySelector('.authentic-notification-header');
+    header.style.display = 'flex';
+    header.style.justifyContent = 'space-between';
+    header.style.marginBottom = '8px';
+    
+    // Style the title
+    const notificationTitle = notification.querySelector('.authentic-notification-title');
+    notificationTitle.style.fontWeight = 'bold';
+    notificationTitle.style.color = type === 'error' ? '#c00' : '#060';
+    
+    // Style the close button
+    const closeButton = notification.querySelector('.authentic-notification-close');
+    closeButton.style.cursor = 'pointer';
+    closeButton.style.fontSize = '18px';
+    closeButton.style.lineHeight = '14px';
+    closeButton.onclick = function() {
+      document.body.removeChild(notification);
+    };
+    
+    // Style the content
+    const content = notification.querySelector('.authentic-notification-content');
+    content.style.color = '#555';
+    
+    // Add to the page
+    document.body.appendChild(notification);
+    
+    // Remove after 5 seconds
+    setTimeout(() => {
+      notification.style.opacity = '0';
+      setTimeout(() => {
+        if (document.body.contains(notification)) {
+          document.body.removeChild(notification);
+        }
+      }, 500);
+    }, 5000);
+  } catch (error) {
+    // Silently fail if we can't add the notification (might be in a restricted context)
+    console.error('Error showing notification:', error);
+  }
+}
+
+/**
+ * Save collection to history for tracking
+ * @param {string} platform - Platform name
+ * @param {number} count - Total post count
+ * @param {number} newCount - New posts count
+ */
+function saveCollectionToHistory(platform, count, newCount) {
+  try {
+    chrome.storage.local.get(['collectionHistory'], function(result) {
+      const history = result.collectionHistory || [];
+      
+      // Add this collection to history
+      history.unshift({
+        platform: platform,
+        count: count,
+        newCount: newCount,
+        timestamp: new Date().toISOString(),
+        url: window.location.href,
+        title: document.title
+      });
+      
+      // Keep only the most recent 100 collections
+      if (history.length > 100) {
+        history.pop();
+      }
+      
+      // Save back to storage
+      chrome.storage.local.set({ collectionHistory: history });
+    });
+  } catch (error) {
+    console.error('Error saving collection to history:', error);
+  }
+}
+
+/**
+ * Update any UI elements showing post counts
+ * @param {string} platform - The platform name
+ * @param {number} count - The post count
+ */
+function updatePostCountDisplay(platform, count) {
+  // This function would update any UI elements in the page that show post counts
+  // For example, a counter in the extension popup or badge
+  try {
+    chrome.runtime.sendMessage({
+      action: 'updatePostCount',
+      platform: platform,
+      count: count
+    });
+  } catch (error) {
+    // Silently fail - not critical
+  }
+}
 
 // Global throttling variables
 let lastCollectionTime = 0;
@@ -245,59 +890,154 @@ function findElements(platform, selectorType) {
   return [];
 }
 
-// Function to simulate infinite scroll to capture more posts
-function simulateInfiniteScroll(duration = 30000, scrollStep = 800) {
-  return new Promise((resolve) => {
-    console.log("Starting infinite scroll simulation");
-    const startTime = Date.now();
-    let lastHeight = document.body.scrollHeight;
-    let postsFound = 0;
-    let stuckCount = 0;
+/**
+ * Simulates infinite scrolling to load more content
+ * 
+ * @param {Object} options - Configuration options for scrolling
+ * @param {number} options.maxScrollTime - Maximum scroll time in milliseconds (default: 30000)
+ * @param {number} options.scrollInterval - Time between scroll actions in milliseconds (default: 1000)
+ * @param {number} options.initialDelay - Time to wait before starting to scroll (default: 1000)
+ * @param {number} options.pauseInterval - How often to pause scrolling to allow content to load (default: 3000)
+ * @param {number} options.pauseDuration - How long to pause scrolling (default: 1500)
+ * @param {string} options.postSelector - CSS selector for identifying posts (platform-specific)
+ * @param {number} options.noNewPostsThreshold - How many scroll attempts with no new posts before stopping (default: 3)
+ * @returns {Promise<number>} - Number of posts loaded
+ */
+function simulateInfiniteScroll(options = {}) {
+  // Set default values
+  const platform = getCurrentPlatform();
+  const defaults = {
+    maxScrollTime: 30000,
+    scrollInterval: 1000,
+    initialDelay: 1000,
+    pauseInterval: 3000,
+    pauseDuration: 1500,
+    noNewPostsThreshold: 3
+  };
+  
+  // Platform-specific settings
+  const platformDefaults = {
+    instagram: {
+      postSelector: 'article', 
+      initialDelay: 2000,
+      pauseInterval: 3000
+    },
+    facebook: {
+      postSelector: '[role="article"]',
+      initialDelay: 1500,
+      pauseInterval: 2500
+    },
+    linkedin: {
+      postSelector: '.feed-shared-update-v2',
+      initialDelay: 2500,
+      pauseInterval: 4000
+    }
+  };
+  
+  // Merge defaults, platform defaults, and provided options
+  const settings = { 
+    ...defaults,
+    ...(platformDefaults[platform] || {}),
+    ...options
+  };
+  
+  console.log(`[Authentic] Starting infinite scroll simulation for ${platform} with settings:`, settings);
+  
+  return new Promise((resolve, reject) => {
+    // Initial post count before scrolling
+    let lastPostCount = countVisiblePosts(settings.postSelector);
+    console.log(`[Authentic] Initial post count: ${lastPostCount}`);
     
-    const scrollInterval = setInterval(() => {
-      window.scrollBy(0, scrollStep);
-      
-      // Check if we've found new posts
-      const platform = detectCurrentPlatform();
-      const currentPostElements = findElements(platform, 'posts');
-      
-      if (currentPostElements.length > postsFound) {
-        postsFound = currentPostElements.length;
-        console.log(`Found ${postsFound} posts while scrolling`);
-        stuckCount = 0; // Reset stuck counter when we find new posts
-      } else {
-        stuckCount++;
-      }
-      
-      // Check if we're stuck (no new posts in several attempts)
-      const isStuck = stuckCount > 5;
-      
-      // Check if we've scrolled to the bottom
-      const currentHeight = document.body.scrollHeight;
-      const reachedBottom = currentHeight === lastHeight;
-      lastHeight = currentHeight;
-      
-      // Stop conditions: time elapsed, reached bottom, or stuck
-      if (Date.now() - startTime > duration || 
-          (reachedBottom && stuckCount > 2) || 
-          isStuck || 
-          postsFound > 100) { // Cap at 100 posts for performance
-        clearInterval(scrollInterval);
-        console.log(`Scroll complete: Scrolled for ${(Date.now() - startTime)/1000}s, found ${postsFound} posts`);
-        resolve(postsFound);
-      }
-    }, 1000); // Scroll every second
+    let scrollStartTime = Date.now();
+    let noNewPostsCount = 0;
+    let scrollAttempts = 0;
+    
+    // Wait for the initial delay before starting to scroll
+    setTimeout(() => {
+      const scrollInterval = setInterval(() => {
+        // Check if we've been scrolling for too long
+        if (Date.now() - scrollStartTime > settings.maxScrollTime) {
+          console.log(`[Authentic] Reached maximum scroll time (${settings.maxScrollTime}ms)`);
+          clearInterval(scrollInterval);
+          resolve(countVisiblePosts(settings.postSelector));
+          return;
+        }
+        
+        scrollAttempts++;
+        
+        // Scroll down
+        window.scrollTo(0, document.body.scrollHeight);
+        
+        // If we need to pause to let content load (every pauseInterval)
+        if (scrollAttempts % Math.floor(settings.pauseInterval / settings.scrollInterval) === 0) {
+          clearInterval(scrollInterval);
+          
+          // After a pause, check if we got new posts
+          setTimeout(() => {
+            const currentPostCount = countVisiblePosts(settings.postSelector);
+            console.log(`[Authentic] Posts count after pause: ${currentPostCount} (previously: ${lastPostCount})`);
+            
+            // Check if we found new posts
+            if (currentPostCount <= lastPostCount) {
+              noNewPostsCount++;
+              console.log(`[Authentic] No new posts detected (${noNewPostsCount}/${settings.noNewPostsThreshold})`);
+              
+              // If we haven't found new posts for several attempts, stop scrolling
+              if (noNewPostsCount >= settings.noNewPostsThreshold) {
+                console.log('[Authentic] Stopping scroll - no new posts after multiple attempts');
+                resolve(currentPostCount);
+                return;
+              }
+    } else {
+              // Reset counter if we found new posts
+              noNewPostsCount = 0;
+            }
+            
+            lastPostCount = currentPostCount;
+            
+            // Continue scrolling after the pause
+            scrollInterval = setInterval(() => {
+              // (Same scroll logic as before)
+              if (Date.now() - scrollStartTime > settings.maxScrollTime) {
+                console.log(`[Authentic] Reached maximum scroll time (${settings.maxScrollTime}ms)`);
+                clearInterval(scrollInterval);
+                resolve(countVisiblePosts(settings.postSelector));
+    return;
+  }
+  
+              scrollAttempts++;
+              window.scrollTo(0, document.body.scrollHeight);
+              
+              if (scrollAttempts % Math.floor(settings.pauseInterval / settings.scrollInterval) === 0) {
+                // Pause logic would repeat here
+                // This creates a potential recursion issue, so we'll use the same loop
+              }
+            }, settings.scrollInterval);
+          }, settings.pauseDuration);
+        }
+      }, settings.scrollInterval);
+    }, settings.initialDelay);
   });
+}
+
+/**
+ * Counts the number of visible posts on the page
+ * 
+ * @param {string} selector - CSS selector for posts
+ * @returns {number} - Number of visible posts
+ */
+function countVisiblePosts(selector) {
+  return document.querySelectorAll(selector).length;
 }
 
 // Detect current platform
 function detectCurrentPlatform() {
-  const url = window.location.href;
+    const url = window.location.href;
   if (url.includes('facebook.com')) {
     return 'facebook';
   } else if (url.includes('instagram.com')) {
     return 'instagram';
-  } else if (url.includes('linkedin.com')) {
+    } else if (url.includes('linkedin.com')) {
     return 'linkedin';
   }
   return 'unknown';
@@ -391,67 +1131,176 @@ function checkServerAvailability(callback) {
     });
 }
 
-// Modified collectWithRateLimitProtection to collect more aggressively
-async function collectWithRateLimitProtection(platform, collectionFunction) {
-  console.log(`Starting ${platform} collection with minimal rate limit protection`);
+/**
+ * Enhanced collection function with better timeout and error handling for all platforms
+ * 
+ * @param {string} platform - The platform being collected (e.g., 'Instagram', 'Facebook', 'LinkedIn')
+ * @param {Function} collectionFunction - The function that performs the actual collection
+ * @param {Object} options - Additional options
+ * @returns {Promise} - Resolves with collected posts
+ */
+function collectWithRateLimitProtection(platform, collectionFunction, options = {}) {
+  console.log(`Starting ${platform} collection with rate limit protection`);
   
-  // Check when we last collected from this platform
-  const lastCollectionKey = `last_${platform}_collection`;
-  const lastCollection = localStorage.getItem(lastCollectionKey);
-  const now = Date.now();
-  
-  // Always allow collection during testing/development
-  const debugMode = true;  // Set to true for testing
-  
-  if (lastCollection && !debugMode) {
-    // Minimum wait time between collections (in milliseconds)
-    // Using a very short interval (5 seconds) to collect more posts
-    const MIN_COLLECTION_INTERVAL = 5000; // 5 seconds for aggressive collection
-    
-    const elapsed = now - parseInt(lastCollection);
-    if (elapsed < MIN_COLLECTION_INTERVAL) {
-      console.log(`Collection attempted after ${elapsed}ms. Allowing collection anyway.`);
-      // Continue with collection always
+  // Platform-specific settings
+  const platformSettings = {
+    'Instagram': {
+      timeout: 35000,   // Instagram often takes longer to load content
+      retries: 2,       // Instagram is more sensitive to rate limits
+      scrollTime: 30000 // Instagram needs more scrolling time
+    },
+    'Facebook': {
+      timeout: 25000,
+      retries: 3,
+      scrollTime: 25000
+    },
+    'LinkedIn': {
+      timeout: 35000,   // LinkedIn is slower to load content
+      retries: 2,
+      scrollTime: 35000
+    },
+    'default': {
+      timeout: 20000,
+      retries: 2,
+      scrollTime: 25000
     }
+  };
+  
+  // Get settings for the current platform or use defaults
+  const settings = platformSettings[platform] || platformSettings.default;
+  
+  // Apply custom options on top of platform defaults
+  const timeout = options.timeout || settings.timeout;
+  const retries = options.retries || settings.retries;
+  const scrollTime = options.scrollTime || settings.scrollTime;
+  
+  // Log collection attempt
+  console.log(`Collection settings for ${platform}: timeout=${timeout}ms, retries=${retries}, scrollTime=${scrollTime}ms`);
+  
+  // Check if we're in rate limit backoff period
+  if (isRateLimited && Date.now() < rateLimitResetTime) {
+    const timeLeft = Math.ceil((rateLimitResetTime - Date.now()) / 1000);
+    console.warn(`Rate limit in effect for ${platform}. Try again in ${timeLeft} seconds.`);
+    return Promise.reject(new Error(`Rate limited for ${timeLeft} more seconds`));
   }
   
-  // Store last collection time
-  localStorage.setItem(lastCollectionKey, now.toString());
-  
-  // Call the actual collection function with error handling
-  let allPosts = [];
-  try {
-    // Use Promise with timeout to prevent hanging
-    const timeoutPromise = new Promise((_, reject) => {
-      setTimeout(() => reject(new Error('Collection timed out')), 10000); // 10 second timeout
-    });
+  // Check if we should enforce cooldown between collections
+  const now = Date.now();
+  if (now - lastCollectionTime < COLLECTION_COOLDOWN) {
+    const cooldownLeft = Math.ceil((COLLECTION_COOLDOWN - (now - lastCollectionTime)) / 1000);
+    console.log(`Collection cooldown active. Waiting ${cooldownLeft} seconds between requests.`);
     
-    const collectionPromise = new Promise(resolve => {
-      try {
-        const result = collectionFunction();
+    // Instead of rejecting, we'll wait and then continue
+    return new Promise((resolve, reject) => {
+      setTimeout(() => {
+        // After cooldown, proceed with collection
+        performCollection(platform, collectionFunction, { timeout, retries, scrollTime })
+          .then(resolve)
+          .catch(reject);
+      }, COLLECTION_COOLDOWN - (now - lastCollectionTime));
+    });
+  }
+  
+  // No rate limit or cooldown, proceed with collection
+  return performCollection(platform, collectionFunction, { timeout, retries, scrollTime });
+}
+
+/**
+ * Helper function to perform the actual collection with timeout handling
+ * 
+ * @param {string} platform - The platform being collected
+ * @param {Function} collectionFunction - The function that performs the collection
+ * @param {Object} options - Collection options including timeout
+ * @returns {Promise} - Resolves with collected posts
+ */
+function performCollection(platform, collectionFunction, options = {}) {
+  // Update collection timestamp
+  lastCollectionTime = Date.now();
+  
+  // Get timeout from options or use a default
+  const timeoutDuration = options.timeout || 20000; // Default 20s
+  
+  // Start a collection timeout
+  let timeoutId;
+  
+  // Create the collection promise with timeout
+  const collectionPromise = new Promise((resolve, reject) => {
+    // Set timeout to prevent hanging collections
+    timeoutId = setTimeout(() => {
+      reject(new Error(`Collection timed out after ${timeoutDuration}ms`));
+    }, timeoutDuration);
+    
+    // Try to run the collection function
+    try {
+      const result = collectionFunction();
+      
+      // Handle both promises and direct returns
+      if (result && typeof result.then === 'function') {
+        result
+          .then(posts => {
+            clearTimeout(timeoutId); // Clear timeout on success
+            
+            // Log collection success
+            console.log(`Successfully collected ${posts ? posts.length : 0} posts from ${platform}`);
+            
+            resolve(posts);
+          })
+          .catch(error => {
+            clearTimeout(timeoutId); // Clear timeout on error
+            
+            // Check for rate limit indicators in the error
+            if (error && (
+                error.toString().toLowerCase().includes('rate') ||
+                error.toString().toLowerCase().includes('limit') ||
+                error.toString().toLowerCase().includes('429')
+            )) {
+              console.error(`Rate limit detected for ${platform}. Backing off.`);
+              isRateLimited = true;
+              rateLimitResetTime = Date.now() + RATE_LIMIT_BACKOFF;
+            }
+            
+            reject(error);
+          });
+      } else {
+        // Function returned a direct result (not a promise)
+        clearTimeout(timeoutId);
+        
+        // Log collection success
+        console.log(`Successfully collected ${result ? result.length : 0} posts from ${platform} (direct)`);
+        
         resolve(result);
-      } catch (e) {
-        console.error(`Error in ${platform} collection function:`, e);
-        resolve([]);
       }
-    });
+    } catch (error) {
+      clearTimeout(timeoutId);
+      console.error(`Error executing ${platform} collection function:`, error);
+      reject(error);
+    }
+  });
+  
+  return collectionPromise.catch(error => {
+    console.error(`Error in ${platform} collection:`, error);
     
-    // Race the collection against the timeout
-    allPosts = await Promise.race([collectionPromise, timeoutPromise]);
-  } catch (e) {
-    console.error(`Error in ${platform} collection:`, e);
-    return [];
-  }
-  
-  // No posts collected
-  if (!allPosts || allPosts.length === 0) {
-    console.log(`No posts collected from ${platform}`);
-    return [];
-  }
-  
-  // Include all posts without filtering duplicates
-  console.log(`Collected ${allPosts.length} posts, including all in results.`);
-  return allPosts;
+    // Increment error counter
+    if (error.toString().includes('timed out')) {
+      console.warn(`Collection timeout for ${platform}. This is likely due to slow page loading or selector issues.`);
+      
+      // Add platform-specific advice
+      if (platform === 'Instagram') {
+        console.info("Instagram collection tips: try refreshing the page or scrolling manually before collecting.");
+      } else if (platform === 'Facebook') {
+        console.info("Facebook collection tips: ensure you're logged in and try scrolling manually to load content.");
+      } else if (platform === 'LinkedIn') {
+        console.info("LinkedIn collection tips: LinkedIn may limit content visibility. Try scrolling manually first.");
+      }
+    }
+    
+    // Track connection errors
+    connectionErrorCount++;
+    lastConnectionError = error.toString();
+    
+    // Rethrow to propagate the error
+    throw error;
+  });
 }
 
 // Add a function at the top of the file to handle post fingerprinting
@@ -492,251 +1341,356 @@ function markPostAsProcessed(fingerprint) {
   });
 }
 
-// Enhanced Instagram post collector
+/**
+ * Enhanced Instagram post collection that can handle different layouts
+ * @returns {Promise<Array>} - Resolves with collected posts
+ */
 function collectInstagramPosts() {
-  console.log("Starting enhanced Instagram post collection...");
-  
-  return new Promise(async (resolve) => {
+  return new Promise((resolve, reject) => {
     try {
-      // Detect Instagram page type for specialized collection
-      const pageType = detectInstagramPageType();
-      console.log(`Detected Instagram page type: ${pageType}`);
+      console.log("Starting enhanced Instagram post collection...");
+
+      // Detect which type of Instagram page we're on
+      let pageType = 'unknown';
+      const url = window.location.href;
       
-      // Scroll to get more posts depending on page type
-      const scrollDuration = pageType === 'explore' ? 40000 : 30000;
-      await simulateInfiniteScroll(scrollDuration, 800);
-      
-      // Use the adaptive selector system to find posts
-      const articleElements = findElements('instagram', 'posts');
-      
-      console.log(`Found ${articleElements.length} potential Instagram posts`);
-      
-      if (!articleElements || articleElements.length === 0) {
-        console.log("No Instagram posts found on page");
-        resolve([]);
-        return;
+      if (url.includes('/p/')) {
+        pageType = 'post';
+      } else if (url.includes('/explore/')) {
+        pageType = 'explore';
+      } else if (url.includes('/reels/')) {
+        pageType = 'reels';
+        } else {
+        pageType = 'feed';
       }
       
-      const posts = [];
-      const processedContents = new Set(); // For deduplication by content
+      console.log(`Detected Instagram page type: ${pageType}`);
       
-      articleElements.forEach((article, index) => {
+      // Try to find more posts with scrolling if not on a single post page
+      if (pageType !== 'post') {
+        // Scroll to load more content
+        simulateInfiniteScroll().then(scrollResult => {
+          // After scrolling, collect what we found
+          collectInstagramPostElements(pageType).then(posts => {
+            resolve(posts);
+          }).catch(error => {
+            console.error("Error during Instagram post processing:", error);
+            reject(error);
+          });
+        }).catch(error => {
+          console.error("Error during infinite scroll:", error);
+          // Try to collect what we can even if scrolling failed
+          collectInstagramPostElements(pageType).then(posts => {
+            resolve(posts);
+          }).catch(innerError => {
+            reject(innerError);
+          });
+        });
+      } else {
+        // Single post page, no need to scroll
+        collectInstagramPostElements(pageType).then(posts => {
+          resolve(posts);
+        }).catch(error => {
+          reject(error);
+        });
+      }
+    } catch (error) {
+      console.error("Fatal error in Instagram collection:", error);
+      reject(error);
+    }
+  });
+}
+
+/**
+ * Helper function to collect Instagram posts after scrolling
+ * @param {string} pageType - The type of Instagram page
+ * @returns {Promise<Array>} - Resolves with collected posts
+ */
+function collectInstagramPostElements(pageType) {
+  return new Promise((resolve, reject) => {
+    try {
+      // Expanded selector set for Instagram 
+      const postSelectors = [
+        'article[role="presentation"]',
+        'div._ab6k', 
+        'div._aagw',
+        'article._ab6k',
+        'article',
+        'div._aabd',
+        'div.x1qjc9v5',
+        '.x1y1aw1k',
+        'div[style*="padding-bottom: 177.778%"]',
+        // New flexible selectors
+        '[data-visualcompletion="media-vc-image"]',
+        'div[style*="position: relative"] > div[role="button"]',
+        'div[style*="padding-bottom"]',
+        // Reels-specific selectors
+        'div[data-visualcompletion="media"] > div > div',
+        'div[data-media-type="GraphVideo"]'
+      ];
+      
+      // Find post elements using our expanded selector set
+      let postElements = [];
+      for (const selector of postSelectors) {
+        const elements = document.querySelectorAll(selector);
+        if (elements && elements.length > 0) {
+          console.log(`Found ${elements.length} elements with ${selector}`);
+          postElements = Array.from(elements);
+          break;
+        }
+      }
+      
+      // If we still have no elements, try a more aggressive approach
+      if (postElements.length === 0) {
+        console.warn("No posts found with standard selectors, trying alternative approach");
+        
+        // Look for images or videos as a fallback
+        const mediaElements = document.querySelectorAll('img[srcset], video');
+        const potentialPostElements = [];
+        
+        // Filter to only include elements that are likely posts (based on size, etc)
+        Array.from(mediaElements).forEach(el => {
+          // Get parent container that might be a post
+          let parent = el.parentElement;
+          for (let i = 0; i < 5; i++) { // Check up to 5 levels up
+            if (!parent) break;
+            
+            // Check if this parent has characteristics of a post container
+            const rect = parent.getBoundingClientRect();
+            if (rect.width > 300 && rect.height > 300) {
+              potentialPostElements.push(parent);
+              break;
+            }
+            parent = parent.parentElement;
+          }
+        });
+        
+        // Use the potential posts if we found any
+        if (potentialPostElements.length > 0) {
+          console.log(`Found ${potentialPostElements.length} potential post elements using media-based detection`);
+          postElements = potentialPostElements;
+        }
+      }
+      
+      // Limit to a reasonable number of posts to avoid processing too much
+      const MAX_POSTS_TO_PROCESS = 20;
+      if (postElements.length > MAX_POSTS_TO_PROCESS) {
+        console.log(`Limiting processing to ${MAX_POSTS_TO_PROCESS} posts out of ${postElements.length} found`);
+        postElements = postElements.slice(0, MAX_POSTS_TO_PROCESS);
+      }
+      
+      console.log(`Found ${postElements.length} potential Instagram posts`);
+      
+      // Now extract data from the post elements
+      const posts = [];
+      let postCount = 0;
+      
+      // Process each post element
+      Array.from(postElements).forEach((el, index) => {
         try {
-          // Get the content text with reliable selectors
+          // Extract content/caption
           let content = "";
-          for (const selector of SELECTORS.instagram.content) {
-            const contentElement = article.querySelector(selector);
-            if (contentElement && contentElement.innerText) {
-              content = contentElement.innerText.trim();
+          
+          // Try various selectors for content
+          const contentSelectors = [
+            'div._a9zs', 'div._a9zr', 'span._aacl', 'div._a9zr div',
+            'span[class*="x193iq5w"]', 'div[dir="auto"] span', 
+            'div.x1lliihq', 'h1 + div',
+            'div[role="button"] + div span', // New pattern
+            'span[dir="auto"]', // For alt text/captions
+            'div[style*="padding-bottom"] + div', // For some layouts
+            'a[role="link"] + div' // Feed captions
+          ];
+          
+          for (const selector of contentSelectors) {
+            const contentEl = el.querySelector(selector) || document.querySelector(selector);
+            if (contentEl && contentEl.innerText) {
+              content = contentEl.innerText.trim();
               if (content.length > 0) break;
             }
           }
           
-          // If single post view, try looking for content in comments section
-          if (pageType === 'single-post' && (!content || content.length < 5)) {
-            const commentSelectors = ['.C4VMK span:not(.gElp9)', '._a9zr > div', '.x1lliihq'];
-            for (const selector of commentSelectors) {
-              const commentElement = article.querySelector(selector);
-      if (commentElement && commentElement.innerText) {
-                content = commentElement.innerText.trim();
-                if (content.length > 0) break;
+          // If we couldn't find content, look for alt text on images as fallback
+          if (!content || content.length < 3) {
+            const img = el.querySelector('img[alt]');
+            if (img && img.alt && img.alt.length > 5) {
+              content = img.alt.trim();
+            }
+          }
+          
+          // Skip if content is too short and not on a single post page
+          if ((!content || content.length < 3) && pageType !== 'post') {
+    return;
+  }
+  
+          // Extract username
+          let username = "unknown";
+          const usernameSelectors = [
+            'a.notranslate', 'a.x1i10hfl', 'div._aaqt', 'h2',
+            'span.x1lliihq', 'a[role="link"]', 'header a',
+            // New patterns
+            'a[tabindex="0"]', 
+            'div[style*="flex-direction: row"] a',
+            'h2 + div a', // Some profile links
+            'a[href*="/"]' // Any link potentially containing username
+          ];
+          
+          for (const selector of usernameSelectors) {
+            const usernameEl = el.querySelector(selector) || document.querySelector(selector);
+            if (usernameEl && usernameEl.innerText) {
+              const potentialUser = usernameEl.innerText.trim();
+              // Username validation - no spaces, reasonable length
+              if (potentialUser.length > 0 && 
+                  potentialUser.length < 40 && 
+                  !potentialUser.includes("\n") && 
+                  usernameEl.href && 
+                  usernameEl.href.includes("/")) {
+                username = potentialUser;
+                break;
               }
             }
           }
           
-          // Skip if content is too short or duplicate
-          if (!content || content.length < 5) {
-            return;
-          }
-          
-          // Create a fingerprint of the content for deduplication
-          const contentFingerprint = generateFingerprint('instagram', '', content);
-          if (processedContents.has(contentFingerprint)) {
-            return; // Skip duplicate content
-          }
-          processedContents.add(contentFingerprint);
-          
-          // Extract user information with multiple selector options
-          let user = "unknown";
-          const userSelectors = [
-            'header span > a', 
-            'header h2 a', 
-            '.zw3Ow a', 
-            '._aaqt',
-            'article header div > a',
-            '.x1i10hfl > div > span'
-          ];
-          
-          for (const selector of userSelectors) {
-            const userElement = article.querySelector(selector);
-            if (userElement && userElement.innerText) {
-              user = userElement.innerText.trim();
-              if (user.length > 0) break;
-            }
-          }
-          
-          // Check if verified with multiple badge selectors
-          const verifiedSelectors = [
-            'header span.coreSpriteVerifiedBadge', 
-            'svg[aria-label="Verified"]',
-            '.NYNLo'
-          ];
-          const isVerified = verifiedSelectors.some(selector => 
-            article.querySelector(selector) !== null
-          );
-          
-          // Check friendship status with multiple button selectors
-          const followButtonSelectors = [
-            'button:not(.following)',
-            'button._acan',
-            '.x1i10hfl:not([aria-disabled])'
-          ];
-          let isFriend = true; // Default to true, set to false if "Follow" button found
-          
-          for (const selector of followButtonSelectors) {
-            const followButton = article.querySelector(selector);
-            if (followButton && followButton.innerText === 'Follow') {
-              isFriend = false;
-              break;
-            }
-          }
-          
-          // Check for sponsored content with multiple indicators
-          const sponsoredTexts = ['Sponsored', 'Paid partnership with', 'Paid partnership'];
-          const isSponsored = sponsoredTexts.some(text => 
-            article.innerText.includes(text)
-          );
-          
-          // Get engagement metrics with reliable parsing
-          let likes = 0;
-          const likeSelectors = [
-            'section span > div:first-child',
-            'article section span',
-            '.zV_Nj span',
-            '._aacl._aaco'
-          ];
-          
-          for (const selector of likeSelectors) {
-            const likeElement = article.querySelector(selector);
-            if (likeElement && likeElement.innerText) {
-              likes = parseSocialCount(likeElement.innerText.trim());
-              if (likes > 0) break;
-            }
-          }
-          
-          // Extract images with improved selectors
+          // Extract image URLs
           const imageUrls = [];
-          const imageSelectors = [
-            'img[srcset]', 
-            'img[src*="instagram"]',
-            '.KL4Bh img',
-            '._aagt img'
-          ];
-          
-          for (const selector of imageSelectors) {
-            article.querySelectorAll(selector).forEach(img => {
-              if (img.src && !imageUrls.includes(img.src)) {
-                // Use srcset if available for better quality images
-                if (img.srcset) {
-                  const srcSetEntries = img.srcset.split(',');
-                  const largestImage = srcSetEntries[srcSetEntries.length - 1].trim().split(' ')[0];
-                  imageUrls.push(largestImage);
+          const imgElements = el.querySelectorAll('img') || document.querySelectorAll('img');
+          imgElements.forEach(img => {
+            if (img.src && !img.src.includes('profile_pic') && 
+                img.width > 100 && img.height > 100) {
+              // Use srcset if available for higher quality
+              if (img.srcset) {
+                const bestSrc = getBestImageSrc(img.srcset);
+                if (bestSrc) {
+                  imageUrls.push(bestSrc);
                 } else {
                   imageUrls.push(img.src);
                 }
+              } else {
+                imageUrls.push(img.src);
               }
-            });
+            }
+          });
+          
+          // Extract hashtags
+          const hashtags = [];
+          if (content) {
+            const hashtagMatches = content.match(/#[a-zA-Z0-9_]+/g);
+            if (hashtagMatches) {
+              hashtagMatches.forEach(tag => {
+                hashtags.push(tag.substring(1)); // Remove the # symbol
+              });
+            }
           }
           
-          // Extract hashtags and mentions
-          const hashtags = extractHashtags(content);
+          // Extract engagement metrics if available
+          let likes = 0;
+          let comments = 0;
           
-          const mentions = [];
-          const mentionMatches = content.match(/@[\w.]+/g);
-          if (mentionMatches) {
-            mentionMatches.forEach(mention => {
-              if (!mentions.includes(mention)) mentions.push(mention);
-            });
+          // Look for like count
+          const likeSelectors = [
+            'section span', 'section div a span', 'span._aacl', 
+            'div._aacl._aaco._aacw._aad0._aad6', 'a[href*="liked_by"]',
+            // New patterns
+            'div.x78zum5 span', 'div[role="button"] + a',
+            'div[role="button"]:has(svg) + div span',
+            'div.x1qjc9v5' // Like section container
+          ];
+          
+          for (const selector of likeSelectors) {
+            const likeEl = el.querySelector(selector) || document.querySelector(selector);
+            if (likeEl && likeEl.innerText) {
+              const likeText = likeEl.innerText.trim();
+              if (likeText.match(/\d+/)) {
+                const match = likeText.match(/(\d+[,.]?\d*[KkMm]?)/);
+                if (match && match[1]) {
+                  likes = parseSocialCount(match[1]);
+                  break;
+                }
+              }
+            }
           }
           
           // Create post object
-          posts.push({
-            content: content,
+          const post = {
+            content: content || "",
             platform: 'instagram',
-            user: user,
-            is_friend: isFriend,
+            original_user: username,
+            verified: false, // Instagram verification is hard to detect reliably
+            is_friend: false, // No reliable way to determine friendship on Instagram
             is_family: false,
-            verified: isVerified,
-            image_urls: imageUrls.slice(0, 3).join(','),
-            collected_at: new Date().toISOString(),
             likes: likes,
-            comments: 0, // Instagram doesn't show comment counts reliably
-            hashtags: hashtags.join(','),
-            mentions: mentions.join(','),
-            is_sponsored: isSponsored,
-            content_length: content.length
-          });
+            comments: comments,
+            shares: 0, // Instagram doesn't have shares
+            image_urls: imageUrls.join(','),
+            collected_at: new Date().toISOString(),
+            is_sponsored: content.toLowerCase().includes('paid partnership') || 
+                         el.innerText.toLowerCase().includes('sponsored'),
+            is_job_post: content.toLowerCase().includes('hiring') || 
+                         content.toLowerCase().includes('job opening'),
+            content_length: content ? content.length : 0,
+            hashtags: hashtags.join(',')
+          };
           
-          console.log(`Added Instagram post from ${user}`);
-        } catch (err) {
-          console.error(`Error processing Instagram post ${index}:`, err);
+          posts.push(post);
+          postCount++;
+          console.log(`Added Instagram post from ${username}${content ? ': "' + content.substring(0, 30) + '..."' : ''}`);
+        } catch (error) {
+          console.error(`Error processing Instagram post ${index}:`, error);
         }
       });
       
-      console.log(`Collected ${posts.length} Instagram posts from ${pageType} page`);
+      console.log(`Collected ${postCount} Instagram posts from ${pageType} page`);
       
-      // Send posts via background script if we collected any
+      // Send posts through the background script instead of making direct API calls
+      // This bypasses Content Security Policy restrictions
       if (posts.length > 0) {
-        // Rank and classify posts before sending
-        try {
-          if (window.pureFeed) {
-            console.log("Ranking and classifying posts with Pure Feed module...");
-            window.pureFeed.rankPosts(posts);
-          }
-        } catch (error) {
-          console.error("Error ranking posts:", error);
-        }
-        
-        console.log(`Sending ${posts.length} Instagram posts via background script`);
-        
-        // Get API settings from storage
-        chrome.storage.local.get(['apiKey', 'apiEndpoint'], function(result) {
-          const apiKey = result.apiKey;
-          const apiEndpoint = result.apiEndpoint || 'http://localhost:8000';
-          
-          // Use the standardized communicateWithAPI function
-          communicateWithAPI(`${apiEndpoint}/api/collect-posts/`, {
-            method: 'POST',
-            headers: { 'X-API-Key': apiKey },
-            body: {
-              platform: 'instagram',
-              posts: posts
-            }
-          })
+        // Use our standardized sendPostsToAPI function with improved logging and error handling
+        sendPostsToAPI(posts, 'instagram')
           .then(response => {
-            console.log("Successfully sent Instagram posts:", response);
+            console.log(`Successfully sent ${posts.length} Instagram posts:`, response);
             resolve(posts);
           })
           .catch(error => {
             console.error("Error sending Instagram posts:", error);
-            // Update connection error counters
-            connectionErrorCount++;
-            lastConnectionError = "Error communicating with background script";
-            
-            if (connectionErrorCount >= MAX_CONNECTION_ERRORS) {
-              console.error(`Too many connection errors (${connectionErrorCount}). Last error: ${lastConnectionError}`);
-            }
+            // Still resolve with posts since we collected them successfully
             resolve(posts);
           });
-        });
       } else {
+        console.log("No posts collected from Instagram");
         resolve([]);
       }
-    } catch (err) {
-      console.error("Fatal error in Instagram collection:", err);
-      resolve([]);
+    } catch (error) {
+      console.error("Error in collectInstagramPostElements:", error);
+      reject(error);
     }
   });
+}
+
+/**
+ * Helper function to get the best image source from srcset
+ * @param {string} srcset - The srcset attribute value
+ * @returns {string} - The best image source URL
+ */
+function getBestImageSrc(srcset) {
+  if (!srcset) return null;
+  
+  try {
+    // Parse the srcset into an array of {url, width} objects
+    const sources = srcset.split(',').map(src => {
+      const [url, width] = src.trim().split(' ');
+      return {
+        url: url,
+        width: width ? parseInt(width.replace('w', '')) : 0
+      };
+    });
+    
+    // Sort by width descending and take the highest resolution
+    sources.sort((a, b) => b.width - a.width);
+    return sources.length > 0 ? sources[0].url : null;
+  } catch (error) {
+    console.error("Error parsing srcset:", error);
+    return null;
+  }
 }
 
 // Detect Instagram page type
@@ -768,1459 +1722,273 @@ function parseSocialCount(text) {
     return Math.round(parseFloat(numericPart) * 1000);
   } else if (numericPart.includes('M') || numericPart.includes('m')) {
     return Math.round(parseFloat(numericPart) * 1000000);
-  } else {
+    } else {
     return parseInt(numericPart, 10) || 0;
   }
 }
 
-// Enhanced Facebook post collector
-function collectFacebookPosts() {
-  return new Promise((resolve, reject) => {
-    console.log("Starting Facebook post collection");
-    try {
-      const posts = [];
-      const processedUrls = new Set();
-      
-      // Try to find Facebook post elements - use the new selector system
-      const postElements = findElements('facebook', 'posts');
-      
-      console.log(`Found ${postElements.length} Facebook post elements`);
-      
-      // Process each post element
-      Array.from(postElements).forEach((el, index) => {
-        try {
-          // Extract content with various selectors
-          let content = "";
-          const contentSelectors = [
-            '[data-ad-comet-preview="message"]', 
-            '[data-ad-preview="message"]', 
-            '.xdj266r', 
-            '.x11i5rnm',
-            '.x1iorvi4',
-            'div[dir="auto"]'
-          ];
-          
-          for (const selector of contentSelectors) {
-            const contentEl = el.querySelector(selector);
-            if (contentEl && contentEl.innerText) {
-              content = contentEl.innerText.trim();
-              if (content.length > 0) break;
-            }
-          }
-          
-          // Skip if content is too short
-          if (!content || content.length < 5) {
-            return;
-          }
-          
-          // Extract user information
-          let user = "unknown";
-          const userSelectors = [
-            'h4 a', 
-            'h3 a', 
-            'a.x1i10hfl', 
-            '.x1heor9g a',
-            'a[role="link"] span'
-          ];
-          
-          for (const selector of userSelectors) {
-            const userEl = el.querySelector(selector);
-            if (userEl && userEl.innerText) {
-              user = userEl.innerText.trim();
-              if (user.length > 0) break;
-            }
-          }
-          
-          // Check if verified
-          let isVerified = false;
-          const verifiedSelectors = [
-            'svg[aria-label="Verified Account"]',
-            '.x6s0dn4 svg',
-            'svg circle'
-          ];
-          
-          for (const selector of verifiedSelectors) {
-            if (el.querySelector(selector)) {
-              isVerified = true;
-              break;
-            }
-          }
-          
-          // Check if friend
-          let isFriend = false;
-          // On Facebook it's hard to determine friendship status from DOM
-          // Most posts in feed are from friends, so default to true
-          isFriend = true;
-          
-          // Look for add friend buttons which indicate NOT a friend
-          const notFriendSelectors = [
-            'a[aria-label="Add friend"]',
-            'a[aria-label="Follow"]',
-            'button[aria-label="Add friend"]'
-          ];
-          
-          for (const selector of notFriendSelectors) {
-            if (el.querySelector(selector)) {
-              isFriend = false;
-              break;
-            }
-          }
-          
-          // Check if sponsored
-          let isSponsored = false;
-          const sponsoredSelectors = [
-            'span:contains("Sponsored")',
-            'a[aria-label="Sponsored"]',
-            'a[href^="#"]'
-          ];
-          
-          // Direct content check is more reliable
-          isSponsored = el.innerText.includes('Sponsored') || 
-                        el.innerText.includes('Paid partnership');
-          
-          // Extract engagement metrics if possible
-          let likes = 0;
-          let comments = 0;
-          let shares = 0;
-          
-          // Look for engagement numbers
-          const engagementText = el.innerText;
-          
-          // Try to find like counts
-          const likeMatches = engagementText.match(/(\d+[KkMm]?)\s+(like|likes|reaction|reactions)/i);
-          if (likeMatches && likeMatches[1]) {
-            likes = parseSocialCount(likeMatches[1]);
-          }
-          
-          // Try to find comment counts
-          const commentMatches = engagementText.match(/(\d+[KkMm]?)\s+(comment|comments)/i);
-          if (commentMatches && commentMatches[1]) {
-            comments = parseSocialCount(commentMatches[1]);
-          }
-          
-          // Extract image URLs if present
-          const imageUrls = [];
-          const images = el.querySelectorAll('img[src*="fbcdn"]');
-          images.forEach(img => {
-            if (img.src && img.width > 100) {
-              imageUrls.push(img.src);
-            }
-          });
-          
-          // Create post object
-          const post = {
-            content: content,
-            platform: 'facebook',
-            original_user: user,
-            verified: isVerified,
-            is_friend: isFriend,
-            is_family: false, // Not determinable from Facebook DOM
-            likes: likes,
-            comments: comments,
-            shares: shares,
-            image_urls: imageUrls.join(','),
-            collected_at: new Date().toISOString(),
-            is_sponsored: isSponsored,
-            is_job_post: content.toLowerCase().includes('hiring') || content.toLowerCase().includes('job opening'),
-            content_length: content.length
-          };
-          
-          posts.push(post);
-          console.log(`Added Facebook post from ${user}: "${content.substring(0, 50)}..."`);
-        } catch (error) {
-          console.error(`Error processing Facebook post ${index}:`, error);
-        }
-      });
-
-      console.log(`Collected ${posts.length} Facebook posts`);
-      
-      // Send posts through the background script instead of making direct API calls
-      // This bypasses Content Security Policy restrictions
-      if (posts.length > 0) {
-          // Rank and classify posts before sending
-          try {
-            if (window.pureFeed) {
-              console.log("Ranking and classifying Facebook posts with Pure Feed module...");
-              window.pureFeed.rankPosts(posts);
-            }
-          } catch (error) {
-            console.error("Error ranking Facebook posts:", error);
-          }
-          
-          // Get API settings from storage
-          chrome.storage.local.get(['apiKey', 'apiEndpoint'], function(result) {
-            const apiKey = result.apiKey;
-            const apiEndpoint = result.apiEndpoint || 'http://localhost:8000';
-            
-            console.log("Sending Facebook posts via background script");
-            
-            // Use the standardized communicateWithAPI function
-            communicateWithAPI(`${apiEndpoint}/api/collect-posts/`, {
-              method: 'POST',
-              headers: { 'X-API-Key': apiKey },
-              body: {
-                platform: 'facebook',
-                posts: posts
-              }
-            })
-            .then(response => {
-              console.log("Successfully sent Facebook posts:", response);
-              resolve(posts);
-            })
-            .catch(error => {
-              console.error("Error sending Facebook posts:", error);
-              // Still resolve with posts since we collected them successfully
-              resolve(posts);
-            });
-          });
-          return;
-        }
-
-        resolve(posts);
-      } catch (error) {
-        console.error("Error collecting Facebook posts:", error);
-        reject(error);
-      }
-  });
-}
-
-// Enhanced LinkedIn collector
-function collectLinkedInPosts() {
-  console.log("Starting LinkedIn post collection...");
-  const posts = [];
-  
+/**
+ * Collects Facebook posts from the current page
+ * @returns {Promise<Array>} - Promise resolving to array of posts
+ */
+async function collectFacebookPosts() {
   try {
-  // LinkedIn post containers
-  const postElements = document.querySelectorAll('.feed-shared-update-v2');
+    console.log('[Authentic] Starting Facebook post collection');
     
-    console.log(`Found ${postElements.length} potential LinkedIn posts`);
+    // Use the standardized infinite scroll for Facebook
+    const postsFound = await simulateInfiniteScroll({
+      maxScrollTime: 20000,  // 20 seconds max for Facebook
+      postSelector: '[role="article"]',
+      noNewPostsThreshold: 3
+    });
     
-    if (!postElements || postElements.length === 0) {
-      console.log("No LinkedIn posts found on page");
-      return [];
-    }
-  
-  postElements.forEach((el) => {
+    console.log(`[Authentic] Found ${postsFound} posts after scrolling, starting extraction`);
+    
+    const posts = [];
+    const processedIds = new Set();
+    
+    // Use the adaptive selector system for resilience
+    const postElements = findElements('facebook', 'posts');
+    
+    console.log(`[Authentic] Processing ${postElements.length} Facebook posts`);
+    
+    for (const postElement of postElements) {
       try {
-        if (!el) return; // Skip invalid elements
+        // Generate a stable ID for the post to prevent duplicates
+        const contentHash = generateContentHash(postElement.textContent);
         
-    const content = el.querySelector('.feed-shared-update-v2__description')?.innerText || "";
-    
-        // Skip posts with insufficient content
-        if (!content || content.length < 20) {
-          return;
+        if (processedIds.has(contentHash)) {
+          continue; // Skip duplicate posts
+        }
+        processedIds.add(contentHash);
+        
+        // Extract post content
+        const contentElements = postElement.querySelectorAll('[data-ad-comet-preview="message"], [data-ad-preview="message"], [dir="auto"]');
+        let content = '';
+        
+        for (const el of contentElements) {
+          // Skip elements that are too small or likely to be UI elements
+          if (el.textContent.length < 5) continue;
+          if (el.textContent.includes('Like') && el.textContent.includes('Comment') && el.textContent.length < 30) continue;
+          
+          content += el.textContent + ' ';
         }
         
-        // Extract user information safely
-        let user = "unknown";
-        try {
-    const userElement = el.querySelector('.feed-shared-actor__name');
-          user = userElement?.innerText?.trim() || "unknown";
-        } catch (err) {
-          console.warn("Error getting LinkedIn user:", err);
-        }
+        content = content.trim();
         
-        // Check for verified badge (Premium) safely
-        let isVerified = false;
-        try {
-          isVerified = el.querySelector('.premium-icon') !== null;
-        } catch (err) {
-          console.warn("Error detecting verified status:", err);
-        }
-    
-    // Enhanced connection status detection (1st, 2nd, 3rd)
-    let connectionDegree = 0;
-    let isFriend = false;
-    
-        try {
-    const connectionElement = el.querySelector('.feed-shared-actor__sub-description');
-    if (connectionElement) {
-      const connectionText = connectionElement.innerText;
-      
-      // Check for 1st-degree connection indicators
-      if (connectionText.includes('1st')) {
-        connectionDegree = 1;
-        isFriend = true;
-      } else if (connectionText.includes('2nd')) {
-        connectionDegree = 2;
-      } else if (connectionText.includes('3rd')) {
-        connectionDegree = 3;
-      }
-      
-      // Additional check for connections you follow
-      if (!isFriend && (
-          connectionText.includes('Following') || 
-          connectionText.includes('You follow') ||
-          el.querySelector('.feed-shared-actor__follow-button') !== null
-      )) {
-        isFriend = true;
-      }
-    }
-    
-    // Fallback check for connected status
-    if (!isFriend) {
-      const followButton = el.querySelector('.feed-shared-actor__follow-button');
-      if (followButton && (
-        followButton.innerText.includes('Following') || 
-        followButton.innerText.includes('Connected')
-      )) {
-        isFriend = true;
-      }
-          }
-        } catch (err) {
-          console.warn("Error detecting connection status:", err);
-    }
-    
-        // Process remaining post data with error handling...
-    let timestamp = '';
-        let likes = 0;
-        let comments = 0;
-        let imageUrls = [];
-        let hashtags = [];
-        let mentions = [];
-        let bizfluencerScore = 0;
-        let sentimentScore = 0;
-        let isJobPost = false;
+        // Skip posts with no meaningful content
+        if (content.length < 5) continue;
         
-        try {
-          // Extract timestamp
-    const timeElement = el.querySelector('.feed-shared-actor__sub-description time');
-    if (timeElement && timeElement.dateTime) {
-      timestamp = timeElement.dateTime;
-    }
-    
-    // Get engagement metrics
-    const reactionElement = el.querySelector('.social-details-social-counts__reactions-count');
-    if (reactionElement && reactionElement.innerText) {
-      const match = reactionElement.innerText.match(/\d+/);
-      if (match) likes = parseInt(match[0]);
-    }
-    
-    const commentElement = el.querySelector('.social-details-social-counts__comments-count');
-    if (commentElement && commentElement.innerText) {
-      const match = commentElement.innerText.match(/\d+/);
-      if (match) comments = parseInt(match[0]);
-    }
-    
-    // Extract image URLs
-    el.querySelectorAll('img').forEach(img => {
-      if (img.src && 
-          img.width > 100 && 
-          !img.src.includes('profile-pic') && 
-          !img.src.includes('profile-display-pic') && 
-          !imageUrls.includes(img.src)) {
-        imageUrls.push(img.src);
-      }
-    });
-    
-          // Extract hashtags and mentions
-    const hashtagMatches = content.match(/#[\w]+/g);
-    if (hashtagMatches) {
-      hashtagMatches.forEach(tag => {
-        if (!hashtags.includes(tag)) hashtags.push(tag);
-      });
-    }
-    
-    const mentionMatches = content.match(/@[\w.]+/g);
-    if (mentionMatches) {
-      mentionMatches.forEach(mention => {
-        if (!mentions.includes(mention)) mentions.push(mention);
-      });
-    }
-    
-    // Check for bizfluencer language
-    const bizfluencerWords = [
-      'synergy', 'disrupt', 'innovate', 'leverage', 'pivot', 'growth hacking', 
-      'thought leader', 'paradigm shift', 'bleeding edge', 'best practices', 'scalable', 
-      'next-level', 'move the needle', 'value add', 'actionable insights', 'ecosystem',
-      'drill down', 'low hanging fruit', 'empower', 'bandwidth', 'deliverable'
-    ];
-    
-    const lowerContent = content.toLowerCase();
-    
-    bizfluencerWords.forEach(word => {
-      const regex = new RegExp('\\b' + word + '\\b', 'gi');
-      const matches = lowerContent.match(regex);
-      if (matches) bizfluencerScore += matches.length;
-    });
-    
-    // Simple sentiment analysis
-          const positiveWords = ['good', 'great', 'excellent', 'amazing', 'love', 'best', 'happy'];
-          const negativeWords = ['bad', 'terrible', 'awful', 'hate', 'worst', 'sad', 'disappointed'];
-    
-    let positiveCount = 0;
-    let negativeCount = 0;
-    
-          positiveWords.forEach(word => {
-            const regex = new RegExp('\\b' + word + '\\b', 'gi');
-      const matches = lowerContent.match(regex);
-      if (matches) positiveCount += matches.length;
-    });
-    
-          negativeWords.forEach(word => {
-            const regex = new RegExp('\\b' + word + '\\b', 'gi');
-      const matches = lowerContent.match(regex);
-      if (matches) negativeCount += matches.length;
-    });
-    
-    // Calculate simple sentiment score (-1.0 to 1.0)
-    if (positiveCount > 0 || negativeCount > 0) {
-      sentimentScore = (positiveCount - negativeCount) / (positiveCount + negativeCount);
-    }
-    
-    // Check if it's a job posting
-          isJobPost = lowerContent.includes('hiring') || 
-                      lowerContent.includes('job opening') || 
-                      lowerContent.includes('apply now') ||
-                      lowerContent.includes('we are looking for') ||
-                      lowerContent.includes('job opportunity');
-        } catch (err) {
-          console.warn("Error processing LinkedIn post data:", err);
-        }
-    
+        // Extract image URLs if present
+        const imageElements = postElement.querySelectorAll('img[src*="scontent"]');
+        const imageUrls = Array.from(imageElements).map(img => img.src).filter(Boolean);
+        
+        // Detect if the post is an ad/sponsored content
+        const isSponsored = detectSponsoredPost(postElement, 'facebook');
+        
         // Create the post object
-        const formattedPost = {
+        posts.push({
+          platform: 'facebook',
           content: content,
-        platform: 'linkedin',
-          original_user: user,
-        verified: isVerified,
-          is_friend: isFriend,
-          is_family: false,
-          content_length: content.length,
-        likes: likes,
-        comments: comments,
-          timestamp: timestamp || '',
-        connection_degree: connectionDegree,
-        bizfluencer_score: bizfluencerScore,
-          sentiment_score: sentimentScore,
-          image_urls: imageUrls.join(','),
-          hashtags: hashtags.join(','),
-          mentions: mentions.join(','),
-          is_sponsored: false,
-          is_job_post: Boolean(isJobPost)
-        };
-        
-        posts.push(formattedPost);
-      } catch (err) {
-        console.error("Error processing LinkedIn post:", err);
-      }
-    });
-    
-    console.log(`Collected ${posts.length} LinkedIn posts`);
-    
-    // Send posts via background script instead of direct fetch
-    if (posts.length > 0) {
-      // Rank and classify posts before sending
-      try {
-        if (window.pureFeed) {
-          console.log("Ranking and classifying posts with Pure Feed module...");
-          window.pureFeed.rankPosts(posts);
-        }
-      } catch (error) {
-        console.error("Error ranking posts:", error);
-      }
-      
-      // Get API settings from storage
-      chrome.storage.local.get(['apiKey', 'apiEndpoint'], function(result) {
-        const apiKey = result.apiKey;
-        const apiEndpoint = result.apiEndpoint || 'http://localhost:8000';
-        
-        console.log("Sending LinkedIn posts via background script");
-        
-        // Use the standardized communicateWithAPI function
-        communicateWithAPI(`${apiEndpoint}/api/collect-posts/`, {
-          method: 'POST',
-          headers: { 'X-API-Key': apiKey },
-          body: {
-            platform: 'linkedin',
-            posts: posts
+          timestamp: new Date().toISOString(),
+          images: imageUrls,
+          isSponsored: isSponsored,
+          url: window.location.href,
+          metadata: {
+            contentHash,
+            hasReactions: postElement.querySelector('[aria-label*="reaction"]') !== null,
+            hasComments: postElement.querySelector('[aria-label*="comment"]') !== null
           }
-        })
+        });
+        
+      } catch (error) {
+        console.error('[Authentic] Error processing Facebook post:', error);
+      }
+    }
+    
+    console.log(`[Authentic] Successfully collected ${posts.length} Facebook posts`);
+    
+    // Use standardized function to send posts to API
+    if (posts.length > 0) {
+      return sendPostsToAPI(posts, 'facebook')
         .then(response => {
-          console.log("Successfully sent LinkedIn posts:", response);
+          console.log(`Successfully sent ${posts.length} Facebook posts:`, response);
+          return posts;
         })
         .catch(error => {
-          console.error("Error sending LinkedIn posts:", error);
+          console.error("Error sending Facebook posts:", error);
+          // Still return posts even if sending failed
+          return posts;
         });
-      });
     }
     
-  return posts;
-  } catch (err) {
-    console.error("Fatal error in LinkedIn collection:", err);
+    return posts;
+  } catch (error) {
+    console.error('[Authentic] Error collecting Facebook posts:', error);
     return [];
   }
 }
 
-// Add manual scan button functionality
-function injectScanButton() {
-  // Don't add multiple buttons
-  if (document.getElementById('authentic-scan-btn')) return;
-  
-  const buttonContainer = document.createElement('div');
-  buttonContainer.style.position = 'fixed';
-  buttonContainer.style.bottom = '20px';
-  buttonContainer.style.right = '20px';
-  buttonContainer.style.zIndex = '9999';
-  
-  const scanButton = document.createElement('button');
-  scanButton.id = 'authentic-scan-btn';
-  scanButton.innerText = 'Scan Feed';
-  scanButton.style.backgroundColor = '#4CAF50';
-  scanButton.style.color = 'white';
-  scanButton.style.border = 'none';
-  scanButton.style.padding = '10px 15px';
-  scanButton.style.borderRadius = '4px';
-  scanButton.style.cursor = 'pointer';
-  scanButton.style.fontWeight = 'bold';
-  
-  scanButton.addEventListener('click', () => {
-    // Detect which platform we're on and run the appropriate collector
-    const url = window.location.href;
-    let posts = [];
+/**
+ * Collects LinkedIn posts from the current page
+ * @returns {Promise<Array>} - Promise resolving to array of posts
+ */
+async function collectLinkedInPosts() {
+  try {
+    console.log('[Authentic] Starting LinkedIn post collection');
     
-    if (url.includes('instagram.com')) {
-      posts = collectWithRateLimitProtection('Instagram', () => collectInstagramPosts());
-      alert(`Scanned ${posts.length} Instagram posts!`);
-    } else if (url.includes('facebook.com')) {
-      posts = collectWithRateLimitProtection('Facebook', () => collectFacebookPosts());
-      alert(`Scanned ${posts.length} Facebook posts!`);
-    } else if (url.includes('linkedin.com')) {
-      posts = collectWithRateLimitProtection('LinkedIn', () => collectLinkedInPosts());
-      alert(`Scanned ${posts.length} LinkedIn posts!`);
-    } else {
-      alert('Not on a supported social platform.');
-    }
-  });
-  
-  buttonContainer.appendChild(scanButton);
-  document.body.appendChild(buttonContainer);
-}
-
-// Send a message to background script on load to check connection
-// Use the retry-enabled sendMessage function
-sendMessageWithRetry({ action: 'checkConnection' })
-  .then(response => {
-    if (response && response.status === 'connected') {
-      console.log('Connection to background script established');
-      
-      // Auto-detect platform and run appropriate collector with try-catch protection
-  const url = window.location.href;
-    setTimeout(() => {
-        try {
-          if (url.includes('instagram.com')) {
-      collectWithRateLimitProtection('Instagram', () => collectInstagramPosts());
-  } else if (url.includes('facebook.com')) {
-      collectWithRateLimitProtection('Facebook', () => collectFacebookPosts());
-  } else if (url.includes('linkedin.com')) {
-      collectWithRateLimitProtection('LinkedIn', () => collectLinkedInPosts());
+    // Use the standardized infinite scroll for LinkedIn
+    const postsFound = await simulateInfiniteScroll({
+      maxScrollTime: 25000,  // 25 seconds max for LinkedIn
+      postSelector: '.feed-shared-update-v2',
+      noNewPostsThreshold: 3,
+      pauseInterval: 4000,  // LinkedIn needs more time to load content
+      pauseDuration: 2000
+    });
+    
+    console.log(`[Authentic] Found ${postsFound} posts after scrolling, starting extraction`);
+    
+    const posts = [];
+    const processedIds = new Set();
+    
+    // Use the adaptive selector system for resilience
+    const postElements = findElements('linkedin', 'posts');
+    
+    console.log(`[Authentic] Processing ${postElements.length} LinkedIn posts`);
+    
+    for (const postElement of postElements) {
+      try {
+        // Generate a stable ID for the post to prevent duplicates
+        const contentHash = generateContentHash(postElement.textContent);
+        
+        if (processedIds.has(contentHash)) {
+          continue; // Skip duplicate posts
+        }
+        processedIds.add(contentHash);
+        
+        // Extract post content
+        const contentElements = postElement.querySelectorAll('.feed-shared-update-v2__description, .feed-shared-text, .break-words');
+        let content = '';
+        
+        for (const el of contentElements) {
+          // Skip elements that are too small or likely to be UI elements
+          if (el.textContent.length < 5) continue;
+          
+          content += el.textContent + ' ';
+        }
+        
+        content = content.trim();
+        
+        // Skip posts with no meaningful content
+        if (content.length < 5) continue;
+        
+        // Extract image URLs if present
+        const imageElements = postElement.querySelectorAll('img[src*="media.licdn.com"]');
+        const imageUrls = Array.from(imageElements).map(img => img.src).filter(Boolean);
+        
+        // Detect if the post is an ad/sponsored content
+        const isSponsored = detectSponsoredPost(postElement, 'linkedin');
+        
+        // Create the post object
+        posts.push({
+          platform: 'linkedin',
+          content: content,
+          timestamp: new Date().toISOString(),
+          images: imageUrls,
+          isSponsored: isSponsored,
+          url: window.location.href,
+          metadata: {
+            contentHash,
+            hasComments: postElement.querySelector('.social-details-social-counts__comments-count') !== null,
+            hasReactions: postElement.querySelector('.social-details-social-counts__reactions-count') !== null
           }
-        } catch (e) {
-          console.error('Error running initial collection:', e);
-        }
-      }, 2000);  // Increased delay to ensure page is fully loaded
-    } else {
-      console.warn('Background connection check returned unexpected result:', response);
-    }
-  })
-  .catch(error => {
-    console.error('Failed to establish connection to background script:', error);
-  })
-  .finally(() => {
-    // Always try to inject the scan button, regardless of connection status
-    try {
-  injectScanButton();
-    } catch (e) {
-      console.error('Error injecting scan button:', e);
-    }
-});
-
-// Also run scan when scrolling stops to capture new content
-let isScrolling;
-window.addEventListener('scroll', function() {
-  // Clear our timeout throughout the scroll
-  window.clearTimeout(isScrolling);
-
-  // Set a timeout to run after scrolling ends
-  isScrolling = setTimeout(function() {
-    const url = window.location.href;
-    // Use try-catch to prevent context invalidation errors
-    try {
-    if (url.includes('instagram.com')) {
-      collectWithRateLimitProtection('Instagram', () => collectInstagramPosts());
-    } else if (url.includes('facebook.com')) {
-      collectWithRateLimitProtection('Facebook', () => collectFacebookPosts());
-    } else if (url.includes('linkedin.com')) {
-      collectWithRateLimitProtection('LinkedIn', () => collectLinkedInPosts());
+        });
+        
+      } catch (error) {
+        console.error('[Authentic] Error processing LinkedIn post:', error);
       }
-    } catch (e) {
-      console.error('Error initiating collection after scroll:', e);
-    }
-  }, 300);
-}, false);
-
-// Educational component for manipulative patterns
-const MANIPULATIVE_PATTERNS = {
-  'urgency': {
-    description: 'Creates artificial time pressure to drive quick decisions',
-    examples: ['Limited time only', 'Ending soon', 'Last chance', 'Don\'t miss out', 'Act now'],
-    impact: 'Bypasses rational decision-making, creates anxiety'
-  },
-  'scarcity': {
-    description: 'Suggests limited availability to increase perceived value',
-    examples: ['Only 3 left', 'Limited stock', 'While supplies last', 'Exclusive offer', 'Rare opportunity'],
-    impact: 'Triggers fear of missing out (FOMO), creates competitive urgency'
-  },
-  'social_proof': {
-    description: 'Uses popularity to validate choices and encourage conformity',
-    examples: ['Thousands of satisfied customers', 'Best-selling', 'Join millions', 'Everyone\'s talking about'],
-    impact: 'Creates herd mentality, outsources critical thinking to the crowd'
-  },
-  'authority': {
-    description: 'Uses perceived expertise or status to establish credibility',
-    examples: ['Expert approved', 'Doctor recommended', 'Scientifically proven', 'Official partner'],
-    impact: 'Bypasses skepticism, borrows trustworthiness'
-  },
-  'emotional_manipulation': {
-    description: 'Triggers strong emotions to override rational thinking',
-    examples: ['Heartbreaking', 'Shocking', 'Outrageous', 'You won\'t believe', 'Faith in humanity restored'],
-    impact: 'Hijacks emotional responses, creates engagement through outrage or sentimentality'
-  },
-  'false_dichotomy': {
-    description: 'Presents only two options when more exist',
-    examples: ['Either you\'re with us or against us', 'The only solution', 'There is no alternative'],
-    impact: 'Eliminates nuance, forces black-and-white thinking'
-  },
-  'information_gap': {
-    description: 'Creates curiosity by promising unknown information',
-    examples: ['You won\'t believe what happens next', 'The secret to', 'What they don\'t want you to know'],
-    impact: 'Exploits curiosity, often delivers disappointing content'
-  },
-  'bizfluencer': {
-    description: 'Corporate jargon that signals belonging but lacks substance',
-    examples: ['Synergy', 'Leverage', 'Paradigm shift', 'Disrupt', 'Circle back', 'Deep dive'],
-    impact: 'Creates illusion of expertise, masks lack of specific information'
-  }
-};
-
-// Function to detect manipulative patterns in content
-function detectManipulativePatterns(text) {
-  if (!text) return [];
-  
-  const detectedPatterns = [];
-  const lowerText = text.toLowerCase();
-  
-  // Check for each pattern
-  Object.entries(MANIPULATIVE_PATTERNS).forEach(([patternKey, patternData]) => {
-    let found = false;
-    
-    // Check each example phrase
-    patternData.examples.forEach(example => {
-      if (lowerText.includes(example.toLowerCase())) {
-        found = true;
-      }
-    });
-    
-    // For bizfluencer, check more thoroughly
-    if (patternKey === 'bizfluencer' && !found) {
-      const bizfluencerWords = ['synergy', 'disrupt', 'innovate', 'leverage', 'pivot', 'growth hacking', 
-        'thought leader', 'paradigm shift', 'bleeding edge', 'best practices', 'scalable'];
-      
-      bizfluencerWords.forEach(word => {
-        if (lowerText.includes(word.toLowerCase())) {
-          found = true;
-        }
-      });
     }
     
-    if (found) {
-      detectedPatterns.push({
-        type: patternKey,
-        info: patternData
-      });
-    }
-  });
-  
-  return detectedPatterns;
-}
-
-// Function to get educational insights for detected patterns
-function getEducationalInsights(patterns) {
-  if (!patterns || patterns.length === 0) {
-    return {
-      html: '<p>No manipulative patterns detected in this content.</p>',
-      count: 0
-    };
-  }
-  
-  let html = `<div class="manipulation-insights">
-    <h4>Detected Patterns (${patterns.length})</h4>
-    <ul>`;
-  
-  patterns.forEach(pattern => {
-    html += `
-      <li>
-        <strong>${pattern.type.replace('_', ' ').toUpperCase()}</strong>
-        <p>${pattern.info.description}</p>
-        <p><em>Impact: ${pattern.info.impact}</em></p>
-      </li>
-    `;
-  });
-  
-  html += '</ul></div>';
-  
-  return {
-    html: html,
-    count: patterns.length
-  };
-}
-
-// Add educational insights to the ML analysis
-function analyzeContentWithML(text, platform) {
-    const result = {
-        sentiment_score: 0,
-        sentiment_indicators: { positive: 0, negative: 0 },
-        toxicity_score: 0,
-        engagement_prediction: 0,
-        automated_category: '',
-        bizfluencer_score: 0,
-        manipulative_patterns: []
-    };
+    console.log(`[Authentic] Successfully collected ${posts.length} LinkedIn posts`);
     
-    if (!text || text.length < 3) {
-        return result;
-    }
-    
-    // Detect manipulative patterns
-    result.manipulative_patterns = detectManipulativePatterns(text);
-    
-    // Simplified sentiment analysis
-    const positiveWords = [
-        'good', 'great', 'excellent', 'amazing', 'wonderful', 'fantastic', 'terrific',
-        'outstanding', 'exceptional', 'impressive', 'remarkable', 'splendid', 'perfect',
-        'happy', 'glad', 'joy', 'delighted', 'pleased', 'satisfied', 'content',
-        'love', 'adore', 'like', 'enjoy', 'appreciate', 'admire', 'praise'
-    ];
-    
-    const negativeWords = [
-        'bad', 'terrible', 'horrible', 'awful', 'dreadful', 'poor', 'inferior',
-        'disappointing', 'unpleasant', 'unsatisfactory', 'inadequate', 'substandard',
-        'sad', 'unhappy', 'depressed', 'miserable', 'gloomy', 'heartbroken',
-        'hate', 'dislike', 'despise', 'detest', 'loathe', 'abhor'
-    ];
-    
-    // Business buzzwords for LinkedIn content
-    const bizfluencerWords = [
-        'synergy', 'leverage', 'paradigm', 'disrupt', 'innovative', 'transform',
-        'strategic', 'empower', 'optimize', 'seamless', 'scalable', 'mindset',
-        'actionable', 'deliverable', 'thought leader', 'circle back', 'deep dive',
-        'best practice', 'ecosystem', 'value add', 'touch base', 'low-hanging fruit',
-        'agile', 'lean', 'pivot', 'bandwidth', 'incentivize'
-    ];
-
-    // Toxicity indicators
-    const toxicityWords = [
-        'offensive', 'inappropriate', 'rude', 'vulgar', 'explicit',
-        'dangerous', 'harmful', 'unsafe', 'risky',
-        'scam', 'fake', 'fraud', 'hoax', 'misleading', 'deceptive'
-    ];
-    
-    // Category detection - simplified topic classification
-    const categories = {
-        'travel': ['travel', 'vacation', 'trip', 'beach', 'destination', 'hotel', 'flight'],
-        'food': ['food', 'recipe', 'cooking', 'meal', 'restaurant', 'delicious', 'eat'],
-        'health': ['health', 'wellness', 'medical', 'doctor', 'hospital', 'medicine'],
-        'technology': ['tech', 'technology', 'computer', 'software', 'hardware', 'app'],
-        'business': ['business', 'company', 'startup', 'entrepreneur', 'industry', 'work'],
-        'personal': ['life', 'personal', 'reflection', 'journey', 'experience', 'story']
-    };
-    
-    // Clean and normalize the text
-    const normalizedText = text.toLowerCase();
-    const words = normalizedText.split(/\s+/);
-    
-    // Calculate sentiment score
-    let positiveCount = 0;
-    let negativeCount = 0;
-    
-    words.forEach(word => {
-        if (positiveWords.some(pw => word.includes(pw))) {
-            positiveCount++;
-        }
-        if (negativeWords.some(nw => word.includes(nw))) {
-            negativeCount++;
-        }
-    });
-    
-    // Calculate overall sentiment
-    const sentimentCount = positiveCount + negativeCount;
-    if (sentimentCount > 0) {
-        result.sentiment_score = (positiveCount - negativeCount) / sentimentCount;
-    }
-    
-    result.sentiment_indicators.positive = positiveCount;
-    result.sentiment_indicators.negative = negativeCount;
-    
-    // Calculate bizfluencer score (particularly for LinkedIn)
-    if (platform === 'linkedin') {
-        let buzzwordCount = 0;
-        words.forEach(word => {
-            if (bizfluencerWords.some(bw => normalizedText.includes(bw))) {
-                buzzwordCount++;
-            }
+    // Use standardized function to send posts to API
+    if (posts.length > 0) {
+      return sendPostsToAPI(posts, 'linkedin')
+        .then(response => {
+          console.log(`Successfully sent ${posts.length} LinkedIn posts:`, response);
+          return posts;
+        })
+        .catch(error => {
+          console.error("Error sending LinkedIn posts:", error);
+          // Still return posts even if sending failed
+          return posts;
         });
-        
-        // Normalize bizfluencer score (0-10)
-        result.bizfluencer_score = Math.min(10, Math.round((buzzwordCount / words.length) * 100));
     }
     
-    // Calculate toxicity score
-    let toxicityCount = 0;
-    toxicityWords.forEach(toxic => {
-        if (normalizedText.includes(toxic)) {
-            toxicityCount++;
-        }
-    });
-    
-    // Normalize toxicity score (0-1)
-    result.toxicity_score = Math.min(1, toxicityCount / 10);
-    
-    // Determine the primary category
-    let topCategory = '';
-    let topCategoryScore = 0;
-    
-    Object.entries(categories).forEach(([category, keywords]) => {
-        let categoryScore = 0;
-        keywords.forEach(keyword => {
-            if (normalizedText.includes(keyword)) {
-                categoryScore++;
-            }
-        });
-        
-        if (categoryScore > topCategoryScore) {
-            topCategoryScore = categoryScore;
-            topCategory = category;
-        }
-    });
-    
-    if (topCategoryScore > 0) {
-        result.automated_category = topCategory;
-    }
-    
-    // Predict engagement based on length, sentiment, and other factors
-    const lengthFactor = Math.min(1, 1000 / Math.max(100, text.length));
-    const sentimentFactor = (result.sentiment_score + 1) / 2; // normalize to 0-1
-    const engagementBase = (platform === 'instagram') ? 0.7 : (platform === 'facebook' ? 0.6 : 0.5);
-    
-    result.engagement_prediction = engagementBase * lengthFactor * sentimentFactor;
-    
-    return result;
-}
-
-// Helper functions
-
-// Extract hashtags from content
-function extractHashtags(content) {
-  if (!content) return [];
-    
-  const hashtagMatches = content.match(/#[\w\u0590-\u05fe\u0600-\u06ff\u0750-\u077f\u1100-\u11ff\u3130-\u3185\uac00-\ud7af\u3040-\u30ff\u4e00-\u9fff]+/g);
-    
-  if (hashtagMatches) {
-    return Array.from(new Set(hashtagMatches));
-    }
-    
-  return [];
-}
-
-// Parse Facebook counts like "1K" or "1.5K"
-function parseFacebookCount(countText) {
-    if (!countText) return 0;
-    
-    try {
-        if (countText.includes('K')) {
-            return Math.round(parseFloat(countText.replace('K', '')) * 1000);
-        } else if (countText.includes('M')) {
-            return Math.round(parseFloat(countText.replace('M', '')) * 1000000);
-        } else {
-            return parseInt(countText) || 0;
-        }
-    } catch (e) {
-        return 0;
-    }
-}
-
-// Modified message listener to respond with success: true
-chrome.runtime.onMessage.addListener(function(request, sender, sendResponse) {
-  if (request.action === 'collectPosts') {
-    try {
-      // Check server first
-      checkServerAvailability(function(available, apiEndpoint, apiKey) {
-        if (!available) {
-          sendResponse({ 
-            success: false, 
-            message: 'Server unavailable. Cannot collect posts.' 
-          });
-          return;
-        }
-        
-        const platform = request.platform;
-        
-        // Apply data preferences to collection
-        const dataPreferences = request.settings && request.settings.dataPreferences ? 
-          request.settings.dataPreferences : {
-            collectContent: true,
-            collectEngagement: true,
-            collectUsers: true,
-            collectHashtags: true,
-            collectLocalML: true
-          };
-        
-        // Collect posts based on platform - handle async/promise based collection
-        let postsPromise;
-        
-        if (platform === 'instagram') {
-          postsPromise = collectInstagramPosts(dataPreferences);
-        } else if (platform === 'facebook') {
-          postsPromise = collectFacebookPosts(dataPreferences);
-        } else if (platform === 'linkedin') {
-          postsPromise = collectLinkedInPosts(dataPreferences);
-        } else {
-          postsPromise = Promise.resolve([]);
-        }
-        
-        // Handle the promise to get posts
-        Promise.resolve(postsPromise).then(posts => {
-          sendResponse({ 
-            success: true, 
-            posts: posts,
-            count: posts.length
-          });
-        }).catch(error => {
-          console.error('Error collecting posts:', error);
-          sendResponse({ 
-            success: false, 
-            error: error.message 
-          });
-        });
-      });
-    } catch (error) {
-      console.error('Error in collect posts handler:', error);
-      sendResponse({ 
-        success: false, 
-        error: error.message 
-      });
-    }
-    
-    // Return true to indicate we'll send a response asynchronously
-    return true;
+    return posts;
+  } catch (error) {
+    console.error('[Authentic] Error collecting LinkedIn posts:', error);
+    return [];
   }
-});
+}
 
 /**
- * Send a message to the background script with retry capability
- * 
- * @param {Object} message - The message to send to the background script
- * @param {number} maxRetries - Maximum number of retry attempts (default: 3)
- * @param {number} retryDelay - Delay between retries in ms (default: 1000)
- * @returns {Promise} - Resolves with the response from the background script
+ * Utility function to detect sponsored/ad posts
+ * @param {Element} postElement - DOM element of the post
+ * @param {string} platform - Social media platform (facebook, instagram, linkedin)
+ * @returns {boolean} - Whether the post is likely sponsored content
  */
-function sendMessageWithRetry(message, maxRetries = 3, retryDelay = 1000) {
-  console.log(`Sending message to background script (attempt 1/${maxRetries + 1}):`, message.action);
-  
-  return new Promise((resolve, reject) => {
-    let currentRetry = 0;
-    
-    const sendMessage = () => {
-      chrome.runtime.sendMessage(message, (response) => {
-        // Check if there was an error communicating with the background script
-        if (chrome.runtime.lastError) {
-          const errorMsg = chrome.runtime.lastError.message || "Unknown error";
-          console.error(`Error sending message (attempt ${currentRetry + 1}/${maxRetries + 1}):`, errorMsg);
-          
-          // Check if we should retry
-          if (currentRetry < maxRetries) {
-            currentRetry++;
-            console.log(`Retrying in ${retryDelay}ms (attempt ${currentRetry + 1}/${maxRetries + 1})...`);
-            
-            // Wait and retry
-            setTimeout(sendMessage, retryDelay);
-            return;
-          }
-          
-          // Maximum retries reached, reject the promise
-          reject(new Error(`Failed to send message after ${maxRetries + 1} attempts: ${errorMsg}`));
-          return;
-        }
-        
-        // No error, resolve with the response
-        resolve(response);
-      });
-    };
-    
-    // Start the first attempt
-    sendMessage();
-  });
-}
-
-// Function to start the auto-scanning process
-function startAutoScanning() {
-  // Check if auto-scanning is already active
-  if (autoScanningActive) {
-    console.log("Auto-scanning is already active");
-    return;
-  }
-  
-  // Clear any existing timer just in case
-  if (autoScanTimer) {
-    clearInterval(autoScanTimer);
-  }
-  
-  console.log(`Starting auto-scanning with interval of ${autoScanInterval/1000} seconds`);
-  
-  autoScanningActive = true;
-  
-  // Run initial scan immediately
-  performAutoScan();
-  
-  // Set up recurring timer for scanning
-  autoScanTimer = setInterval(performAutoScan, autoScanInterval);
-  
-  // Add visual indicator for auto-scanning
-  showAutoScanIndicator();
-}
-
-// Function to stop auto-scanning
-function stopAutoScanning() {
-  if (autoScanTimer) {
-    clearInterval(autoScanTimer);
-    autoScanTimer = null;
-  }
-  
-  autoScanningActive = false;
-  console.log("Auto-scanning stopped");
-  
-  // Remove visual indicator
-  const indicator = document.getElementById('authentic-autoscan-indicator');
-  if (indicator) {
-    indicator.remove();
-  }
-}
-
-// Function to actually perform the auto-scan
-function performAutoScan() {
-  // Don't scan if disabled
-  if (!autoScanEnabled) {
-    console.log("Auto-scanning is disabled, skipping scan");
-    return;
-  }
-  
-  // Don't scan if the user is inactive (tab not visible)
-  if (document.hidden) {
-    console.log("Page not visible, skipping auto-scan");
-    return;
-  }
-  
-  // Check cooldown period
-  const currentTime = Date.now();
-  if (currentTime - lastAutoScanTime < autoScanInterval * 0.5) {
-    console.log("Auto-scan cooldown period active, skipping scan");
-    return;
-  }
-  
-  console.log("Performing auto-scan...");
-  lastAutoScanTime = currentTime;
-  
-  // Detect which platform we're on
-  const url = window.location.href;
-  
-  // Store the scroll position so we can restore it later
-  const scrollPosition = window.scrollY;
-  
-  // Add a flashing effect to the indicator to show scanning is in progress
-  const indicator = document.getElementById('authentic-autoscan-indicator');
-  if (indicator) {
-    indicator.classList.add('scanning');
-  }
-  
-  // Helper function to restore state after scanning
-  const finishScan = (success, posts = []) => {
-    // Restore scroll position
-    window.scrollTo(0, scrollPosition);
-    
-    // Update indicator
-    if (indicator) {
-      indicator.classList.remove('scanning');
+function detectSponsoredPost(postElement, platform) {
+  try {
+    switch (platform) {
+      case 'facebook':
+        // Check for sponsored text
+        const fbSponsoredTexts = ['Sponsored', 'Suggested for you', 'Recommended', 'Suggested Page'];
+        const fbText = postElement.textContent;
+        return fbSponsoredTexts.some(text => fbText.includes(text)) || 
+               !!postElement.querySelector('a[href*="ads"]') ||
+               !!postElement.querySelector('[aria-label*="sponsor"]');
       
-      if (success) {
-        indicator.classList.add('success');
-        setTimeout(() => {
-          indicator.classList.remove('success');
-        }, 2000);
-        
-        // Reset failure counter on success
-        consecutiveScanFailures = 0;
-        
-        // Notify background script if posts were found
-        if (posts.length > 0) {
-          let platform = 'Unknown';
-          if (url.includes('instagram.com')) platform = 'Instagram';
-          else if (url.includes('facebook.com')) platform = 'Facebook';
-          else if (url.includes('linkedin.com')) platform = 'LinkedIn';
-          
-          chrome.runtime.sendMessage({
-            action: 'autoScanComplete',
-            postsFound: posts.length,
-            platform: platform
-          });
-        }
-      } else {
-        indicator.classList.add('failure');
-        setTimeout(() => {
-          indicator.classList.remove('failure');
-        }, 2000);
-        
-        // Increment failure counter
-        consecutiveScanFailures++;
-        
-        // If too many consecutive failures, stop auto-scanning
-        if (consecutiveScanFailures >= MAX_SCAN_FAILURES) {
-          console.error("Too many auto-scan failures, disabling auto-scan");
-          stopAutoScanning();
-          
-          // Show notification to user
-          chrome.runtime.sendMessage({
-            action: 'showNotification',
-            title: 'Auto-Scanning Disabled',
-            message: 'Auto-scanning has been disabled due to multiple failures. You can re-enable it from the extension popup.'
-          });
-        }
-      }
+      case 'instagram':
+        // Check for sponsored text
+        const igSponsoredTexts = ['Sponsored', 'Paid partnership'];
+        const igText = postElement.textContent;
+        return igSponsoredTexts.some(text => igText.includes(text)) ||
+               !!postElement.querySelector('a[href*="ads"]');
+      
+      case 'linkedin':
+        // Check for sponsored text or elements
+        const liSponsoredTexts = ['Promoted', 'Sponsored', 'Ad'];
+        const liText = postElement.textContent;
+        return liSponsoredTexts.some(text => liText.includes(text)) ||
+               !!postElement.querySelector('.feed-shared-actor__sub-description') &&
+               postElement.querySelector('.feed-shared-actor__sub-description').textContent.includes('Promoted');
+      
+      default:
+        return false;
     }
-  };
-  
-  // First check if server is available
-  checkServerAvailability(function(available, apiEndpoint, apiKey) {
-    if (!available) {
-      console.error("Server not available, skipping auto-scan");
-      finishScan(false);
-      return;
-    }
-    
-    // Perform platform-specific scan
-    let scanPromise;
-    
-    try {
-      if (url.includes('instagram.com')) {
-        // Scroll down a bit to load more content
-        window.scrollTo(0, window.innerHeight * 2);
-        
-        setTimeout(() => {
-          scanPromise = collectWithRateLimitProtection('Instagram', () => collectInstagramPosts());
-          scanPromise.then(posts => {
-            console.log(`Auto-scanned ${posts.length} Instagram posts`);
-            finishScan(true, posts);
-          }).catch(error => {
-            console.error("Error during Instagram auto-scan:", error);
-            finishScan(false);
-          });
-        }, 1000); // Wait for content to load after scrolling
-      } 
-      else if (url.includes('facebook.com')) {
-        // Scroll down a bit to load more content
-        window.scrollTo(0, window.innerHeight * 2);
-        
-        setTimeout(() => {
-          scanPromise = collectWithRateLimitProtection('Facebook', () => collectFacebookPosts());
-          scanPromise.then(posts => {
-            console.log(`Auto-scanned ${posts.length} Facebook posts`);
-            finishScan(true, posts);
-          }).catch(error => {
-            console.error("Error during Facebook auto-scan:", error);
-            finishScan(false);
-          });
-        }, 1000); // Wait for content to load after scrolling
-      } 
-      else if (url.includes('linkedin.com')) {
-        // Scroll down a bit to load more content
-        window.scrollTo(0, window.innerHeight * 2);
-        
-        setTimeout(() => {
-          scanPromise = collectWithRateLimitProtection('LinkedIn', () => collectLinkedInPosts());
-          scanPromise.then(posts => {
-            console.log(`Auto-scanned ${posts.length} LinkedIn posts`);
-            finishScan(true, posts);
-          }).catch(error => {
-            console.error("Error during LinkedIn auto-scan:", error);
-            finishScan(false);
-          });
-        }, 1000); // Wait for content to load after scrolling
-      }
-      else {
-        console.log("Not on a supported social platform for auto-scanning");
-        finishScan(false);
-      }
-    } catch (error) {
-      console.error("Error during auto-scan:", error);
-      finishScan(false);
-    }
-  });
+  } catch (error) {
+    console.error(`[Authentic] Error detecting sponsored content for ${platform}:`, error);
+    return false;
+  }
 }
 
-// Function to show a visual indicator for auto-scanning
-function showAutoScanIndicator() {
-  // Don't add multiple indicators
-  if (document.getElementById('authentic-autoscan-indicator')) return;
+/**
+ * Generate a content hash to uniquely identify posts
+ * @param {string} content - Post content to hash
+ * @returns {string} - Hash of the content
+ */
+function generateContentHash(content) {
+  // Simple hash function for content fingerprinting
+  let hash = 0;
+  if (!content || content.length === 0) return hash.toString();
   
-  const indicatorContainer = document.createElement('div');
-  indicatorContainer.id = 'authentic-autoscan-indicator';
-  indicatorContainer.style.position = 'fixed';
-  indicatorContainer.style.bottom = '80px';
-  indicatorContainer.style.right = '20px';
-  indicatorContainer.style.zIndex = '9999';
-  indicatorContainer.style.backgroundColor = 'rgba(0, 0, 0, 0.7)';
-  indicatorContainer.style.color = 'white';
-  indicatorContainer.style.padding = '5px 10px';
-  indicatorContainer.style.borderRadius = '4px';
-  indicatorContainer.style.fontSize = '12px';
-  indicatorContainer.style.transition = 'background-color 0.3s';
-  indicatorContainer.style.cursor = 'pointer';
-  indicatorContainer.style.display = 'flex';
-  indicatorContainer.style.alignItems = 'center';
-  indicatorContainer.style.gap = '5px';
+  for (let i = 0; i < content.length; i++) {
+    const char = content.charCodeAt(i);
+    hash = ((hash << 5) - hash) + char;
+    hash = hash & hash; // Convert to 32bit integer
+  }
   
-  // Add a small icon
-  const icon = document.createElement('div');
-  icon.innerHTML = '🔄';
-  icon.style.display = 'inline-block';
-  
-  // Add text
-  const text = document.createElement('span');
-  text.innerText = 'Auto-Scanning Active';
-  
-  // Add a toggle switch
-  const toggleSwitch = document.createElement('div');
-  toggleSwitch.style.width = '30px';
-  toggleSwitch.style.height = '16px';
-  toggleSwitch.style.backgroundColor = '#4CAF50';
-  toggleSwitch.style.borderRadius = '8px';
-  toggleSwitch.style.position = 'relative';
-  toggleSwitch.style.marginLeft = '10px';
-  toggleSwitch.style.cursor = 'pointer';
-  
-  const toggleSlider = document.createElement('div');
-  toggleSlider.style.width = '12px';
-  toggleSlider.style.height = '12px';
-  toggleSlider.style.backgroundColor = 'white';
-  toggleSlider.style.borderRadius = '50%';
-  toggleSlider.style.position = 'absolute';
-  toggleSlider.style.top = '2px';
-  toggleSlider.style.right = '2px';
-  toggleSlider.style.transition = 'all 0.3s';
-  
-  toggleSwitch.appendChild(toggleSlider);
-  
-  // Add click event to toggle auto-scanning
-  toggleSwitch.addEventListener('click', function() {
-    autoScanEnabled = !autoScanEnabled;
-    
-    if (autoScanEnabled) {
-      toggleSwitch.style.backgroundColor = '#4CAF50';
-      toggleSlider.style.right = '2px';
-      toggleSlider.style.left = 'auto';
-      text.innerText = 'Auto-Scanning Active';
-    } else {
-      toggleSwitch.style.backgroundColor = '#ccc';
-      toggleSlider.style.right = 'auto';
-      toggleSlider.style.left = '2px';
-      text.innerText = 'Auto-Scanning Paused';
-    }
-  });
-  
-  // Add a close button
-  const closeButton = document.createElement('div');
-  closeButton.innerHTML = '✕';
-  closeButton.style.marginLeft = '10px';
-  closeButton.style.cursor = 'pointer';
-  closeButton.style.fontSize = '14px';
-  closeButton.style.opacity = '0.7';
-  closeButton.style.transition = 'opacity 0.3s';
-  
-  closeButton.addEventListener('mouseover', function() {
-    closeButton.style.opacity = '1';
-  });
-  
-  closeButton.addEventListener('mouseout', function() {
-    closeButton.style.opacity = '0.7';
-  });
-  
-  closeButton.addEventListener('click', function(e) {
-    e.stopPropagation();
-    stopAutoScanning();
-  });
-  
-  indicatorContainer.appendChild(icon);
-  indicatorContainer.appendChild(text);
-  indicatorContainer.appendChild(toggleSwitch);
-  indicatorContainer.appendChild(closeButton);
-  
-  // Add styles for scanning animation
-  const style = document.createElement('style');
-  style.textContent = `
-    #authentic-autoscan-indicator.scanning {
-      animation: authentic-pulse 1s infinite;
-    }
-    #authentic-autoscan-indicator.success {
-      background-color: rgba(76, 175, 80, 0.8) !important;
-    }
-    #authentic-autoscan-indicator.failure {
-      background-color: rgba(255, 76, 76, 0.8) !important;
-    }
-    @keyframes authentic-pulse {
-      0% { opacity: 0.7; }
-      50% { opacity: 1; }
-      100% { opacity: 0.7; }
-    }
-  `;
-  document.head.appendChild(style);
-  
-  document.body.appendChild(indicatorContainer);
+  return hash.toString();
 }
-
-// Modify the existing functionality to include auto-scanning
-document.addEventListener('DOMContentLoaded', function() {
-  // Check if auto-scanning is enabled in settings
-  chrome.storage.local.get(['autoScanEnabled', 'autoScanInterval'], function(result) {
-    // Default to enabled if not set
-    autoScanEnabled = result.autoScanEnabled !== false;
-    
-    // Use custom interval if set, otherwise default to 5 minutes
-    if (result.autoScanInterval) {
-      autoScanInterval = result.autoScanInterval * 1000; // Convert to milliseconds
-    }
-    
-    // Start auto-scanning if enabled
-    if (autoScanEnabled) {
-      // Delay the first scan to allow page to fully load
-      setTimeout(startAutoScanning, 5000);
-    }
-  });
-});
-
-// Add message listener for auto-scanning controls
-chrome.runtime.onMessage.addListener(function(message, sender, sendResponse) {
-  // Handle auto-scanning messages
-  if (message.action === 'startAutoScanning') {
-    if (!autoScanningActive) {
-      startAutoScanning();
-      sendResponse({ success: true, message: 'Auto-scanning started' });
-    } else {
-      sendResponse({ success: false, message: 'Auto-scanning already active' });
-    }
-    return true;
-  }
-  
-  if (message.action === 'stopAutoScanning') {
-    if (autoScanningActive) {
-      stopAutoScanning();
-      sendResponse({ success: true, message: 'Auto-scanning stopped' });
-    } else {
-      sendResponse({ success: false, message: 'Auto-scanning not active' });
-    }
-    return true;
-  }
-  
-  if (message.action === 'updateAutoScanInterval') {
-    if (message.interval) {
-      // Update interval setting
-      autoScanInterval = message.interval * 1000; // Convert to milliseconds
-      
-      // If auto-scanning is active, restart with new interval
-      if (autoScanningActive) {
-        stopAutoScanning();
-        startAutoScanning();
-      }
-      
-      sendResponse({ success: true, message: `Interval updated to ${message.interval} minutes` });
-    } else {
-      sendResponse({ success: false, message: 'Invalid interval' });
-    }
-    return true;
-  }
-  
-  if (message.action === 'getAutoScanStatus') {
-    // Return information about auto-scanning status
-    const url = window.location.href;
-    let platformSupported = false;
-    
-    if (url.includes('instagram.com') || url.includes('facebook.com') || url.includes('linkedin.com')) {
-      platformSupported = true;
-    }
-    
-    let status = '';
-    
-    if (!platformSupported) {
-      status = 'Auto-scanning not supported on this site';
-    } else if (autoScanningActive) {
-      const nextScan = lastAutoScanTime + autoScanInterval - Date.now();
-      const minutesRemaining = Math.max(0, Math.floor(nextScan / 60000));
-      const secondsRemaining = Math.max(0, Math.floor((nextScan % 60000) / 1000));
-      
-      status = `Active - Next scan in ${minutesRemaining}m ${secondsRemaining}s`;
-      
-      if (!autoScanEnabled) {
-        status = 'Paused - Toggle enabled to resume';
-      }
-    } else {
-      status = 'Inactive - Enable in settings to start';
-    }
-    
-    sendResponse({
-      status: status,
-      active: autoScanningActive,
-      enabled: autoScanEnabled,
-      platformSupported: platformSupported,
-      interval: autoScanInterval / 1000,
-      nextScan: lastAutoScanTime + autoScanInterval
-    });
-    
-    return true;
-  }
-  
-  if (message.action === 'performManualScan') {
-    // Manually trigger a scan
-    performAutoScan();
-    sendResponse({ success: true, message: 'Manual scan initiated' });
-    return true;
-  }
-});
-
-// Update the auto-scan indicator status every second
-function updateAutoScanIndicator() {
-  const indicator = document.getElementById('authentic-autoscan-indicator');
-  if (!indicator || !autoScanningActive) return;
-  
-  const textElement = indicator.querySelector('span');
-  if (!textElement) return;
-  
-  // Calculate time until next scan
-  const nextScan = lastAutoScanTime + autoScanInterval - Date.now();
-  const minutesRemaining = Math.max(0, Math.floor(nextScan / 60000));
-  const secondsRemaining = Math.max(0, Math.floor((nextScan % 60000) / 1000));
-  
-  if (autoScanEnabled) {
-    textElement.innerText = `Auto-Scanning: Next in ${minutesRemaining}m ${secondsRemaining}s`;
-  } else {
-    textElement.innerText = 'Auto-Scanning Paused';
-  }
-  
-  // Schedule the next update
-  setTimeout(updateAutoScanIndicator, 1000);
-}
-
-// Start the indicator updater when the indicator is shown
-const originalShowAutoScanIndicator = showAutoScanIndicator;
-showAutoScanIndicator = function() {
-  originalShowAutoScanIndicator();
-  updateAutoScanIndicator();
-};
 
