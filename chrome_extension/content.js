@@ -40,10 +40,13 @@ function testApiConnections() {
  * @returns {Promise} - Promise that resolves with the API response
  */
 function communicateWithAPI(endpoint, options = {}) {
+  console.log(`communicateWithAPI: Starting API call to ${endpoint}`, options);
+  
   return new Promise((resolve, reject) => {
     // Ensure endpoint starts with a slash if not provided
     if (!endpoint.startsWith('/') && !endpoint.startsWith('http')) {
       endpoint = '/' + endpoint;
+      console.log(`communicateWithAPI: Added leading slash to endpoint: ${endpoint}`);
     }
     
     // Extract API domain from endpoint if it's a full URL
@@ -51,27 +54,49 @@ function communicateWithAPI(endpoint, options = {}) {
     let domain = 'http://localhost:8000';
     
     if (endpoint.startsWith('http')) {
-      const url = new URL(endpoint);
-      domain = url.origin;
-      apiPath = url.pathname + url.search;
+      try {
+        const url = new URL(endpoint);
+        domain = url.origin;
+        apiPath = url.pathname + url.search;
+        console.log(`communicateWithAPI: Parsed URL - domain: ${domain}, path: ${apiPath}`);
+      } catch (error) {
+        console.error(`communicateWithAPI: Error parsing URL ${endpoint}`, error);
+        reject(`Invalid URL: ${endpoint}`);
+        return;
+      }
     }
     
-    // Send message to background script to make the API call
-    chrome.runtime.sendMessage({
+    const fullEndpoint = domain + apiPath;
+    console.log(`communicateWithAPI: Full endpoint: ${fullEndpoint}`);
+    
+    // Use the more robust sendMessageWithRetry function
+    sendMessageWithRetry({
       action: 'proxyApiCall',
-      endpoint: domain + apiPath,
+      endpoint: fullEndpoint,
       method: options.method || 'GET',
       headers: options.headers || {},
       body: options.body || null
-    }, function(response) {
-      if (chrome.runtime.lastError) {
-        console.error("Error communicating with background script:", chrome.runtime.lastError);
-        reject(chrome.runtime.lastError);
-      } else if (response && response.success) {
+    }, 3, 1000) // 3 retries, 1 second between retries
+    .then(response => {
+      if (!response) {
+        console.error("communicateWithAPI: Received empty response from background script");
+        reject("Empty response from background script");
+        return;
+      }
+      
+      console.log(`communicateWithAPI: Received response from background script:`, response);
+      
+      if (response.success) {
+        console.log("communicateWithAPI: API call successful");
         resolve(response.data);
       } else {
-        reject(response?.error || 'Unknown error');
+        console.error("communicateWithAPI: API call failed:", response.error);
+        reject(response.error || 'Unknown error');
       }
+    })
+    .catch(error => {
+      console.error("communicateWithAPI: Error sending message to background script:", error);
+      reject(error || "Failed to communicate with background script");
     });
   });
 }
@@ -94,6 +119,30 @@ setTimeout(testApiConnections, 3000);
 // Transparency in how content is filtered
 // Human-centered design (satisfaction vs engagement)
 // Ethical technology principles
+
+// Function to load Pure Feed module
+function loadPureFeedModule() {
+  try {
+    const script = document.createElement('script');
+    const scriptUrl = chrome.runtime.getURL('pure_feed.js');
+    console.log('Attempting to load Pure Feed module from:', scriptUrl);
+    
+    script.src = scriptUrl;
+    script.onload = () => {
+      console.log('Pure Feed module loaded successfully');
+      // Verify the module is available in the window object
+      if (window.pureFeed) {
+        console.log('PureFeed object is available in window');
+      } else {
+        console.warn('PureFeed object is NOT available in window after loading');
+      }
+    };
+    script.onerror = (e) => console.error('Failed to load Pure Feed module:', e);
+    (document.head || document.documentElement).appendChild(script);
+  } catch (error) {
+    console.error('Error loading Pure Feed module:', error);
+  }
+}
 
 // Load Pure Feed module for post ranking and classification
 loadPureFeedModule();
@@ -143,16 +192,25 @@ const SELECTORS = {
   },
   instagram: {
     posts: [
+      'article[role="presentation"]',
+      'div._ab6k', 
+      'div._aagw',
+      'article._ab6k',
       'article',
-      '.x1qjc9v5',
-      '._aac4',
-      '._aabd'
+      'div._aabd',
+      'div.x1qjc9v5',
+      '.x1y1aw1k',
+      'div[style*="padding-bottom: 177.778%"]'
     ],
     content: [
-      'h1 + div',
-      'div._a9zr > div',
-      '.x1lliihq',
-      '._aacl'
+      'div._a9zs',
+      'div._a9zr',
+      'span._aacl',
+      'div._a9zr div',
+      'span[class*="x193iq5w"]',
+      'div[dir="auto"] span',
+      'div.x1lliihq',
+      'h1 + div'
     ]
   },
   linkedin: {
@@ -730,59 +788,199 @@ function collectFacebookPosts() {
       
       // Process each post element
       Array.from(postElements).forEach((el, index) => {
-        // Facebook post processing code (existing) 
-        // ...
-  });
+        try {
+          // Extract content with various selectors
+          let content = "";
+          const contentSelectors = [
+            '[data-ad-comet-preview="message"]', 
+            '[data-ad-preview="message"]', 
+            '.xdj266r', 
+            '.x11i5rnm',
+            '.x1iorvi4',
+            'div[dir="auto"]'
+          ];
+          
+          for (const selector of contentSelectors) {
+            const contentEl = el.querySelector(selector);
+            if (contentEl && contentEl.innerText) {
+              content = contentEl.innerText.trim();
+              if (content.length > 0) break;
+            }
+          }
+          
+          // Skip if content is too short
+          if (!content || content.length < 5) {
+            return;
+          }
+          
+          // Extract user information
+          let user = "unknown";
+          const userSelectors = [
+            'h4 a', 
+            'h3 a', 
+            'a.x1i10hfl', 
+            '.x1heor9g a',
+            'a[role="link"] span'
+          ];
+          
+          for (const selector of userSelectors) {
+            const userEl = el.querySelector(selector);
+            if (userEl && userEl.innerText) {
+              user = userEl.innerText.trim();
+              if (user.length > 0) break;
+            }
+          }
+          
+          // Check if verified
+          let isVerified = false;
+          const verifiedSelectors = [
+            'svg[aria-label="Verified Account"]',
+            '.x6s0dn4 svg',
+            'svg circle'
+          ];
+          
+          for (const selector of verifiedSelectors) {
+            if (el.querySelector(selector)) {
+              isVerified = true;
+              break;
+            }
+          }
+          
+          // Check if friend
+          let isFriend = false;
+          // On Facebook it's hard to determine friendship status from DOM
+          // Most posts in feed are from friends, so default to true
+          isFriend = true;
+          
+          // Look for add friend buttons which indicate NOT a friend
+          const notFriendSelectors = [
+            'a[aria-label="Add friend"]',
+            'a[aria-label="Follow"]',
+            'button[aria-label="Add friend"]'
+          ];
+          
+          for (const selector of notFriendSelectors) {
+            if (el.querySelector(selector)) {
+              isFriend = false;
+              break;
+            }
+          }
+          
+          // Check if sponsored
+          let isSponsored = false;
+          const sponsoredSelectors = [
+            'span:contains("Sponsored")',
+            'a[aria-label="Sponsored"]',
+            'a[href^="#"]'
+          ];
+          
+          // Direct content check is more reliable
+          isSponsored = el.innerText.includes('Sponsored') || 
+                        el.innerText.includes('Paid partnership');
+          
+          // Extract engagement metrics if possible
+          let likes = 0;
+          let comments = 0;
+          let shares = 0;
+          
+          // Look for engagement numbers
+          const engagementText = el.innerText;
+          
+          // Try to find like counts
+          const likeMatches = engagementText.match(/(\d+[KkMm]?)\s+(like|likes|reaction|reactions)/i);
+          if (likeMatches && likeMatches[1]) {
+            likes = parseSocialCount(likeMatches[1]);
+          }
+          
+          // Try to find comment counts
+          const commentMatches = engagementText.match(/(\d+[KkMm]?)\s+(comment|comments)/i);
+          if (commentMatches && commentMatches[1]) {
+            comments = parseSocialCount(commentMatches[1]);
+          }
+          
+          // Extract image URLs if present
+          const imageUrls = [];
+          const images = el.querySelectorAll('img[src*="fbcdn"]');
+          images.forEach(img => {
+            if (img.src && img.width > 100) {
+              imageUrls.push(img.src);
+            }
+          });
+          
+          // Create post object
+          const post = {
+            content: content,
+            platform: 'facebook',
+            original_user: user,
+            verified: isVerified,
+            is_friend: isFriend,
+            is_family: false, // Not determinable from Facebook DOM
+            likes: likes,
+            comments: comments,
+            shares: shares,
+            image_urls: imageUrls.join(','),
+            collected_at: new Date().toISOString(),
+            is_sponsored: isSponsored,
+            is_job_post: content.toLowerCase().includes('hiring') || content.toLowerCase().includes('job opening'),
+            content_length: content.length
+          };
+          
+          posts.push(post);
+          console.log(`Added Facebook post from ${user}: "${content.substring(0, 50)}..."`);
+        } catch (error) {
+          console.error(`Error processing Facebook post ${index}:`, error);
+        }
+      });
 
-  console.log(`Collected ${posts.length} Facebook posts`);
-  
+      console.log(`Collected ${posts.length} Facebook posts`);
+      
       // Send posts through the background script instead of making direct API calls
       // This bypasses Content Security Policy restrictions
-    if (posts.length > 0) {
-        // Rank and classify posts before sending
-        try {
-          if (window.pureFeed) {
-            console.log("Ranking and classifying Facebook posts with Pure Feed module...");
-            window.pureFeed.rankPosts(posts);
-          }
-        } catch (error) {
-          console.error("Error ranking Facebook posts:", error);
-        }
-        
-        // Get API settings from storage
-        chrome.storage.local.get(['apiKey', 'apiEndpoint'], function(result) {
-          const apiKey = result.apiKey;
-          const apiEndpoint = result.apiEndpoint || 'http://localhost:8000';
-          
-          console.log("Sending Facebook posts via background script");
-          
-          // Use the standardized communicateWithAPI function
-          communicateWithAPI(`${apiEndpoint}/api/collect-posts/`, {
-            method: 'POST',
-            headers: { 'X-API-Key': apiKey },
-            body: {
-              platform: 'facebook',
-              posts: posts
+      if (posts.length > 0) {
+          // Rank and classify posts before sending
+          try {
+            if (window.pureFeed) {
+              console.log("Ranking and classifying Facebook posts with Pure Feed module...");
+              window.pureFeed.rankPosts(posts);
             }
-          })
-          .then(response => {
-            console.log("Successfully sent Facebook posts:", response);
-            resolve(posts);
-          })
-          .catch(error => {
-            console.error("Error sending Facebook posts:", error);
-            // Still resolve with posts since we collected them successfully
-            resolve(posts);
+          } catch (error) {
+            console.error("Error ranking Facebook posts:", error);
+          }
+          
+          // Get API settings from storage
+          chrome.storage.local.get(['apiKey', 'apiEndpoint'], function(result) {
+            const apiKey = result.apiKey;
+            const apiEndpoint = result.apiEndpoint || 'http://localhost:8000';
+            
+            console.log("Sending Facebook posts via background script");
+            
+            // Use the standardized communicateWithAPI function
+            communicateWithAPI(`${apiEndpoint}/api/collect-posts/`, {
+              method: 'POST',
+              headers: { 'X-API-Key': apiKey },
+              body: {
+                platform: 'facebook',
+                posts: posts
+              }
+            })
+            .then(response => {
+              console.log("Successfully sent Facebook posts:", response);
+              resolve(posts);
+            })
+            .catch(error => {
+              console.error("Error sending Facebook posts:", error);
+              // Still resolve with posts since we collected them successfully
+              resolve(posts);
+            });
           });
-        });
-        return;
-      }
+          return;
+        }
 
-      resolve(posts);
-    } catch (error) {
-      console.error("Error collecting Facebook posts:", error);
-      reject(error);
-    }
+        resolve(posts);
+      } catch (error) {
+        console.error("Error collecting Facebook posts:", error);
+        reject(error);
+      }
   });
 }
 
@@ -1518,40 +1716,48 @@ chrome.runtime.onMessage.addListener(function(request, sender, sendResponse) {
   }
 });
 
-// Function to send a message to the background script with retry capability
+/**
+ * Send a message to the background script with retry capability
+ * 
+ * @param {Object} message - The message to send to the background script
+ * @param {number} maxRetries - Maximum number of retry attempts (default: 3)
+ * @param {number} retryDelay - Delay between retries in ms (default: 1000)
+ * @returns {Promise} - Resolves with the response from the background script
+ */
 function sendMessageWithRetry(message, maxRetries = 3, retryDelay = 1000) {
-  // Special handling for sendPosts action to use our CSP-friendly function
-  if (message.action === 'sendPosts' && message.posts && message.platform) {
-    console.log(`Using sendPostsViaBackgroundScript for ${message.posts.length} ${message.platform} posts`);
-    return sendPostsViaBackgroundScript(message.posts, message.platform);
-  }
+  console.log(`Sending message to background script (attempt 1/${maxRetries + 1}):`, message.action);
   
-  // For all other message types, use the original implementation
   return new Promise((resolve, reject) => {
-    let retryCount = 0;
+    let currentRetry = 0;
     
     const sendMessage = () => {
-      console.log(`Sending message to background script (attempt ${retryCount + 1}/${maxRetries + 1}):`, message.action);
-      
       chrome.runtime.sendMessage(message, (response) => {
+        // Check if there was an error communicating with the background script
         if (chrome.runtime.lastError) {
-          const error = chrome.runtime.lastError;
-          console.error(`Error sending message (attempt ${retryCount + 1}):`, error);
+          const errorMsg = chrome.runtime.lastError.message || "Unknown error";
+          console.error(`Error sending message (attempt ${currentRetry + 1}/${maxRetries + 1}):`, errorMsg);
           
-          if (retryCount < maxRetries) {
-            retryCount++;
-            console.log(`Retrying in ${retryDelay}ms...`);
+          // Check if we should retry
+          if (currentRetry < maxRetries) {
+            currentRetry++;
+            console.log(`Retrying in ${retryDelay}ms (attempt ${currentRetry + 1}/${maxRetries + 1})...`);
+            
+            // Wait and retry
             setTimeout(sendMessage, retryDelay);
-          } else {
-            reject(error);
+            return;
           }
-        } else {
-          console.log(`Message sent successfully after ${retryCount + 1} attempt(s):`, message.action);
-          resolve(response);
+          
+          // Maximum retries reached, reject the promise
+          reject(new Error(`Failed to send message after ${maxRetries + 1} attempts: ${errorMsg}`));
+          return;
         }
+        
+        // No error, resolve with the response
+        resolve(response);
       });
     };
     
+    // Start the first attempt
     sendMessage();
   });
 }
@@ -2017,17 +2223,4 @@ showAutoScanIndicator = function() {
   originalShowAutoScanIndicator();
   updateAutoScanIndicator();
 };
-
-// Function to load Pure Feed module
-function loadPureFeedModule() {
-  try {
-    const script = document.createElement('script');
-    script.src = chrome.runtime.getURL('pure_feed.js');
-    script.onload = () => console.log('Pure Feed module loaded');
-    script.onerror = (e) => console.error('Failed to load Pure Feed module:', e);
-    (document.head || document.documentElement).appendChild(script);
-  } catch (error) {
-    console.error('Error loading Pure Feed module:', error);
-  }
-}
 
