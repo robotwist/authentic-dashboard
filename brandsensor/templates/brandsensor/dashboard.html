@@ -657,12 +657,12 @@
         
         <!-- Step 1 -->
         <div class="welcome-step" data-step="1" style="display: block;">
-            <h2>Welcome to Authentic Dashboard</h2>
+            <h2>Welcome to Your Social Media Oasis</h2>
             <div class="welcome-feature">
-                <div class="welcome-icon">🔍</div>
+                <div class="welcome-icon">🌴</div>
                 <div class="welcome-feature-content">
-                    <h3>Discover Authentic Content</h3>
-                    <p>Filter through social media noise and find genuine posts from real people that matter to you.</p>
+                    <h3>A Refreshing Experience</h3>
+                    <p>Escape the noise and discover what truly matters. Authentic Dashboard helps you filter out distractions and focus on genuine connections.</p>
                 </div>
             </div>
         </div>
@@ -671,34 +671,38 @@
         <div class="welcome-step" data-step="2" style="display: none;">
             <h2>Pure Feed™ Technology</h2>
             <div class="welcome-feature">
-                <div class="welcome-icon">⚡</div>
+                <div class="welcome-icon">💧</div>
                 <div class="welcome-feature-content">
-                    <h3>Enhanced Authenticity Ranking</h3>
-                    <p>Our proprietary algorithm ranks content based on authenticity signals, helping you see more of what really matters.</p>
+                    <h3>Crystal Clear Content</h3>
+                    <p>Our authenticity ranking acts as a filter, letting the most genuine content rise to the top while keeping promotional noise at bay.</p>
                 </div>
             </div>
         </div>
         
         <!-- Step 3 -->
         <div class="welcome-step" data-step="3" style="display: none;">
-            <h2>ML-Powered Insights</h2>
+            <h2>Smart Insights</h2>
             <div class="welcome-feature">
                 <div class="welcome-icon">🧠</div>
                 <div class="welcome-feature-content">
-                    <h3>Smart Content Analysis</h3>
-                    <p>Our machine learning models detect patterns in content that help identify authentic vs. promotional content.</p>
+                    <h3>Understand Your Feed</h3>
+                    <p>Our AI tools analyze your content to help you see patterns in what you consume and create a more balanced social media diet.</p>
                 </div>
             </div>
         </div>
         
         <!-- Step 4 -->
         <div class="welcome-step" data-step="4" style="display: none;">
-            <h2>Get the Chrome Extension</h2>
+            <h2>Seamless Experience</h2>
             <div class="welcome-feature">
                 <div class="welcome-icon">🧩</div>
                 <div class="welcome-feature-content">
-                    <h3>Enhance Your Social Browsing</h3>
-                    <p>Install our Chrome extension to get authenticity insights directly in your social media feeds.</p>
+                    <h3>Desktop + Browser Extension</h3>
+                    <p>Install our Chrome extension to get authenticity insights directly in your social feeds. One click to collect and analyze your content.</p>
+                    <div class="action-links mt-3">
+                        <a href="#" class="btn-link" id="getExtensionBtn">Get the Extension</a> | 
+                        <a href="#" class="btn-link" id="learnMoreBtn">How It Works</a>
+                    </div>
                 </div>
             </div>
         </div>
@@ -753,74 +757,7 @@ $(document).ready(function() {
     // Enable tooltips
     $('[data-toggle="tooltip"]').tooltip();
     
-    // Welcome Modal Functionality for First-Time Users
-    const hasSeenWelcome = localStorage.getItem('hasSeenWelcome');
-    const welcomeModal = document.getElementById('welcomeModal');
-    
-    if (!hasSeenWelcome) {
-        // Show the welcome modal for first-time users
-        welcomeModal.classList.add('active');
-    }
-    
-    // Modal close button
-    document.getElementById('closeWelcomeModal').addEventListener('click', function() {
-        welcomeModal.classList.remove('active');
-        localStorage.setItem('hasSeenWelcome', 'true');
-    });
-    
-    // Skip tour button
-    document.getElementById('skipWelcomeTour').addEventListener('click', function() {
-        welcomeModal.classList.remove('active');
-        localStorage.setItem('hasSeenWelcome', 'true');
-    });
-    
-    // Multi-step navigation
-    const welcomeSteps = document.querySelectorAll('.welcome-step');
-    const stepDots = document.querySelectorAll('.step-dot');
-    const nextButton = document.getElementById('nextWelcomeStep');
-    let currentStep = 1;
-    
-    nextButton.addEventListener('click', function() {
-        // If on the last step, close the modal
-        if (currentStep >= welcomeSteps.length) {
-            welcomeModal.classList.remove('active');
-            localStorage.setItem('hasSeenWelcome', 'true');
-            return;
-        }
-        
-        // Hide current step, show next step
-        document.querySelector(`.welcome-step[data-step="${currentStep}"]`).style.display = 'none';
-        currentStep++;
-        document.querySelector(`.welcome-step[data-step="${currentStep}"]`).style.display = 'block';
-        
-        // Update step indicators
-        stepDots.forEach(dot => dot.classList.remove('active'));
-        document.querySelector(`.step-dot[data-step="${currentStep}"]`).classList.add('active');
-        
-        // Update button text on last step
-        if (currentStep === welcomeSteps.length) {
-            nextButton.textContent = 'Get Started';
-        }
-    });
-    
-    // Step indicator clicks
-    stepDots.forEach(dot => {
-        dot.addEventListener('click', function() {
-            const step = parseInt(this.getAttribute('data-step'));
-            
-            // Hide all steps, show selected step
-            welcomeSteps.forEach(step => step.style.display = 'none');
-            document.querySelector(`.welcome-step[data-step="${step}"]`).style.display = 'block';
-            
-            // Update step indicators
-            stepDots.forEach(dot => dot.classList.remove('active'));
-            this.classList.add('active');
-            
-            // Update current step and button text
-            currentStep = step;
-            nextButton.textContent = currentStep === welcomeSteps.length ? 'Get Started' : 'Next';
-        });
-    });
+    // Note: Welcome modal functionality is now handled in dashboard.js
 });
 </script>
 {% endblock %}

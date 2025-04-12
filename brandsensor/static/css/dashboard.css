@@ -102,6 +102,29 @@
     line-height: 1.5;
 }
 
+/* Action links in welcome modal */
+.action-links {
+    margin-top: 15px;
+}
+
+.btn-link {
+    color: var(--primary-color);
+    text-decoration: none;
+    font-weight: 500;
+    transition: color 0.2s;
+    display: inline-block;
+    padding: 5px 0;
+}
+
+.btn-link:hover {
+    color: var(--primary-color-dark);
+    text-decoration: underline;
+}
+
+.mt-3 {
+    margin-top: 15px;
+}
+
 .welcome-modal-footer {
     display: flex;
     flex-direction: column;

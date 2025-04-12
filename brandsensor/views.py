@@ -1,21 +1,38 @@
-from django.shortcuts import render, redirect, get_object_or_404
-from django.contrib.auth.decorators import login_required
-from django.http import JsonResponse
-from django.views.decorators.csrf import csrf_exempt
-from django.db.models import Q, Count, Avg, F
-from django.utils import timezone
-from django.conf import settings
-from django.core.cache import cache
-from django.views.decorators.cache import cache_page
+import os
 import json
+import logging
 import datetime
-import uuid
+import re
+import hashlib
 import secrets
 import string
-import hashlib
-from django.db.utils import IntegrityError
-import logging
-import time
+from datetime import timedelta
+from collections import Counter, defaultdict
+from django.shortcuts import render, redirect, get_object_or_404
+from django.http import JsonResponse, HttpResponse, HttpResponseBadRequest
+from django.contrib.auth.decorators import login_required
+from django.contrib.auth import login, authenticate, logout
+from django.contrib.auth.forms import UserCreationForm, AuthenticationForm
+from django.contrib import messages
+from django.views.decorators.csrf import csrf_exempt
+from django.utils import timezone
+from django.db.models import Q, Count, Sum, Avg, F, Value, CharField
+from django.db.models.functions import TruncDate
+from django.core.cache import cache
+from django.core.paginator import Paginator
+from django.conf import settings
+from .models import (
+    SocialPost, 
+    Brand, 
+    BehaviorLog, 
+    UserPreferences, 
+    APIKey, 
+    SocialConnection,
+    FilterPreset,
+    MLPredictionLog,
+    InterpretationLog
+)
+from .decorators import api_key_required
 
 logger = logging.getLogger(__name__)
 
@@ -552,15 +569,73 @@ def onboarding(request):
     # Get the current user if authenticated
     user = request.user if request.user.is_authenticated else None
     
+    # If POST request, process the form data
+    if request.method == 'POST':
+        # Extract form data
+        friends_only = request.POST.get('friends_only') == 'on'
+        family_only = request.POST.get('family_only') == 'on'
+        hide_sponsored = request.POST.get('hide_sponsored') == 'on'
+        show_verified_only = request.POST.get('show_verified_only') == 'on'
+        interest_filter = request.POST.get('interest_filter', '')
+        excluded_keywords = request.POST.get('excluded_keywords', '')
+        approved_brands = request.POST.get('approved_brands', '')
+        favorite_hashtags = request.POST.get('favorite_hashtags', '')
+        
+        # Get or create user preferences
+        preferences, created = UserPreferences.objects.get_or_create(user=user)
+        
+        # Update preferences
+        preferences.friends_only = friends_only
+        preferences.family_only = family_only
+        preferences.hide_sponsored = hide_sponsored
+        preferences.show_verified_only = show_verified_only
+        preferences.interest_filter = interest_filter
+        preferences.excluded_keywords = excluded_keywords
+        preferences.approved_brands = approved_brands
+        preferences.favorite_hashtags = favorite_hashtags
+        preferences.save()
+        
+        # Log the action
+        BehaviorLog.objects.create(
+            user=user,
+            action='complete_onboarding',
+            details=f'User completed onboarding and set preferences'
+        )
+        
+        # Generate API key if user doesn't have one
+        api_key = APIKey.objects.filter(user=user).first()
+        if not api_key:
+            # Generate a random API key
+            key_length = 32
+            alphabet = string.ascii_letters + string.digits
+            key_value = ''.join(secrets.choice(alphabet) for _ in range(key_length))
+            
+            # Create the API key
+            api_key = APIKey.objects.create(
+                user=user,
+                key=key_value,
+                name=f"API Key {timezone.now().strftime('%Y-%m-%d %H:%M')}"
+            )
+        
+        # Redirect to dashboard
+        messages.success(request, 'Your preferences have been saved! You\'re all set to use Authentic Dashboard.')
+        return redirect('dashboard')
+    
     # If user is authenticated, try to get their API key
     api_key = None
     if user:
         api_key = APIKey.objects.filter(user=user).first()
     
+    # Get user preferences if they exist
+    preferences = None
+    if user:
+        preferences, created = UserPreferences.objects.get_or_create(user=user)
+    
     context = {
         'user': user,
         'api_key': api_key,
         'has_api_key': api_key is not None,
+        'preferences': preferences,
     }
     
     return render(request, 'brandsensor/onboarding.html', context)

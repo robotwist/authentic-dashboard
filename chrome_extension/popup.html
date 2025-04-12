@@ -182,14 +182,46 @@
         
         <!-- Insights Tab -->
         <div id="insightsTab" class="tab-content">
-            <h3 style="font-size: 14px; margin-bottom: 10px; color: #222;">Your Feed Insights</h3>
-            <p style="font-size: 12px; color: #444; margin-bottom: 15px;">
-                Real-time analysis of your current browsing session.
-            </p>
+            <h3 class="section-title">Your Feed Insights</h3>
+            <p class="text-muted mb-md">Real-time analysis of content from your social feeds.</p>
             
             <div id="currentPageInsights">
-                <div style="text-align: center; color: #555; font-size: 12px; padding: 20px;">
-                    Click "Scan Current Page" to see insights
+                <div class="no-insights-state">
+                    <div class="empty-state-icon">📊</div>
+                    <h4 class="empty-state-title">No insights yet</h4>
+                    <p class="empty-state-message">To see insights about your current feed, click "Scan Current Page" above.</p>
+                    
+                    <div class="quick-insights-preview">
+                        <h5 class="mt-md mb-sm">What insights will you get?</h5>
+                        <ul class="insights-list">
+                            <li><span class="insight-icon">🧮</span> Post type breakdown</li>
+                            <li><span class="insight-icon">💼</span> Promotional content percentage</li>
+                            <li><span class="insight-icon">💬</span> Content sentiment analysis</li>
+                            <li><span class="insight-icon">👥</span> Friends vs. brands ratio</li>
+                            <li><span class="insight-icon">📈</span> Authenticity rating</li>
+                        </ul>
+                    </div>
+                    
+                    <div class="action-container">
+                        <button id="insightsScanButton" class="btn btn-primary">Scan Now</button>
+                        <a href="#" id="viewPastInsightsLink" class="btn-link ml-sm">View past insights</a>
+                    </div>
+                </div>
+            </div>
+            
+            <div id="insightsTips" class="tips-section">
+                <h5 class="tips-title">Pro Tips</h5>
+                <div class="tip-card">
+                    <div class="tip-icon">💡</div>
+                    <div class="tip-content">
+                        <p>Scan multiple platforms to compare content quality across your social feeds.</p>
+                    </div>
+                </div>
+                <div class="tip-card">
+                    <div class="tip-icon">⚡</div>
+                    <div class="tip-content">
+                        <p>Use the <strong>Pure Feed</strong> tab to see your content ranked by authenticity instead of platform algorithms.</p>
+                    </div>
                 </div>
             </div>
         </div>
