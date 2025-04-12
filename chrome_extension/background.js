@@ -241,47 +241,54 @@ chrome.webNavigation.onBeforeNavigate.addListener(
   {url: [{urlContains: 'localhost:8000/accounts/login'}]}
 );
 
+// Standard response format function
+function createResponse(success, data = null, error = null) {
+  const response = { success };
+  
+  if (success && data !== null) {
+    response.data = data;
+  }
+  
+  if (!success && error !== null) {
+    response.error = typeof error === 'object' ? error.message || JSON.stringify(error) : error;
+  }
+  
+  return response;
+}
+
 // Listen for messages from content scripts or popup
 chrome.runtime.onMessage.addListener(function(request, sender, sendResponse) {
     console.log("Background script received message:", request.action);
     
     if (request.action === 'showNotification') {
         showNotification(request.title, request.message, request.type);
-        sendResponse({success: true});
+        sendResponse(createResponse(true));
     } else if (request.action === 'checkAPIEndpoint') {
         // Force a check of the API availability
         if (authDashboardAPI) {
             authDashboardAPI.checkAvailability(request.forceCheck || true)
             .then(status => {
-                    sendResponse({
-                        success: true,
+                    sendResponse(createResponse(true, {
                         available: status.available,
                         endpoint: status.endpoint,
                         apiKey: status.apiKey
-                    });
+                    }));
                 })
                 .catch(error => {
-                    sendResponse({
-                        success: false,
-                        error: error.message
-                    });
+                    sendResponse(createResponse(false, null, error));
                 });
         } else {
             // Fallback if API client isn't available
             checkAPIAvailabilityDirectly()
                 .then(result => {
-                    sendResponse({
-                        success: true,
+                    sendResponse(createResponse(true, {
                         available: result.available,
                         endpoint: result.endpoint,
                         apiKey: result.apiKey
-                    });
+                    }));
                 })
                 .catch(error => {
-                    sendResponse({
-                        success: false,
-                        error: error.message
-                    });
+                    sendResponse(createResponse(false, null, error));
                 });
         }
         return true; // Keep the message channel open for the async response
@@ -316,17 +323,11 @@ chrome.runtime.onMessage.addListener(function(request, sender, sendResponse) {
                 return response.json();
             })
             .then(data => {
-                sendResponse({
-                    success: true,
-                    data: data
-                });
+                sendResponse(createResponse(true, data));
             })
             .catch(error => {
                 console.error("Error in proxied API call:", error);
-                sendResponse({
-                    success: false,
-                    error: error.message || "Unknown error in API call"
-                });
+                sendResponse(createResponse(false, null, error));
             });
         });
         
@@ -339,17 +340,13 @@ chrome.runtime.onMessage.addListener(function(request, sender, sendResponse) {
         fetch(`${endpoint}/api/health-check/`)
             .then(response => response.json())
             .then(data => {
-                sendResponse({
-                    success: true,
+                sendResponse(createResponse(true, {
                     data: data,
                     status: 'API is operational'
-                });
+                }));
             })
             .catch(error => {
-                sendResponse({
-                    success: false,
-                    error: error.message
-                });
+                sendResponse(createResponse(false, null, error));
             });
         return true;
     } else if (request.action === 'verifyApiKey') {
@@ -358,10 +355,7 @@ chrome.runtime.onMessage.addListener(function(request, sender, sendResponse) {
         const apiKey = request.apiKey;
         
         if (!apiKey) {
-            sendResponse({
-                success: false,
-                error: 'No API key provided'
-            });
+            sendResponse(createResponse(false, null, 'No API key provided'));
             return true;
         }
         
@@ -372,17 +366,13 @@ chrome.runtime.onMessage.addListener(function(request, sender, sendResponse) {
         })
             .then(response => response.json())
             .then(data => {
-                sendResponse({
-                    success: true,
+                sendResponse(createResponse(true, {
                     valid: data.valid === true,
                     data: data
-                });
+                }));
             })
             .catch(error => {
-                sendResponse({
-                    success: false,
-                    error: error.message
-                });
+                sendResponse(createResponse(false, null, error));
             });
         return true;
     } else if (request.action === 'checkConnection') {
@@ -390,10 +380,10 @@ chrome.runtime.onMessage.addListener(function(request, sender, sendResponse) {
         try {
             // Simple response to tell content script that background script is responsive
             // This doesn't actually check the API yet - just confirms background script is working
-            sendResponse({
+            sendResponse(createResponse(true, {
                 status: 'connected',
                 backgroundScriptWorking: true
-            });
+            }));
             
             // Then also check actual API connection if requested
             if (request.checkApi && authDashboardAPI) {
@@ -407,10 +397,7 @@ chrome.runtime.onMessage.addListener(function(request, sender, sendResponse) {
             }
         } catch (error) {
             console.error("Error in checkConnection handler:", error);
-            sendResponse({
-                status: 'error',
-                error: error.message
-            });
+            sendResponse(createResponse(false, null, error));
         }
         return true;
     } else if (request.action === 'sendPosts') {
@@ -421,19 +408,13 @@ chrome.runtime.onMessage.addListener(function(request, sender, sendResponse) {
         // Validate the request
         if (!request.posts || !Array.isArray(request.posts) || request.posts.length === 0) {
             console.error("Invalid posts data received");
-            sendResponse({
-                success: false,
-                error: "Invalid posts data"
-            });
+            sendResponse(createResponse(false, null, "Invalid posts data"));
             return true;
         }
         
         if (!request.platform) {
             console.error("Missing platform in sendPosts request");
-            sendResponse({
-                success: false,
-                error: "Missing platform"
-            });
+            sendResponse(createResponse(false, null, "Missing platform"));
             return true;
         }
         
@@ -454,42 +435,30 @@ chrome.runtime.onMessage.addListener(function(request, sender, sendResponse) {
                 authDashboardAPI.sendPosts(formattedPosts, request.platform)
                     .then(result => {
                         console.log("Successfully sent posts via API client:", result);
-                        sendResponse({
-                            success: true, 
+                        sendResponse(createResponse(true, {
                             message: `Successfully sent ${formattedPosts.length} posts from ${request.platform}`,
                             result: result
-                        });
+                        }));
                     })
                     .catch(error => {
                         console.error("Error sending posts via API client:", error);
-                        sendResponse({
-                            success: false,
-                            error: error.message || "Unknown error sending posts",
-                            errorDetails: error
-                        });
+                        sendResponse(createResponse(false, null, error));
                     });
             } else {
                 console.error("API client not available");
-                sendResponse({
-                    success: false,
-                    error: "API client not available"
-                });
+                sendResponse(createResponse(false, null, "API client not available"));
             }
         } catch (error) {
             console.error("Exception in sendPosts handler:", error);
-            sendResponse({
-                success: false,
-                error: error.message || "Unknown error in sendPosts handler"
-            });
+            sendResponse(createResponse(false, null, error));
         }
         
         return true; // Keep the message channel open for the async response
     } else if (request.action === 'getStats') {
         chrome.storage.local.get(['stats'], function(result) {
-            sendResponse({
-                success: true,
+            sendResponse(createResponse(true, {
                 stats: result.stats || {}
-            });
+            }));
         });
         
         // Return true to indicate we'll send a response asynchronously
@@ -509,19 +478,14 @@ chrome.runtime.onMessage.addListener(function(request, sender, sendResponse) {
         })
         .then(response => {
             console.log("Health check result:", response.status, response.ok);
-            sendResponse({
-                success: true,
+            sendResponse(createResponse(true, {
                 available: response.ok,
                 status: response.status
-            });
+            }));
         })
         .catch(error => {
             console.error("Health check error:", error);
-            sendResponse({
-                success: false,
-                available: false,
-                error: error.message
-            });
+            sendResponse(createResponse(false, null, error));
         });
         
         return true; // Keep the message channel open for the async response

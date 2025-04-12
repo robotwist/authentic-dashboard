@@ -32,15 +32,17 @@ function testApiConnections() {
 }
 
 /**
- * Safely makes API calls through the background script to avoid CSP issues
- * @param {string} endpoint - The API endpoint (e.g., '/api/health-check/')
- * @param {Object} options - Fetch options (method, headers, body)
- * @returns {Promise} - Resolves with the API response
+ * Unified API communication function that sends requests through the background script
+ * to bypass Content Security Policy restrictions
+ * 
+ * @param {string} endpoint - API endpoint path (with or without domain)
+ * @param {Object} options - Request options (method, body, headers)
+ * @returns {Promise} - Promise that resolves with the API response
  */
-function safeApiCall(endpoint, options = {}) {
+function communicateWithAPI(endpoint, options = {}) {
   return new Promise((resolve, reject) => {
     // Ensure endpoint starts with a slash if not provided
-    if (!endpoint.startsWith('/')) {
+    if (!endpoint.startsWith('/') && !endpoint.startsWith('http')) {
       endpoint = '/' + endpoint;
     }
     
@@ -63,6 +65,7 @@ function safeApiCall(endpoint, options = {}) {
       body: options.body || null
     }, function(response) {
       if (chrome.runtime.lastError) {
+        console.error("Error communicating with background script:", chrome.runtime.lastError);
         reject(chrome.runtime.lastError);
       } else if (response && response.success) {
         resolve(response.data);
@@ -71,6 +74,13 @@ function safeApiCall(endpoint, options = {}) {
       }
     });
   });
+}
+
+// Replace the safeApiCall function with our new unified function
+// This function is now just an alias for backward compatibility
+function safeApiCall(endpoint, options = {}) {
+  console.log("Using safeApiCall (via communicateWithAPI) for:", endpoint);
+  return communicateWithAPI(endpoint, options);
 }
 
 // Run the test immediately when the script loads
@@ -630,13 +640,27 @@ function collectInstagramPosts() {
         }
         
         console.log(`Sending ${posts.length} Instagram posts via background script`);
-        sendPostsViaBackgroundScript(posts, 'instagram')
+        
+        // Get API settings from storage
+        chrome.storage.local.get(['apiKey', 'apiEndpoint'], function(result) {
+          const apiKey = result.apiKey;
+          const apiEndpoint = result.apiEndpoint || 'http://localhost:8000';
+          
+          // Use the standardized communicateWithAPI function
+          communicateWithAPI(`${apiEndpoint}/api/collect-posts/`, {
+            method: 'POST',
+            headers: { 'X-API-Key': apiKey },
+            body: {
+              platform: 'instagram',
+              posts: posts
+            }
+          })
           .then(response => {
-            console.log("Successfully sent Instagram posts via background script:", response);
+            console.log("Successfully sent Instagram posts:", response);
             resolve(posts);
           })
           .catch(error => {
-            console.error("Error sending Instagram posts via background script:", error);
+            console.error("Error sending Instagram posts:", error);
             // Update connection error counters
             connectionErrorCount++;
             lastConnectionError = "Error communicating with background script";
@@ -646,6 +670,7 @@ function collectInstagramPosts() {
             }
             resolve(posts);
           });
+        });
       } else {
         resolve([]);
       }
@@ -724,40 +749,41 @@ function collectFacebookPosts() {
           console.error("Error ranking Facebook posts:", error);
         }
         
-        console.log("Sending Facebook posts via background script");
-        sendPostsViaBackgroundScript(posts, 'facebook')
+        // Get API settings from storage
+        chrome.storage.local.get(['apiKey', 'apiEndpoint'], function(result) {
+          const apiKey = result.apiKey;
+          const apiEndpoint = result.apiEndpoint || 'http://localhost:8000';
+          
+          console.log("Sending Facebook posts via background script");
+          
+          // Use the standardized communicateWithAPI function
+          communicateWithAPI(`${apiEndpoint}/api/collect-posts/`, {
+            method: 'POST',
+            headers: { 'X-API-Key': apiKey },
+            body: {
+              platform: 'facebook',
+              posts: posts
+            }
+          })
           .then(response => {
-            console.log("Successfully sent Facebook posts via background script:", response);
+            console.log("Successfully sent Facebook posts:", response);
+            resolve(posts);
           })
           .catch(error => {
-            console.error("Error sending Facebook posts via background script:", error);
+            console.error("Error sending Facebook posts:", error);
+            // Still resolve with posts since we collected them successfully
+            resolve(posts);
           });
+        });
+        return;
       }
 
-      return posts;
+      resolve(posts);
     } catch (error) {
       console.error("Error collecting Facebook posts:", error);
       reject(error);
     }
   });
-}
-
-/**
- * Helper function to send posts using background script instead of direct fetch
- * This replaces the old sendWithDirectFetch function to fix CORS/CSP issues
- */
-function sendWithDirectFetch(posts, apiKey, apiEndpoint) {
-  console.log(`Using background script to send ${posts.length} posts`);
-  
-  return sendPostsViaBackgroundScript(posts, posts[0]?.platform || 'facebook')
-    .then(response => {
-      console.log("Successfully sent posts via background script:", response);
-      return response;
-    })
-    .catch(error => {
-      console.error("Error sending posts via background script:", error);
-      throw error; // Propagate the error to callers
-    });
 }
 
 // Enhanced LinkedIn collector
@@ -996,14 +1022,29 @@ function collectLinkedInPosts() {
         console.error("Error ranking posts:", error);
       }
       
-      console.log("Sending LinkedIn posts via background script");
-      sendPostsViaBackgroundScript(posts, 'linkedin')
+      // Get API settings from storage
+      chrome.storage.local.get(['apiKey', 'apiEndpoint'], function(result) {
+        const apiKey = result.apiKey;
+        const apiEndpoint = result.apiEndpoint || 'http://localhost:8000';
+        
+        console.log("Sending LinkedIn posts via background script");
+        
+        // Use the standardized communicateWithAPI function
+        communicateWithAPI(`${apiEndpoint}/api/collect-posts/`, {
+          method: 'POST',
+          headers: { 'X-API-Key': apiKey },
+          body: {
+            platform: 'linkedin',
+            posts: posts
+          }
+        })
         .then(response => {
-          console.log("Successfully sent LinkedIn posts via background script:", response);
+          console.log("Successfully sent LinkedIn posts:", response);
         })
         .catch(error => {
-          console.error("Error sending LinkedIn posts via background script:", error);
+          console.error("Error sending LinkedIn posts:", error);
         });
+      });
     }
     
   return posts;
@@ -1976,29 +2017,6 @@ showAutoScanIndicator = function() {
   originalShowAutoScanIndicator();
   updateAutoScanIndicator();
 };
-
-function sendPostsViaBackgroundScript(posts, platform) {
-  console.log(`Sending ${posts.length} ${platform} posts through background script`);
-  
-  return new Promise((resolve, reject) => {
-    chrome.runtime.sendMessage({
-      action: 'sendPosts',
-      platform: platform,
-      posts: posts
-    }, function(response) {
-      if (chrome.runtime.lastError) {
-        console.error("Error sending posts to background script:", chrome.runtime.lastError);
-        reject(chrome.runtime.lastError);
-      } else if (response && response.success) {
-        console.log("Successfully sent posts through background script:", response);
-        resolve(response);
-      } else {
-        console.error("Background script returned error:", response?.error || "Unknown error");
-        reject(new Error(response?.error || "Unknown error in background script"));
-      }
-    });
-  });
-}
 
 // Function to load Pure Feed module
 function loadPureFeedModule() {
