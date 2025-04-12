@@ -232,11 +232,35 @@ class AuthenticDashboardAPI {
   
   /**
    * Perform a health check on a specific endpoint
+   * This has been modified to be more resilient to CORS issues
    */
   healthCheck(endpoint) {
     return new Promise((resolve) => {
       console.log(`Testing API endpoint: ${endpoint}`);
       
+      // If running in a content script, message the background script to do the health check
+      if (this.isContentScript()) {
+        console.log("Running in content script, using background script for health check");
+        chrome.runtime.sendMessage({
+          action: 'performHealthCheck',
+          endpoint: endpoint
+        }, response => {
+          if (chrome.runtime.lastError) {
+            console.error("Error communicating with background script:", chrome.runtime.lastError);
+            resolve(false);
+            return;
+          }
+          
+          if (response && response.success) {
+            resolve(response.available);
+          } else {
+            resolve(false);
+          }
+        });
+        return;
+      }
+      
+      // If in background script or popup, we can use fetch directly
       fetch(`${endpoint}/api/health-check/`, {
         method: 'GET',
         headers: {
@@ -251,6 +275,24 @@ class AuthenticDashboardAPI {
         resolve(false);
       });
     });
+  }
+  
+  /**
+   * Check if we're running in a content script context
+   */
+  isContentScript() {
+    // Check for service worker context first
+    if (typeof self !== 'undefined' && typeof window === 'undefined') {
+      return false; // We're in a service worker context
+    }
+    
+    // For browser contexts, check if we're in an iframe/content script
+    try {
+      return window.self !== window.top;
+    } catch (e) {
+      // If we can't access top, we're definitely in a content script due to security restrictions
+      return true;
+    }
   }
   
   /**
@@ -619,5 +661,18 @@ class AuthenticDashboardAPI {
 // Create a singleton instance
 const apiClient = new AuthenticDashboardAPI();
 
-// Export the singleton
-window.authDashboardAPI = apiClient; 
+// Make apiClient available in both module and non-module contexts
+if (typeof self !== 'undefined') {
+  // Make it available in service worker context
+  self.apiClient = apiClient;
+}
+
+// Make it available as a module export
+if (typeof exports !== 'undefined') {
+  // CommonJS module format
+  Object.defineProperty(exports, "__esModule", { value: true });
+  exports.default = apiClient;
+} else if (typeof window !== 'undefined') {
+  // Browser global
+  window.apiClient = apiClient;
+} 

@@ -1,0 +1,214 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>API Connection Test</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        .test-card {
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            padding: 15px;
+            margin-bottom: 15px;
+            background-color: #f9f9f9;
+        }
+        .result {
+            margin-top: 10px;
+            padding: 10px;
+            border-radius: 4px;
+            white-space: pre-wrap;
+            font-family: monospace;
+            min-height: 20px;
+        }
+        .success {
+            background-color: #dff0d8;
+            border: 1px solid #d6e9c6;
+            color: #3c763d;
+        }
+        .error {
+            background-color: #f2dede;
+            border: 1px solid #ebccd1;
+            color: #a94442;
+        }
+        .pending {
+            background-color: #fcf8e3;
+            border: 1px solid #faebcc;
+            color: #8a6d3b;
+        }
+        button {
+            padding: 8px 12px;
+            background-color: #4285f4;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+        button:hover {
+            background-color: #357ae8;
+        }
+        input[type="text"] {
+            padding: 8px;
+            width: 300px;
+        }
+    </style>
+</head>
+<body>
+    <h1>API Connection Test</h1>
+    <p>This page allows you to test the connection between your Chrome extension and the backend API.</p>
+    
+    <div class="test-card">
+        <h3>Test 1: Background Script Connection</h3>
+        <p>Checks if the background script is responsive.</p>
+        <button id="testBackgroundScript">Run Test</button>
+        <div id="backgroundResult" class="result pending">Waiting for test to run...</div>
+    </div>
+    
+    <div class="test-card">
+        <h3>Test 2: API Health Check</h3>
+        <p>Tests connection to the API health check endpoint.</p>
+        <button id="testHealthCheck">Run Test</button>
+        <div id="healthResult" class="result pending">Waiting for test to run...</div>
+    </div>
+    
+    <div class="test-card">
+        <h3>Test 3: API Key Verification</h3>
+        <p>Verifies if your API key is valid.</p>
+        <input type="text" id="apiKey" placeholder="Enter your API key" value="42ad72779a934c2d8005992bbecb6772">
+        <button id="testApiKey">Verify Key</button>
+        <div id="apiKeyResult" class="result pending">Waiting for test to run...</div>
+    </div>
+    
+    <div class="test-card">
+        <h3>Test 4: Send Test Post</h3>
+        <p>Attempts to send a test post via the background script relay.</p>
+        <button id="sendTestPost">Send Test Post</button>
+        <div id="postResult" class="result pending">Waiting for test to run...</div>
+    </div>
+
+    <script>
+        document.getElementById('testBackgroundScript').addEventListener('click', function() {
+            const resultDiv = document.getElementById('backgroundResult');
+            resultDiv.className = 'result pending';
+            resultDiv.textContent = 'Checking background script connection...';
+            
+            chrome.runtime.sendMessage({
+                action: 'checkConnection'
+            }, function(response) {
+                if (chrome.runtime.lastError) {
+                    resultDiv.className = 'result error';
+                    resultDiv.textContent = 'Error: ' + chrome.runtime.lastError.message;
+                    return;
+                }
+                
+                if (response && response.backgroundScriptWorking) {
+                    resultDiv.className = 'result success';
+                    resultDiv.textContent = 'Success! Background script is responsive.';
+                } else {
+                    resultDiv.className = 'result error';
+                    resultDiv.textContent = 'Error: Background script did not respond correctly.';
+                }
+            });
+        });
+        
+        document.getElementById('testHealthCheck').addEventListener('click', function() {
+            const resultDiv = document.getElementById('healthResult');
+            resultDiv.className = 'result pending';
+            resultDiv.textContent = 'Testing API health check...';
+            
+            chrome.runtime.sendMessage({
+                action: 'performHealthCheck',
+                endpoint: 'http://localhost:8000'
+            }, function(response) {
+                if (chrome.runtime.lastError) {
+                    resultDiv.className = 'result error';
+                    resultDiv.textContent = 'Error: ' + chrome.runtime.lastError.message;
+                    return;
+                }
+                
+                resultDiv.textContent = JSON.stringify(response, null, 2);
+                
+                if (response && response.success && response.available) {
+                    resultDiv.className = 'result success';
+                } else {
+                    resultDiv.className = 'result error';
+                }
+            });
+        });
+        
+        document.getElementById('testApiKey').addEventListener('click', function() {
+            const resultDiv = document.getElementById('apiKeyResult');
+            const apiKey = document.getElementById('apiKey').value;
+            
+            if (!apiKey) {
+                resultDiv.className = 'result error';
+                resultDiv.textContent = 'Error: Please enter an API key.';
+                return;
+            }
+            
+            resultDiv.className = 'result pending';
+            resultDiv.textContent = 'Verifying API key...';
+            
+            chrome.runtime.sendMessage({
+                action: 'verifyApiKey',
+                endpoint: 'http://localhost:8000',
+                apiKey: apiKey
+            }, function(response) {
+                if (chrome.runtime.lastError) {
+                    resultDiv.className = 'result error';
+                    resultDiv.textContent = 'Error: ' + chrome.runtime.lastError.message;
+                    return;
+                }
+                
+                resultDiv.textContent = JSON.stringify(response, null, 2);
+                
+                if (response && response.success && response.valid) {
+                    resultDiv.className = 'result success';
+                } else {
+                    resultDiv.className = 'result error';
+                }
+            });
+        });
+        
+        document.getElementById('sendTestPost').addEventListener('click', function() {
+            const resultDiv = document.getElementById('postResult');
+            resultDiv.className = 'result pending';
+            resultDiv.textContent = 'Sending test post...';
+            
+            const testPost = {
+                content: "This is a test post from the connection test page",
+                platform: "test",
+                original_user: "test_user",
+                is_friend: true,
+                is_family: false,
+                verified: false,
+                is_sponsored: false,
+                collected_at: new Date().toISOString()
+            };
+            
+            chrome.runtime.sendMessage({
+                action: 'sendPosts',
+                platform: 'test',
+                posts: [testPost]
+            }, function(response) {
+                if (chrome.runtime.lastError) {
+                    resultDiv.className = 'result error';
+                    resultDiv.textContent = 'Error: ' + chrome.runtime.lastError.message;
+                    return;
+                }
+                
+                resultDiv.textContent = JSON.stringify(response, null, 2);
+                
+                if (response && response.success) {
+                    resultDiv.className = 'result success';
+                } else {
+                    resultDiv.className = 'result error';
+                }
+            });
+        });
+    </script>
+</body>
+</html> 

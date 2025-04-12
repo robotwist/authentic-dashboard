@@ -55,7 +55,14 @@ MIDDLEWARE = [
 ]
 
 # CORS settings
-CORS_ALLOW_ALL_ORIGINS = True  # For development - in production, specify domains
+# Changed from CORS_ALLOW_ALL_ORIGINS to specific allowed origins for security
+CORS_ALLOWED_ORIGINS = [
+    'chrome-extension://*',  # Allow all Chrome extensions
+    'http://localhost:8000',
+    'http://127.0.0.1:8000',
+    'http://0.0.0.0:8000',
+    # Add production domains if needed
+]
 CORS_ALLOW_CREDENTIALS = True
 CORS_ALLOW_METHODS = [
     'GET',
@@ -77,6 +84,9 @@ CORS_ALLOW_HEADERS = [
     'x-requested-with',
     'x-api-key',  # Allow the API key header
 ]
+
+# Add CORS_URLS_REGEX to limit CORS to specific URL patterns if needed
+CORS_URLS_REGEX = r'^/api/.*$'  # Only apply CORS to /api/ endpoints
 
 ROOT_URLCONF = 'config_project.urls'
 

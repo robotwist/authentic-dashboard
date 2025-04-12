@@ -115,6 +115,33 @@ document.addEventListener('DOMContentLoaded', function() {
             checkBackendConnection();
         });
     }
+
+    // Add Pure Feed functionality
+    document.getElementById('pureFeedTabBtn').addEventListener('click', function() {
+        // Hide all tabs and show Pure Feed tab
+        document.querySelectorAll('.tab-content').forEach(tab => {
+            tab.style.display = 'none';
+        });
+        document.getElementById('pureFeedTab').style.display = 'block';
+        
+        // Update active button styles
+        document.querySelectorAll('.tab-button').forEach(btn => {
+            btn.classList.remove('active');
+        });
+        this.classList.add('active');
+        
+        // Load Pure Feed posts
+        loadPureFeedPosts();
+    });
+
+    // Refresh button for Pure Feed
+    document.getElementById('refreshFeedBtn').addEventListener('click', function() {
+        loadPureFeedPosts();
+    });
+
+    // Filter change handlers
+    document.getElementById('feedPlatform').addEventListener('change', loadPureFeedPosts);
+    document.getElementById('feedCategory').addEventListener('change', loadPureFeedPosts);
 });
 
 // Function to check backend connection
@@ -1039,4 +1066,224 @@ chrome.runtime.onMessage.addListener(function(message, sender, sendResponse) {
   
   return true;
 });
+
+/**
+ * Load Pure Feed posts with current filter settings
+ */
+function loadPureFeedPosts() {
+  const container = document.getElementById('pureFeedContainer');
+  const platformFilter = document.getElementById('feedPlatform').value;
+  const categoryFilter = document.getElementById('feedCategory').value;
+  
+  // Show loading indicator
+  container.innerHTML = `
+    <div class="loading-indicator">
+      <div class="spinner"></div>
+      <p>Loading ranked posts...</p>
+    </div>
+  `;
+  
+  // Prepare filter options
+  const options = {};
+  
+  if (platformFilter !== 'all') {
+    options.platform = platformFilter;
+  }
+  
+  if (categoryFilter !== 'all') {
+    options.category = categoryFilter;
+  }
+  
+  // Get the total number of posts to display
+  options.limit = 50;
+  
+  // Query the active tab to access content script
+  chrome.tabs.query({active: true, currentWindow: true}, async function(tabs) {
+    try {
+      // Try to get posts from background script's storage first
+      chrome.storage.local.get(['rankedPosts'], function(result) {
+        if (result.rankedPosts && Object.keys(result.rankedPosts).length > 0) {
+          renderRankedPosts(result.rankedPosts, options);
+        } else {
+          // If no posts in storage, try to access active tab's content script
+          try {
+            chrome.tabs.sendMessage(tabs[0].id, {
+              action: 'getPureFeed',
+              options: options
+            }, function(response) {
+              if (chrome.runtime.lastError) {
+                container.innerHTML = `
+                  <div class="empty-state">
+                    <p>Could not access Pure Feed. Make sure you're on a supported social platform.</p>
+                  </div>
+                `;
+                return;
+              }
+              
+              if (response && response.posts) {
+                renderRankedPosts(response.posts, options);
+              } else {
+                container.innerHTML = `
+                  <div class="empty-state">
+                    <p>No ranked posts found. Browse social media to collect posts.</p>
+                  </div>
+                `;
+              }
+            });
+          } catch (error) {
+            container.innerHTML = `
+              <div class="empty-state">
+                <p>Error: ${error.message}</p>
+              </div>
+            `;
+          }
+        }
+      });
+    } catch (error) {
+      container.innerHTML = `
+        <div class="empty-state">
+          <p>Error: ${error.message}</p>
+        </div>
+      `;
+    }
+  });
+}
+
+/**
+ * Render ranked posts with current filters applied
+ */
+function renderRankedPosts(posts, options) {
+  const container = document.getElementById('pureFeedContainer');
+  
+  // Convert object to array if needed
+  let postsArray = Array.isArray(posts) ? posts : Object.values(posts);
+  
+  // Apply filters
+  if (options.platform) {
+    postsArray = postsArray.filter(post => post.platform === options.platform);
+  }
+  
+  if (options.category) {
+    // Need to calculate category for each post based on score
+    postsArray = postsArray.filter(post => {
+      const score = post.authenticity_score || 50;
+      const category = getCategoryFromScore(score);
+      return category.name.toLowerCase() === options.category.toLowerCase();
+    });
+  }
+  
+  // Sort by authenticity score (high to low)
+  postsArray.sort((a, b) => (b.authenticity_score || 0) - (a.authenticity_score || 0));
+  
+  // Limit results
+  if (options.limit) {
+    postsArray = postsArray.slice(0, options.limit);
+  }
+  
+  // Check if we have posts
+  if (postsArray.length === 0) {
+    container.innerHTML = `
+      <div class="empty-state">
+        <p>No posts found matching your filters.</p>
+      </div>
+    `;
+    return;
+  }
+  
+  // Generate HTML for posts
+  let html = '';
+  
+  postsArray.forEach(post => {
+    const score = post.authenticity_score || 50;
+    const category = getCategoryFromScore(score);
+    const scoreClass = getScoreColorClass(score);
+    
+    // Post preview HTML
+    html += `
+      <div class="post-item ${scoreClass}">
+        <div class="post-header">
+          <div class="post-platform">${getPlatformIcon(post.platform)} ${post.platform || 'unknown'}</div>
+          <div class="post-user">${post.original_user || post.user || 'unknown'}</div>
+          <div class="post-score" title="${category.description}">
+            <span class="score-pill ${scoreClass}">${score}</span>
+            <span class="score-category">${category.name}</span>
+          </div>
+        </div>
+        <div class="post-content">
+          ${truncateText(post.content || '', 200)}
+        </div>
+        <div class="post-footer">
+          <div class="post-metrics">
+            ${post.is_sponsored ? '<span class="badge sponsored">Sponsored</span>' : ''}
+            ${post.is_friend ? '<span class="badge friend">Friend</span>' : ''}
+            ${post.is_family ? '<span class="badge family">Family</span>' : ''}
+            ${post.verified ? '<span class="badge verified">Verified</span>' : ''}
+          </div>
+          <div class="post-engagement">
+            ${post.likes ? `<span>${post.likes} likes</span>` : ''}
+            ${post.comments ? `<span>${post.comments} comments</span>` : ''}
+          </div>
+        </div>
+      </div>
+    `;
+  });
+  
+  container.innerHTML = html;
+}
+
+/**
+ * Get category object from score
+ */
+function getCategoryFromScore(score) {
+  const categories = [
+    { name: "Pure soul", range: [90, 100], description: "Vulnerable, funny, deep, unique." },
+    { name: "Insightful", range: [70, 89], description: "Honest, charmingly human." },
+    { name: "Neutral", range: [40, 69], description: "Safe but not manipulative." },
+    { name: "Performative", range: [20, 39], description: "Cringe, bland, try-hard." },
+    { name: "Spam/Ads", range: [0, 19], description: "Spam, ads, outrage bait." }
+  ];
+  
+  for (const category of categories) {
+    if (score >= category.range[0] && score <= category.range[1]) {
+      return category;
+    }
+  }
+  
+  return categories[2]; // Default to neutral
+}
+
+/**
+ * Get CSS class for score color
+ */
+function getScoreColorClass(score) {
+  if (score >= 90) return 'score-excellent';
+  if (score >= 70) return 'score-good';
+  if (score >= 40) return 'score-neutral';
+  if (score >= 20) return 'score-poor';
+  return 'score-bad';
+}
+
+/**
+ * Get platform icon
+ */
+function getPlatformIcon(platform) {
+  switch (platform?.toLowerCase()) {
+    case 'facebook':
+      return '<i class="fab fa-facebook"></i>';
+    case 'instagram':
+      return '<i class="fab fa-instagram"></i>';
+    case 'linkedin':
+      return '<i class="fab fa-linkedin"></i>';
+    default:
+      return '<i class="fas fa-globe"></i>';
+  }
+}
+
+/**
+ * Truncate text to a certain length
+ */
+function truncateText(text, maxLength) {
+  if (!text || text.length <= maxLength) return text;
+  return text.substring(0, maxLength) + '...';
+}
   

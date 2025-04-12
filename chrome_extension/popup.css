@@ -1,0 +1,245 @@
+/* Pure Feed Styles */
+#pureFeedTab {
+  padding: 15px;
+}
+
+.pure-feed-header {
+  margin-bottom: 20px;
+}
+
+.pure-feed-header h2 {
+  margin-top: 0;
+  margin-bottom: 10px;
+  color: #4a4a4a;
+}
+
+.pure-feed-header p {
+  margin-top: 0;
+  color: #666;
+  font-size: 14px;
+  line-height: 1.4;
+}
+
+.filter-group {
+  margin-bottom: 15px;
+}
+
+.filter-group label {
+  display: block;
+  margin-bottom: 5px;
+  font-weight: bold;
+  color: #555;
+  font-size: 14px;
+}
+
+.filter-group select {
+  width: 100%;
+  padding: 8px;
+  border-radius: 4px;
+  border: 1px solid #ccc;
+  background-color: #fff;
+  font-size: 14px;
+}
+
+.feed-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: 15px;
+}
+
+.refresh-btn {
+  background-color: #4285f4;
+  color: white;
+  border: none;
+  border-radius: 4px;
+  padding: 8px 15px;
+  font-size: 14px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.refresh-btn:hover {
+  background-color: #3367d6;
+}
+
+.refresh-btn i {
+  font-size: 14px;
+}
+
+/* Post List */
+.pure-feed-container {
+  max-height: 400px;
+  overflow-y: auto;
+  border: 1px solid #eee;
+  border-radius: 4px;
+  background-color: #f9f9f9;
+}
+
+.post-item {
+  background-color: white;
+  margin-bottom: 10px;
+  border-radius: 4px;
+  padding: 12px;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+  border-left: 4px solid #ccc;
+}
+
+.post-item.score-excellent {
+  border-left-color: #1e88e5;
+}
+
+.post-item.score-good {
+  border-left-color: #43a047;
+}
+
+.post-item.score-neutral {
+  border-left-color: #ffb300;
+}
+
+.post-item.score-poor {
+  border-left-color: #fb8c00;
+}
+
+.post-item.score-bad {
+  border-left-color: #e53935;
+}
+
+.post-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 10px;
+  font-size: 14px;
+}
+
+.post-platform {
+  color: #666;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.post-user {
+  font-weight: bold;
+  color: #333;
+}
+
+.post-score {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.score-pill {
+  display: inline-block;
+  padding: 2px 6px;
+  border-radius: 12px;
+  color: white;
+  font-weight: bold;
+  font-size: 12px;
+}
+
+.score-pill.score-excellent {
+  background-color: #1e88e5;
+}
+
+.score-pill.score-good {
+  background-color: #43a047;
+}
+
+.score-pill.score-neutral {
+  background-color: #ffb300;
+}
+
+.score-pill.score-poor {
+  background-color: #fb8c00;
+}
+
+.score-pill.score-bad {
+  background-color: #e53935;
+}
+
+.score-category {
+  font-size: 12px;
+  color: #555;
+}
+
+.post-content {
+  font-size: 14px;
+  color: #333;
+  line-height: 1.4;
+  margin-bottom: 10px;
+}
+
+.post-footer {
+  display: flex;
+  justify-content: space-between;
+  font-size: 12px;
+  color: #666;
+}
+
+.post-metrics {
+  display: flex;
+  gap: 5px;
+}
+
+.badge {
+  display: inline-block;
+  padding: 1px 5px;
+  border-radius: 3px;
+  font-size: 11px;
+  color: white;
+}
+
+.badge.sponsored {
+  background-color: #ff5722;
+}
+
+.badge.friend {
+  background-color: #2196f3;
+}
+
+.badge.family {
+  background-color: #4caf50;
+}
+
+.badge.verified {
+  background-color: #9c27b0;
+}
+
+.post-engagement {
+  display: flex;
+  gap: 8px;
+}
+
+/* Loading and Empty States */
+.loading-indicator {
+  padding: 20px;
+  text-align: center;
+  color: #666;
+}
+
+.spinner {
+  display: inline-block;
+  width: 20px;
+  height: 20px;
+  border: 2px solid rgba(0,0,0,0.1);
+  border-top-color: #3498db;
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+  margin-bottom: 10px;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+.empty-state {
+  padding: 20px;
+  text-align: center;
+  color: #666;
+}
+
+/* Existing styles... */ 

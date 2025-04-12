@@ -402,6 +402,7 @@
             <button id="settingsTabBtn" class="tab-button active">Settings</button>
             <button id="transparencyTabBtn" class="tab-button">Transparency</button>
             <button id="insightsTabBtn" class="tab-button">Insights</button>
+            <button id="pureFeedTabBtn" class="tab-button">Pure Feed</button>
         </div>
         
         <!-- Settings Tab -->
@@ -532,6 +533,49 @@
             <div id="currentPageInsights">
                 <div style="text-align: center; color: #555; font-size: 12px; padding: 20px;">
                     Click "Scan Current Page" to see insights
+                </div>
+            </div>
+        </div>
+        
+        <!-- Pure Feed Tab -->
+        <div id="pureFeedTab" class="tab-content">
+            <div class="section-header">
+                <h2>Pure Feed</h2>
+                <p>Content ranked by authenticity, not engagement.</p>
+            </div>
+            
+            <div class="filters">
+                <div class="filter-group">
+                    <label for="feedPlatform">Platform:</label>
+                    <select id="feedPlatform">
+                        <option value="all">All Platforms</option>
+                        <option value="facebook">Facebook</option>
+                        <option value="instagram">Instagram</option>
+                        <option value="linkedin">LinkedIn</option>
+                    </select>
+                </div>
+                
+                <div class="filter-group">
+                    <label for="feedCategory">Category:</label>
+                    <select id="feedCategory">
+                        <option value="all">All Categories</option>
+                        <option value="pure soul">Pure Soul (90-100)</option>
+                        <option value="insightful">Insightful (70-89)</option>
+                        <option value="neutral">Neutral (40-69)</option>
+                        <option value="performative">Performative (20-39)</option>
+                        <option value="spam/ads">Spam/Ads (0-19)</option>
+                    </select>
+                </div>
+                
+                <button id="refreshFeedBtn" class="btn-primary">
+                    <i class="fas fa-sync"></i> Refresh
+                </button>
+            </div>
+            
+            <div id="pureFeedContainer" class="posts-container">
+                <div class="loading-indicator">
+                    <div class="spinner"></div>
+                    <p>Loading ranked posts...</p>
                 </div>
             </div>
         </div>

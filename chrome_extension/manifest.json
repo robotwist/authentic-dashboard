@@ -33,7 +33,7 @@
           "*://*.facebook.com/*",
           "*://*.linkedin.com/*"
         ],
-        "js": ["api_client.js", "content.js"]
+        "js": ["content.js"]
       }
     ],
     "background": {
@@ -42,8 +42,9 @@
     },
     "web_accessible_resources": [
       {
-        "resources": ["api_client.js"],
-        "matches": ["<all_urls>"]
+        "resources": ["api_client.js", "ml_models/post_classifier.json", "lib/flexsearch.min.js", "lib/tf.min.js"],
+        "matches": ["<all_urls>"],
+        "use_dynamic_url": true
       }
     ],
     "icons": {

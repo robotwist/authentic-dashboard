@@ -1519,16 +1519,28 @@ def delete_api_key(request, key_id):
 def api_health_check(request):
     """
     Simple health check endpoint to verify API is up and running
+    This endpoint intentionally allows OPTIONS requests and sets CORS headers directly
+    to ensure it can be accessed from anywhere for connectivity checking.
     """
+    # Handle OPTIONS preflight requests
+    if request.method == "OPTIONS":
+        response = JsonResponse({'status': 'ok'})
+        response["Access-Control-Allow-Origin"] = "*"
+        response["Access-Control-Allow-Methods"] = "GET, OPTIONS"
+        response["Access-Control-Allow-Headers"] = "X-API-Key, Content-Type, Origin"
+        response["Access-Control-Max-Age"] = "86400"  # Cache preflight for 24 hours
+        return response
+    
     response = JsonResponse({
         'status': 'ok',
         'message': 'API is operational',
-        'version': '1.0'
+        'version': '1.0',
+        'timestamp': timezone.now().isoformat()
     })
     # Add CORS headers to bypass preflight check issues
     response["Access-Control-Allow-Origin"] = "*"
     response["Access-Control-Allow-Methods"] = "GET, OPTIONS"
-    response["Access-Control-Allow-Headers"] = "X-API-Key, Content-Type"
+    response["Access-Control-Allow-Headers"] = "X-API-Key, Content-Type, Origin"
     return response
 
 @csrf_exempt
