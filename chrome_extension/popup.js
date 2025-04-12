@@ -687,30 +687,56 @@ function updateStatsDisplay(stats) {
     document.getElementById('mlProcessed').textContent = stats.mlProcessed;
 }
 
-// Function to update recent scans display
+/**
+ * Update recent scans display
+ */
 function updateRecentScansDisplay(scanHistory) {
-    const recentScansElement = document.getElementById('recentScans');
-    recentScansElement.innerHTML = '';
+    const container = document.getElementById('recentScans');
     
-    if (scanHistory.length === 0) {
-        recentScansElement.innerHTML = '<p>No recent scans</p>';
-        return;
-    }
+    // Clear container
+    container.innerHTML = '';
     
-    scanHistory.forEach(scan => {
-        const scanDate = new Date(scan.timestamp);
-        const timeString = scanDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    // Create recent scan items
+    if (scanHistory && scanHistory.length > 0) {
+        // Only show the most recent 5 scans
+        const recentScans = scanHistory.slice(0, 5);
         
-        const scanItem = document.createElement('div');
-        scanItem.className = 'scan-item';
-        scanItem.innerHTML = `
-            <span class="scan-platform">${scan.platform}</span>: 
-            ${scan.count} posts 
-            <span class="scan-time">(${timeString})</span>
+        recentScans.forEach(scan => {
+            const scanDate = new Date(scan.timestamp);
+            const formattedTime = scanDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+            const formattedDate = scanDate.toLocaleDateString([], { month: 'short', day: 'numeric' });
+            
+            // Create scan item with improved design
+            const scanItem = document.createElement('div');
+            scanItem.className = 'scan-item';
+            
+            // Format platform name with proper capitalization
+            const platformName = scan.platform.charAt(0).toUpperCase() + scan.platform.slice(1);
+            
+            // Get platform icon
+            const platformIcon = getPlatformIcon(scan.platform);
+            
+            // Create scan item content
+            scanItem.innerHTML = `
+                <div class="scan-content">
+                    <div class="scan-info">
+                        <span class="scan-platform">${platformName}</span>: 
+                        <span class="scan-count">${scan.count}</span> posts collected
+                    </div>
+                    <div class="scan-time">${formattedTime} · ${formattedDate}</div>
+                </div>
+            `;
+            
+            container.appendChild(scanItem);
+        });
+    } else {
+        // Show empty state
+        container.innerHTML = `
+            <div class="empty-state">
+                <p>No recent scans. Click "Scan Current Page" to collect posts.</p>
+            </div>
         `;
-        
-        recentScansElement.appendChild(scanItem);
-    });
+    }
 }
 
 // Function to update API key
@@ -1068,188 +1094,196 @@ chrome.runtime.onMessage.addListener(function(message, sender, sendResponse) {
 });
 
 /**
- * Load Pure Feed posts with current filter settings
+ * Load and render ranked posts for the Pure Feed
  */
 function loadPureFeedPosts() {
-  const container = document.getElementById('pureFeedContainer');
-  const platformFilter = document.getElementById('feedPlatform').value;
-  const categoryFilter = document.getElementById('feedCategory').value;
-  
-  // Show loading indicator
-  container.innerHTML = `
-    <div class="loading-indicator">
-      <div class="spinner"></div>
-      <p>Loading ranked posts...</p>
-    </div>
-  `;
-  
-  // Prepare filter options
-  const options = {};
-  
-  if (platformFilter !== 'all') {
-    options.platform = platformFilter;
-  }
-  
-  if (categoryFilter !== 'all') {
-    options.category = categoryFilter;
-  }
-  
-  // Get the total number of posts to display
-  options.limit = 50;
-  
-  // Query the active tab to access content script
-  chrome.tabs.query({active: true, currentWindow: true}, async function(tabs) {
-    try {
-      // Try to get posts from background script's storage first
-      chrome.storage.local.get(['rankedPosts'], function(result) {
-        if (result.rankedPosts && Object.keys(result.rankedPosts).length > 0) {
-          renderRankedPosts(result.rankedPosts, options);
-        } else {
-          // If no posts in storage, try to access active tab's content script
-          try {
-            chrome.tabs.sendMessage(tabs[0].id, {
-              action: 'getPureFeed',
-              options: options
-            }, function(response) {
-              if (chrome.runtime.lastError) {
-                container.innerHTML = `
-                  <div class="empty-state">
-                    <p>Could not access Pure Feed. Make sure you're on a supported social platform.</p>
-                  </div>
-                `;
-                return;
-              }
-              
-              if (response && response.posts) {
-                renderRankedPosts(response.posts, options);
-              } else {
-                container.innerHTML = `
-                  <div class="empty-state">
-                    <p>No ranked posts found. Browse social media to collect posts.</p>
-                  </div>
-                `;
-              }
-            });
-          } catch (error) {
-            container.innerHTML = `
-              <div class="empty-state">
-                <p>Error: ${error.message}</p>
-              </div>
-            `;
-          }
-        }
-      });
-    } catch (error) {
-      container.innerHTML = `
-        <div class="empty-state">
-          <p>Error: ${error.message}</p>
-        </div>
-      `;
-    }
-  });
-}
-
-/**
- * Render ranked posts with current filters applied
- */
-function renderRankedPosts(posts, options) {
-  const container = document.getElementById('pureFeedContainer');
-  
-  // Convert object to array if needed
-  let postsArray = Array.isArray(posts) ? posts : Object.values(posts);
-  
-  // Apply filters
-  if (options.platform) {
-    postsArray = postsArray.filter(post => post.platform === options.platform);
-  }
-  
-  if (options.category) {
-    // Need to calculate category for each post based on score
-    postsArray = postsArray.filter(post => {
-      const score = post.authenticity_score || 50;
-      const category = getCategoryFromScore(score);
-      return category.name.toLowerCase() === options.category.toLowerCase();
-    });
-  }
-  
-  // Sort by authenticity score (high to low)
-  postsArray.sort((a, b) => (b.authenticity_score || 0) - (a.authenticity_score || 0));
-  
-  // Limit results
-  if (options.limit) {
-    postsArray = postsArray.slice(0, options.limit);
-  }
-  
-  // Check if we have posts
-  if (postsArray.length === 0) {
-    container.innerHTML = `
-      <div class="empty-state">
-        <p>No posts found matching your filters.</p>
-      </div>
-    `;
-    return;
-  }
-  
-  // Generate HTML for posts
-  let html = '';
-  
-  postsArray.forEach(post => {
-    const score = post.authenticity_score || 50;
-    const category = getCategoryFromScore(score);
-    const scoreClass = getScoreColorClass(score);
+    // Get filters
+    const platformFilter = document.getElementById('feedPlatform').value;
+    const categoryFilter = document.getElementById('feedCategory').value;
     
-    // Post preview HTML
-    html += `
-      <div class="post-item ${scoreClass}">
-        <div class="post-header">
-          <div class="post-platform">${getPlatformIcon(post.platform)} ${post.platform || 'unknown'}</div>
-          <div class="post-user">${post.original_user || post.user || 'unknown'}</div>
-          <div class="post-score" title="${category.description}">
-            <span class="score-pill ${scoreClass}">${score}</span>
-            <span class="score-category">${category.name}</span>
-          </div>
+    // Show loading state
+    const container = document.getElementById('pureFeedContainer');
+    container.innerHTML = `
+        <div class="loading-indicator">
+            <div class="spinner"></div>
+            <p>Loading your ranked posts...</p>
         </div>
-        <div class="post-content">
-          ${truncateText(post.content || '', 200)}
-        </div>
-        <div class="post-footer">
-          <div class="post-metrics">
-            ${post.is_sponsored ? '<span class="badge sponsored">Sponsored</span>' : ''}
-            ${post.is_friend ? '<span class="badge friend">Friend</span>' : ''}
-            ${post.is_family ? '<span class="badge family">Family</span>' : ''}
-            ${post.verified ? '<span class="badge verified">Verified</span>' : ''}
-          </div>
-          <div class="post-engagement">
-            ${post.likes ? `<span>${post.likes} likes</span>` : ''}
-            ${post.comments ? `<span>${post.comments} comments</span>` : ''}
-          </div>
-        </div>
-      </div>
     `;
-  });
-  
-  container.innerHTML = html;
+    
+    // Get ranked posts from storage
+    chrome.storage.local.get(['rankedPosts'], function(result) {
+        const rankedPosts = result.rankedPosts || {};
+        
+        // Convert to array
+        let posts = Object.values(rankedPosts);
+        
+        // Check if we have any posts
+        if (!posts || posts.length === 0) {
+            container.innerHTML = `
+                <div class="empty-state">
+                    <p>No ranked posts found.</p>
+                    <p>Try scanning some social media pages first.</p>
+                </div>
+            `;
+            return;
+        }
+        
+        // Apply platform filter
+        if (platformFilter && platformFilter !== 'all') {
+            posts = posts.filter(post => post.platform === platformFilter);
+        }
+        
+        // Apply category filter
+        if (categoryFilter && categoryFilter !== 'all') {
+            posts = posts.filter(post => {
+                const category = getCategoryFromScore(post.authenticity_score || 50);
+                return category.name.toLowerCase() === categoryFilter.toLowerCase();
+            });
+        }
+        
+        // Sort by authenticity score (high to low)
+        posts.sort((a, b) => (b.authenticity_score || 0) - (a.authenticity_score || 0));
+        
+        // Limit to 20 posts for performance
+        posts = posts.slice(0, 20);
+        
+        // Render posts with updated UI
+        setTimeout(() => {
+            renderRankedPosts(posts);
+            
+            // Scroll to top
+            container.scrollTop = 0;
+            
+            // Show post count
+            const countString = posts.length === 1 ? '1 post' : `${posts.length} posts`;
+            container.insertAdjacentHTML('afterbegin', `
+                <div class="results-summary mb-sm">
+                    Showing ${countString} sorted by authenticity score
+                </div>
+            `);
+        }, 300); // Small delay for better visual feedback
+    });
 }
 
 /**
- * Get category object from score
+ * Render ranked posts in the Pure Feed tab
+ */
+function renderRankedPosts(posts, options = {}) {
+    const container = document.getElementById('pureFeedContainer');
+    
+    // Clear previous content
+    container.innerHTML = '';
+    
+    if (!posts || posts.length === 0) {
+        container.innerHTML = `
+            <div class="empty-state">
+                <p>No posts found matching your criteria.</p>
+                <p>Try changing your filters or scanning more pages.</p>
+            </div>
+        `;
+        return;
+    }
+    
+    // Create posts
+    posts.forEach(post => {
+        // Get score class and category
+        const scoreClass = getScoreColorClass(post.authenticity_score);
+        const category = getCategoryFromScore(post.authenticity_score);
+        
+        // Platform icon
+        const platformIcon = getPlatformIcon(post.platform);
+        
+        // Create post element
+        const postElement = document.createElement('div');
+        postElement.className = `post-item ${scoreClass}`;
+        
+        // Format badges
+        const badges = [];
+        if (post.is_sponsored) badges.push('<span class="badge sponsored">Sponsored</span>');
+        if (post.is_friend) badges.push('<span class="badge friend">Friend</span>');
+        if (post.is_family) badges.push('<span class="badge family">Family</span>');
+        if (post.verified) badges.push('<span class="badge verified">Verified</span>');
+        
+        // Format engagement metrics
+        const engagement = [];
+        if (post.likes !== undefined && post.likes > 0) {
+            engagement.push(`<div class="engagement-item"><span class="engagement-icon">👍</span> ${post.likes}</div>`);
+        }
+        if (post.comments !== undefined && post.comments > 0) {
+            engagement.push(`<div class="engagement-item"><span class="engagement-icon">💬</span> ${post.comments}</div>`);
+        }
+        if (post.shares !== undefined && post.shares > 0) {
+            engagement.push(`<div class="engagement-item"><span class="engagement-icon">↗️</span> ${post.shares}</div>`);
+        }
+        
+        // Create authenticity meter with score visualization
+        const authenticityMeter = `
+            <div class="authenticity-score-container">
+                <div class="authenticity-meter">
+                    <div class="authenticity-fill ${scoreClass}" style="width: ${post.authenticity_score}%"></div>
+                </div>
+            </div>
+        `;
+        
+        // Set inner HTML with improved layout
+        postElement.innerHTML = `
+            <div class="post-header">
+                <div class="post-user-info">
+                    <div class="post-platform">
+                        ${platformIcon}
+                        ${post.platform}
+                    </div>
+                    <div class="post-user">${post.original_user || 'Unknown'}</div>
+                </div>
+                <div class="post-score">
+                    <span class="score-pill ${scoreClass}">${post.authenticity_score}</span>
+                    <span class="score-category">${category.name}</span>
+                </div>
+            </div>
+            
+            ${authenticityMeter}
+            
+            <div class="post-content">
+                ${truncateText(post.content || '', 150)}
+            </div>
+            
+            <div class="post-footer">
+                <div class="post-metrics">
+                    ${badges.join('')}
+                </div>
+                <div class="post-engagement">
+                    ${engagement.join('')}
+                </div>
+            </div>
+        `;
+        
+        // Add to container
+        container.appendChild(postElement);
+    });
+}
+
+/**
+ * Get authenticity category from score
  */
 function getCategoryFromScore(score) {
-  const categories = [
-    { name: "Pure soul", range: [90, 100], description: "Vulnerable, funny, deep, unique." },
-    { name: "Insightful", range: [70, 89], description: "Honest, charmingly human." },
-    { name: "Neutral", range: [40, 69], description: "Safe but not manipulative." },
-    { name: "Performative", range: [20, 39], description: "Cringe, bland, try-hard." },
-    { name: "Spam/Ads", range: [0, 19], description: "Spam, ads, outrage bait." }
-  ];
-  
-  for (const category of categories) {
-    if (score >= category.range[0] && score <= category.range[1]) {
-      return category;
+    // Define score ranges
+    const categories = [
+        { name: "Pure soul", range: [90, 100], description: "Vulnerable, funny, deep, unique." },
+        { name: "Insightful", range: [70, 89], description: "Honest, charmingly human." },
+        { name: "Neutral", range: [40, 69], description: "Safe but not manipulative." },
+        { name: "Performative", range: [20, 39], description: "Cringe, bland, try-hard." },
+        { name: "Spam/Ads", range: [0, 19], description: "Spam, ads, outrage bait." }
+    ];
+    
+    // Find matching category
+    for (const category of categories) {
+        if (score >= category.range[0] && score <= category.range[1]) {
+            return category;
+        }
     }
-  }
-  
-  return categories[2]; // Default to neutral
+    
+    // Default to neutral
+    return categories[2];
 }
 
 /**

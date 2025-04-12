@@ -1,0 +1,109 @@
+/**
+ * Authentic Dashboard - Shared Design Tokens
+ * This file defines all design variables shared between the web dashboard and extension
+ */
+
+:root {
+  /* Color System */
+  --color-primary: #3498db;
+  --color-primary-dark: #2980b9;
+  --color-primary-light: #e3f2fd;
+  --color-secondary: #2ecc71;
+  --color-secondary-dark: #27ae60;
+  --color-warning: #f39c12;
+  --color-danger: #e74c3c;
+  --color-info: #3498db;
+  --color-success: #2ecc71;
+  
+  /* Neutrals */
+  --color-black: #222;
+  --color-gray-dark: #444;
+  --color-gray: #777;
+  --color-gray-light: #bbb;
+  --color-gray-lighter: #ddd;
+  --color-white: #fff;
+  --color-off-white: #f9f9f9;
+  
+  /* Backgrounds */
+  --bg-body: var(--color-off-white);
+  --bg-card: var(--color-white);
+  --bg-sidebar: var(--color-white);
+  --bg-nav: var(--color-white);
+  
+  /* Authenticity Score Colors */
+  --score-excellent: #1e88e5;
+  --score-good: #43a047;
+  --score-neutral: #ffb300;
+  --score-poor: #fb8c00;
+  --score-bad: #e53935;
+  
+  /* Typography */
+  --font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+  --font-size-xs: 11px;
+  --font-size-sm: 13px;
+  --font-size-md: 14px;
+  --font-size-lg: 16px;
+  --font-size-xl: 18px;
+  --font-size-2xl: 24px;
+  --font-size-3xl: 32px;
+  
+  /* Font Weights */
+  --font-weight-normal: 400;
+  --font-weight-medium: 500;
+  --font-weight-semibold: 600;
+  --font-weight-bold: 700;
+  
+  /* Spacing */
+  --spacing-xs: 4px;
+  --spacing-sm: 8px;
+  --spacing-md: 16px;
+  --spacing-lg: 24px;
+  --spacing-xl: 32px;
+  --spacing-2xl: 48px;
+  --spacing-3xl: 64px;
+  
+  /* Border Radius */
+  --radius-sm: 4px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+  --radius-full: 9999px;
+  
+  /* Shadows */
+  --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.1);
+  --shadow-md: 0 2px 8px rgba(0, 0, 0, 0.08);
+  --shadow-lg: 0 4px 12px rgba(0, 0, 0, 0.15);
+  
+  /* Transitions */
+  --transition-fast: 0.2s;
+  --transition-medium: 0.3s;
+  --transition-slow: 0.5s;
+  
+  /* Z-indices */
+  --z-dropdown: 1000;
+  --z-sticky: 1020;
+  --z-fixed: 1030;
+  --z-modal-backdrop: 1040;
+  --z-modal: 1050;
+  --z-popover: 1060;
+  --z-tooltip: 1070;
+}
+
+/* Dark mode overrides */
+[data-theme="dark"] {
+  --color-black: #e1e1e1;
+  --color-gray-dark: #c1c1c1;
+  --color-gray: #a1a1a1;
+  --color-gray-light: #666;
+  --color-gray-lighter: #444;
+  --color-white: #121212;
+  --color-off-white: #1e1e1e;
+  
+  --bg-body: #121212;
+  --bg-card: #1e1e1e;
+  --bg-sidebar: #1e1e1e;
+  --bg-nav: #1e1e1e;
+  
+  --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.4);
+  --shadow-md: 0 2px 8px rgba(0, 0, 0, 0.6);
+  --shadow-lg: 0 4px 12px rgba(0, 0, 0, 0.8);
+} 

@@ -1,12 +1,21 @@
+{% load static %}
 <!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>{% block title %}Authentic Internet{% endblock %}</title>
+  
+  <!-- Third-party CSS -->
   <link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.3/css/all.min.css">
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300;400;500;600;700&family=DM+Sans:wght@400;500;700&family=DM+Mono:wght@400;500&display=swap">
+  
+  <!-- Design System CSS -->
+  <link rel="stylesheet" href="{% static 'css/design-tokens.css' %}">
+  <link rel="stylesheet" href="{% static 'css/components.css' %}">
+  
+  <!-- Legacy styles - to be gradually migrated to the design system -->
   <style>
     :root {
       /* Color Palette */
@@ -449,6 +458,8 @@
       }
     }
   </style>
+  
+  <!-- Include any extra CSS from child templates -->
   {% block extra_css %}{% endblock %}
 </head>
 <body data-theme="light">

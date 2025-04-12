@@ -2,371 +2,13 @@
 <html>
 <head>
     <title>Authentic Dashboard</title>
-  <style>
-        body {
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            margin: 0;
-            padding: 15px;
-            max-width: 400px;
-            background-color: #f9f9f9;
-            color: #222;
-        }
-        
-        .header {
-            margin-bottom: 20px;
-        }
-        
-        h1 {
-            font-size: 18px;
-            color: #222;
-            margin-bottom: 5px;
-        }
-        
-        .description {
-            font-size: 13px;
-            color: #444;
-            margin-bottom: 15px;
-        }
-        
-        #scanButton {
-            background-color: #3498db;
-            color: white;
-            border: none;
-            border-radius: 5px;
-            padding: 8px 15px;
-            font-size: 14px;
-            cursor: pointer;
-            width: 100%;
-            margin-bottom: 10px;
-            transition: background-color 0.2s;
-        }
-        
-        #scanButton:hover {
-            background-color: #2980b9;
-        }
-        
-        .status {
-            font-size: 13px;
-            color: #444;
-            margin-bottom: 15px;
-            text-align: center;
-        }
-        
-        .stats {
-            background-color: #f0f2f5;
-            border-radius: 8px;
-            padding: 10px;
-            margin-bottom: 15px;
-        }
-        
-        .stat-row {
-            display: flex;
-            justify-content: space-between;
-            margin-bottom: 5px;
-            font-size: 13px;
-        }
-        
-        .stat-row span {
-            color: #333;
-        }
-        
-        .stat-count {
-            font-weight: bold;
-            color: #2980b9;
-        }
-        
-        .recent-scans {
-            margin-bottom: 15px;
-        }
-        
-        .scan-item {
-            font-size: 12px;
-            color: #333;
-            margin-bottom: 8px;
-            padding: 8px;
-            background-color: #e9eef2;
-            border-radius: 5px;
-        }
-        
-        .scan-time {
-            font-size: 11px;
-            color: #444;
-            margin-top: 4px;
-        }
-        
-        .toggle-row {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            margin-bottom: 15px;
-        }
-        
-        .toggle-label {
-            font-size: 13px;
-            color: #333;
-        }
-        
-        .toggle {
-            position: relative;
-            display: inline-block;
-            width: 36px;
-            height: 20px;
-        }
-        
-        .toggle input {
-            opacity: 0;
-            width: 0;
-            height: 0;
-        }
-        
-        .slider {
-            position: absolute;
-            cursor: pointer;
-            top: 0;
-            left: 0;
-            right: 0;
-            bottom: 0;
-            background-color: #ccc;
-            -webkit-transition: .4s;
-            transition: .4s;
-            border-radius: 20px;
-        }
-        
-        .slider:before {
-            position: absolute;
-            content: "";
-            height: 16px;
-            width: 16px;
-            left: 2px;
-            bottom: 2px;
-            background-color: white;
-            -webkit-transition: .4s;
-            transition: .4s;
-            border-radius: 50%;
-        }
-        
-        input:checked + .slider {
-            background-color: #3498db;
-        }
-        
-        input:focus + .slider {
-            box-shadow: 0 0 1px #3498db;
-        }
-        
-        input:checked + .slider:before {
-            -webkit-transform: translateX(16px);
-            -ms-transform: translateX(16px);
-            transform: translateX(16px);
-        }
-        
-        .api-key-section {
-            margin-top: 10px;
-        }
-        
-        .api-key-section label {
-            display: block;
-            margin-bottom: 5px;
-            font-size: 13px;
-            color: #333;
-        }
-        
-        .api-key-input {
-            width: calc(100% - 100px);
-            padding: 5px;
-            border: 1px solid #ccc;
-            border-radius: 4px;
-        }
-        
-        .small-button {
-            background-color: #3498db;
-            color: white;
-            border: none;
-            border-radius: 4px;
-            padding: 6px 12px;
-            font-size: 12px;
-            cursor: pointer;
-            transition: background-color 0.2s;
-        }
-        
-        .small-button:hover {
-            background-color: #2980b9;
-        }
-        
-        /* Tab styling */
-        .tab-container {
-            margin-top: 20px;
-            border-top: 1px solid #ddd;
-            padding-top: 15px;
-        }
-        
-        .tab-buttons {
-            display: flex;
-            border-bottom: 1px solid #ddd;
-        }
-        
-        .tab-button {
-            background-color: #f1f1f1;
-            border: none;
-            padding: 8px 16px;
-            font-size: 13px;
-            cursor: pointer;
-            transition: 0.3s;
-            border-radius: 4px 4px 0 0;
-            margin-bottom: -1px;
-            color: #444;
-        }
-        
-        .tab-button:hover {
-            background-color: #ddd;
-        }
-        
-        .tab-button.active {
-            background-color: white;
-            border: 1px solid #ddd;
-            border-bottom: 1px solid white;
-            color: #3498db;
-        }
-        
-        .tab-content {
-            display: none;
-            padding: 15px;
-            border: 1px solid #ddd;
-            border-top: none;
-            background-color: white;
-            margin-bottom: 15px;
-        }
-        
-        .tab-content.active {
-            display: block;
-        }
-        
-        /* Transparency panel */
-        .data-category {
-            margin-bottom: 15px;
-        }
-        
-        .data-category h4 {
-            margin: 5px 0;
-            font-size: 14px;
-            color: #222;
-            font-weight: 600;
-        }
-        
-        .data-items {
-            margin-left: 15px;
-            font-size: 12px;
-            color: #444;
-        }
-        
-        .data-control {
-            font-size: 12px;
-            margin-top: 5px;
-            color: #333;
-        }
-        
-        .data-control label {
-            display: flex;
-            align-items: center;
-        }
-        
-        .data-control input {
-            margin-right: 5px;
-        }
-        
-        .learn-more {
-            font-size: 11px;
-            color: #2980b9;
-            text-decoration: underline;
-            cursor: pointer;
-            margin-left: 5px;
-        }
-        
-        /* Tooltip for explaining data usage */
-        .tooltip {
-            position: relative;
-            display: inline-block;
-            border-bottom: 1px dotted #3498db;
-            cursor: help;
-        }
-        
-        .tooltip .tooltiptext {
-            visibility: hidden;
-            width: 200px;
-            background-color: #333;
-            color: #fff;
-            text-align: center;
-            border-radius: 6px;
-            padding: 5px;
-            position: absolute;
-            z-index: 1;
-            bottom: 125%;
-            left: 50%;
-            margin-left: -100px;
-            opacity: 0;
-            transition: opacity 0.3s;
-            font-size: 11px;
-            font-weight: normal;
-        }
-        
-        .tooltip:hover .tooltiptext {
-            visibility: visible;
-            opacity: 1;
-        }
-        
-        /* Connection warning styles */
-        .connection-warning {
-            background-color: #fcf8e3;
-            border: 1px solid #faebcc;
-            border-radius: 4px;
-            color: #8a6d3b;
-            margin-top: 10px;
-            margin-bottom: 10px;
-            padding: 10px;
-            display: none;
-        }
-        
-        .connection-warning p {
-            margin: 0 0 10px 0;
-            font-size: 13px;
-            color: #6d5630;
-        }
-        
-        .retry-button {
-            background-color: #f0ad4e;
-            width: auto;
-            font-size: 12px;
-            padding: 5px 10px;
-            margin: 0;
-            color: #fff;
-        }
-        
-        .retry-button:hover {
-            background-color: #ec971f;
-        }
-        
-        .footer {
-            margin-top: 20px;
-            font-size: 11px;
-            text-align: center;
-            color: #555;
-        }
-        
-        .footer a {
-            color: #2980b9;
-            text-decoration: none;
-        }
-        
-        .troubleshoot-link {
-            font-size: 11px;
-            color: #555;
-            text-decoration: none;
-        }
-        
-        .troubleshoot-link:hover {
-            color: #2980b9;
-            text-decoration: underline;
-        }
-  </style>
+    <!-- Core design system -->
+    <link rel="stylesheet" href="shared/design-tokens.css">
+    <link rel="stylesheet" href="shared/components.css">
+    <!-- Legacy styles (to be gradually migrated) -->
+    <link rel="stylesheet" href="design-system.css">
+    <link rel="stylesheet" href="popup.css">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
 </head>
 <body>
     <div class="header">
@@ -375,39 +17,52 @@
         <!-- Connection message container will be inserted here by JS -->
     </div>
     
-    <button id="scanButton">Scan Current Page</button>
+    <button id="scanButton" class="btn btn-primary">Scan Current Page</button>
     <div id="status" class="status">Checking connection status...</div>
     
-    <div class="stats">
+    <div class="stats-card">
         <div class="stat-row">
-            <span>Posts collected today:</span>
+            <span class="stat-label">Posts collected today</span>
             <span class="stat-count" id="postsToday">0</span>
         </div>
         <div class="stat-row">
-            <span>Total posts:</span>
+            <span class="stat-label">Total posts</span>
             <span class="stat-count" id="postsTotal">0</span>
         </div>
         <div class="stat-row">
-            <span>ML processed:</span>
+            <span class="stat-label">ML processed</span>
             <span class="stat-count" id="mlProcessed">0</span>
         </div>
     </div>
     
+    <h3 class="section-title mb-sm">Recent Activity</h3>
     <div class="recent-scans" id="recentScans">
         <!-- Recent scans will be inserted here -->
     </div>
     
     <div class="tab-container">
         <div class="tab-buttons">
-            <button id="settingsTabBtn" class="tab-button active">Settings</button>
-            <button id="transparencyTabBtn" class="tab-button">Transparency</button>
-            <button id="insightsTabBtn" class="tab-button">Insights</button>
-            <button id="pureFeedTabBtn" class="tab-button">Pure Feed</button>
+            <button id="settingsTabBtn" class="tab-button active">
+                <span class="tab-icon settings-icon"></span>
+                Settings
+            </button>
+            <button id="transparencyTabBtn" class="tab-button">
+                <span class="tab-icon transparency-icon"></span>
+                Transparency
+            </button>
+            <button id="insightsTabBtn" class="tab-button">
+                <span class="tab-icon insights-icon"></span>
+                Insights
+            </button>
+            <button id="pureFeedTabBtn" class="tab-button">
+                <span class="tab-icon pure-feed-icon"></span>
+                Pure Feed
+            </button>
         </div>
         
         <!-- Settings Tab -->
-        <div id="settingsTab" class="tab-content">
-            <h3 style="font-size: 14px; margin-bottom: 10px; color: #222;">Scanner Settings</h3>
+        <div id="settingsTab" class="tab-content active">
+            <h3 class="section-title">Scanner Settings</h3>
             
             <div class="toggle-row">
                 <span class="toggle-label">Auto-scan on page load</span>
@@ -442,9 +97,11 @@
             </div>
             
             <div class="api-key-section">
-                <label for="apiKey" style="color: #333; font-weight: 500;">API Key:</label>
-                <input type="text" id="apiKey" class="api-key-input" placeholder="Enter your API key" style="border: 1px solid #bbb;">
-                <button id="saveApiKey" class="small-button" style="background-color: #3498db; color: white;">Save</button>
+                <label for="apiKey" class="form-label">API Key:</label>
+                <div class="input-with-button">
+                    <input type="text" id="apiKey" class="form-input" placeholder="Enter your API key">
+                    <button id="saveApiKey" class="btn btn-secondary">Save</button>
+                </div>
             </div>
         </div>
         
@@ -539,15 +196,15 @@
         
         <!-- Pure Feed Tab -->
         <div id="pureFeedTab" class="tab-content">
-            <div class="section-header">
-                <h2>Pure Feed</h2>
-                <p>Content ranked by authenticity, not engagement.</p>
+            <div class="pure-feed-header">
+                <h3 class="section-title">Pure Feed</h3>
+                <p class="mb-md">Content ranked by authenticity, not engagement algorithms.</p>
             </div>
             
-            <div class="filters">
+            <div class="filter-controls card">
                 <div class="filter-group">
-                    <label for="feedPlatform">Platform:</label>
-                    <select id="feedPlatform">
+                    <label for="feedPlatform">Platform</label>
+                    <select id="feedPlatform" class="form-input">
                         <option value="all">All Platforms</option>
                         <option value="facebook">Facebook</option>
                         <option value="instagram">Instagram</option>
@@ -556,8 +213,8 @@
                 </div>
                 
                 <div class="filter-group">
-                    <label for="feedCategory">Category:</label>
-                    <select id="feedCategory">
+                    <label for="feedCategory">Authenticity Category</label>
+                    <select id="feedCategory" class="form-input">
                         <option value="all">All Categories</option>
                         <option value="pure soul">Pure Soul (90-100)</option>
                         <option value="insightful">Insightful (70-89)</option>
@@ -567,15 +224,43 @@
                     </select>
                 </div>
                 
-                <button id="refreshFeedBtn" class="btn-primary">
-                    <i class="fas fa-sync"></i> Refresh
-                </button>
+                <div class="filter-actions">
+                    <button id="refreshFeedBtn" class="btn btn-small">
+                        <span class="refresh-icon"></span> Refresh
+                    </button>
+                </div>
             </div>
             
-            <div id="pureFeedContainer" class="posts-container">
+            <div class="authenticity-legend mb-sm">
+                <div class="legend-title text-center mb-xs">Authenticity Scale</div>
+                <div class="legend-items">
+                    <div class="legend-item">
+                        <span class="color-dot score-excellent"></span>
+                        <span class="legend-label">Pure Soul</span>
+                    </div>
+                    <div class="legend-item">
+                        <span class="color-dot score-good"></span>
+                        <span class="legend-label">Insightful</span>
+                    </div>
+                    <div class="legend-item">
+                        <span class="color-dot score-neutral"></span>
+                        <span class="legend-label">Neutral</span>
+                    </div>
+                    <div class="legend-item">
+                        <span class="color-dot score-poor"></span>
+                        <span class="legend-label">Performative</span>
+                    </div>
+                    <div class="legend-item">
+                        <span class="color-dot score-bad"></span>
+                        <span class="legend-label">Spam/Ads</span>
+                    </div>
+                </div>
+            </div>
+            
+            <div id="pureFeedContainer" class="pure-feed-container">
                 <div class="loading-indicator">
                     <div class="spinner"></div>
-                    <p>Loading ranked posts...</p>
+                    <p>Loading your ranked posts...</p>
                 </div>
             </div>
         </div>
