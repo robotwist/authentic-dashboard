@@ -1,678 +1,314 @@
 /**
- * api_client.js - Centralized API client for Authentic Dashboard Chrome Extension
- * 
- * This module handles all API interactions with the backend server,
- * providing a consistent interface and centralized error handling.
+ * api-client.js - API client utilities for background processing
  */
+
+import { recordError } from './error_handling.js';
 
 class AuthenticDashboardAPI {
   constructor() {
-    // Default configuration
-    this.config = {
-      baseEndpoints: [
-        'http://localhost:8000',
-        'http://127.0.0.1:8000',
-        'http://0.0.0.0:8000'
-      ],
-      currentEndpoint: 'http://localhost:8000',
-      apiKey: '',
-      available: false,
-      lastCheck: 0,
-      retryCount: 3,
-      backoffDelay: 1000, // Initial retry delay in ms
-      maxBackoffDelay: 30000 // Maximum retry delay in ms
-    };
+    this.apiBaseUrl = 'https://api.authenticdashboard.com/v1';
+    this.apiKey = '';
+    this.isAvailable = false;
+    this.lastCheck = 0;
+    this.dashboardUrl = 'http://localhost:8000/dashboard/';
     
-    // Initialize the client
-    this.initialize();
+    // Load API key and URL from storage
+    this.loadConfig();
   }
   
   /**
-   * Initialize the API client by loading stored configuration
+   * Load API configuration from storage
    */
-  initialize() {
+  async loadConfig() {
     return new Promise((resolve) => {
-      chrome.storage.local.get(['apiEndpoint', 'apiKey', 'apiAvailable', 'apiLastCheck'], (result) => {
-        if (result.apiEndpoint) {
-          this.config.currentEndpoint = result.apiEndpoint;
+      chrome.storage.sync.get(['settings'], (result) => {
+        if (result.settings) {
+          if (result.settings.apiKey) {
+            this.apiKey = result.settings.apiKey;
+          }
+          
+          if (result.settings.apiUrl) {
+            this.apiBaseUrl = result.settings.apiUrl;
+            // Update dashboard URL to match the same base domain
+            this.dashboardUrl = `${this.apiBaseUrl}/dashboard/`;
+          }
         }
-        
-        if (result.apiKey) {
-          this.config.apiKey = result.apiKey;
-        }
-        
-        if (result.apiAvailable !== undefined) {
-          this.config.available = result.apiAvailable;
-        }
-        
-        if (result.apiLastCheck) {
-          this.config.lastCheck = result.apiLastCheck;
-        }
-        
-        console.log('API Client initialized with endpoint:', this.config.currentEndpoint);
-        resolve(this.config);
+        resolve();
       });
     });
   }
   
   /**
-   * Get the current API configuration
-   */
-  getConfig() {
-    return this.config;
-  }
-  
-  /**
-   * Set a new API endpoint
-   */
-  setEndpoint(endpoint) {
-    this.config.currentEndpoint = endpoint;
-    
-    return new Promise((resolve) => {
-      chrome.storage.local.set({ apiEndpoint: endpoint }, () => {
-        console.log('API Endpoint updated to:', endpoint);
-        resolve(endpoint);
-      });
-    });
-  }
-  
-  /**
-   * Set a new API key
+   * Set the API key
+   * @param {string} apiKey - The API key
    */
   setApiKey(apiKey) {
-    this.config.apiKey = apiKey;
+    this.apiKey = apiKey;
+  }
+  
+  /**
+   * Set the API base URL
+   * @param {string} apiUrl - The API base URL
+   */
+  setApiUrl(apiUrl) {
+    if (apiUrl) {
+      this.apiBaseUrl = apiUrl;
+      // Update dashboard URL to match
+      this.dashboardUrl = `${this.apiBaseUrl}/dashboard/`;
+    }
+  }
+  
+  /**
+   * Get dashboard URL
+   * @returns {string} - Dashboard URL
+   */
+  getDashboardUrl() {
+    return this.dashboardUrl || 'http://localhost:8000/dashboard/';
+  }
+  
+  /**
+   * Check if the API is available
+   * @param {boolean} force - Force check even if recently checked
+   * @returns {Promise<boolean>} - Promise resolving to API availability
+   */
+  async checkAvailability(force = false) {
+    const now = Date.now();
+    const CACHE_TIME = 5 * 60 * 1000; // 5 minutes
     
-    return new Promise((resolve) => {
-      chrome.storage.local.set({ apiKey: apiKey }, () => {
-        console.log('API Key updated');
-        resolve(apiKey);
-      });
-    });
-  }
-  
-  /**
-   * Check if the API server is available
-   * @param {boolean} forceCheck - Force a new check regardless of cached status
-   */
-  checkAvailability(forceCheck = false) {
-    return new Promise((resolve) => {
-      const now = Date.now();
-      const fiveMinutesAgo = now - (5 * 60 * 1000);
+    // Don't check too frequently unless forced
+    if (!force && now - this.lastCheck < CACHE_TIME) {
+      return this.isAvailable;
+    }
+    
+    try {
+      this.lastCheck = now;
       
-      // Use cached result if available and recent
-      // Only use cached result if it's TRUE or if forceCheck is false
-      // This ensures that when we're actively trying to send data, we don't trust a cached "false" result
-      if (!forceCheck && this.config.lastCheck > fiveMinutesAgo && 
-          (this.config.available === true || this.config.available === undefined)) {
-        console.log("Using cached API availability result:", this.config.available);
-        resolve({
-          available: this.config.available,
-          endpoint: this.config.currentEndpoint,
-          apiKey: this.config.apiKey,
-          fromCache: true
-        });
-        return;
-      }
+      // Try multiple potential endpoints that might exist on the server
+      let response;
+      const endpoints = ['/ping', '/api/ping', '/health', '/api/health', '/'];
       
-      // Always perform a fresh check for critical operations or if the cached result was false
-      console.log("Performing fresh API availability check");
-      this.healthCheck(this.config.currentEndpoint)
-        .then(available => {
-          // If current endpoint is available, update status and return
-          if (available) {
-            this.updateAvailabilityStatus(true, this.config.currentEndpoint);
-            resolve({
-              available: true,
-              endpoint: this.config.currentEndpoint,
-              apiKey: this.config.apiKey,
-              fromCache: false
-            });
-            return;
-          }
-          
-          // Try alternative endpoints if the current one fails
-          this.tryAlternativeEndpoints()
-            .then(result => {
-              resolve({
-                available: result.available,
-                endpoint: result.endpoint || this.config.currentEndpoint,
-                apiKey: this.config.apiKey,
-                fromCache: false
-              });
-            });
-        });
-    });
-  }
-  
-  /**
-   * Try all alternative endpoints if the primary one fails
-   */
-  tryAlternativeEndpoints() {
-    return new Promise((resolve) => {
-      const currentEndpoint = this.config.currentEndpoint;
-      const alternatives = this.config.baseEndpoints.filter(endpoint => endpoint !== currentEndpoint);
-      
-      // Function to try each endpoint sequentially
-      const tryEndpoint = async (index) => {
-        if (index >= alternatives.length) {
-          // All alternatives failed
-          this.updateAvailabilityStatus(false);
-          resolve({ available: false });
-          return;
-        }
-        
-        const endpoint = alternatives[index];
-        const available = await this.healthCheck(endpoint);
-        
-        if (available) {
-          // We found a working alternative
-          this.updateAvailabilityStatus(true, endpoint);
-          
-          // Notify that we switched endpoints
-          chrome.notifications.create({
-            type: 'basic',
-            iconUrl: 'icon48.png',
-            title: 'API Endpoint Changed',
-            message: `Connected to alternative endpoint: ${endpoint}`
+      for (const endpoint of endpoints) {
+        try {
+          response = await fetch(`${this.apiBaseUrl}${endpoint}`, {
+            method: 'GET',
+            headers: {
+              'X-API-Key': this.apiKey
+            }
           });
           
-          resolve({ available: true, endpoint });
-        } else {
-          // Try next alternative
-          tryEndpoint(index + 1);
+          if (response.ok) {
+            break; // Found a working endpoint
+          }
+        } catch (err) {
+          // Continue trying other endpoints
+          console.log(`Endpoint ${endpoint} not available, trying next...`);
         }
-      };
-      
-      // Start the sequential check
-      tryEndpoint(0);
-    });
-  }
-  
-  /**
-   * Update the availability status in memory and storage
-   */
-  updateAvailabilityStatus(available, endpoint = null) {
-    const now = Date.now();
-    
-    this.config.available = available;
-    this.config.lastCheck = now;
-    
-    if (endpoint) {
-      this.config.currentEndpoint = endpoint;
-    }
-    
-    // Update storage
-    chrome.storage.local.set({
-      apiAvailable: available,
-      apiLastCheck: now,
-      apiEndpoint: endpoint || this.config.currentEndpoint
-    });
-    
-    // Update badge - only if chrome.action API is available
-    if (typeof chrome !== 'undefined' && chrome.action) {
-      try {
-        if (available) {
-          chrome.action.setBadgeBackgroundColor({ color: '#4CAF50' });
-          chrome.action.setBadgeText({ text: '✓' });
-          
-          setTimeout(() => {
-            chrome.action.setBadgeText({ text: '' });
-          }, 5000);
-        } else {
-          chrome.action.setBadgeBackgroundColor({ color: '#F44336' });
-          chrome.action.setBadgeText({ text: '!' });
-        }
-      } catch (e) {
-        console.log('Badge update failed, likely running in content script context:', e);
       }
-    } else {
-      console.log('Chrome action API not available in this context - skipping badge update');
+      
+      this.isAvailable = response && response.ok;
+      
+      // Store availability status
+      chrome.storage.local.set({ apiAvailable: this.isAvailable });
+      
+      return this.isAvailable;
+    } catch (error) {
+      console.error('API availability check failed:', error);
+      this.isAvailable = false;
+      
+      // Store availability status
+      chrome.storage.local.set({ apiAvailable: false });
+      
+      return false;
     }
   }
   
   /**
-   * Perform a health check on a specific endpoint
-   * This has been modified to be more resilient to CORS issues
+   * Send collected posts to the API
+   * @param {Array} posts - Array of post objects
+   * @param {string} platform - Platform name (facebook, instagram, linkedin)
+   * @param {string} batchId - Batch ID for this upload
+   * @returns {Promise} - Promise resolving to API response
    */
-  healthCheck(endpoint) {
-    return new Promise((resolve) => {
-      console.log(`Testing API endpoint: ${endpoint}`);
-      
-      // If running in a content script, message the background script to do the health check
-      if (this.isContentScript()) {
-        console.log("Running in content script, using background script for health check");
-        chrome.runtime.sendMessage({
-          action: 'performHealthCheck',
-          endpoint: endpoint
-        }, response => {
-          if (chrome.runtime.lastError) {
-            console.error("Error communicating with background script:", chrome.runtime.lastError);
-            resolve(false);
-            return;
-          }
-          
-          if (response && response.success) {
-            resolve(response.available);
-          } else {
-            resolve(false);
-          }
-        });
-        return;
+  async sendPosts(posts, platform, batchId) {
+    if (!this.apiKey) {
+      await this.loadConfig();
+      if (!this.apiKey) {
+        throw new Error('API key not configured');
       }
+    }
+    
+    try {
+      const url = `${this.apiBaseUrl}/posts`;
       
-      // If in background script or popup, we can use fetch directly
-      fetch(`${endpoint}/api/health-check/`, {
-        method: 'GET',
+      const response = await fetch(url, {
+        method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'X-API-Key': this.config.apiKey || ''
-        }
-      })
-      .then(response => {
-        resolve(response.ok);
-      })
-      .catch(() => {
-        resolve(false);
+          'X-API-Key': this.apiKey,
+          'X-Platform': platform,
+          'X-Batch-ID': batchId
+        },
+        body: JSON.stringify({ posts })
       });
-    });
+      
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(`API error (${response.status}): ${errorText}`);
+      }
+      
+      const data = await response.json();
+      
+      // Update collection stats
+      this.updateCollectionStats(platform, posts.length, data.newPosts || 0);
+      
+      return data;
+    } catch (error) {
+      console.error('Error sending posts to API:', error);
+      throw error;
+    }
   }
   
   /**
-   * Check if we're running in a content script context
+   * Make a generic API call
+   * @param {string} endpoint - API endpoint (without base URL)
+   * @param {Object} options - Request options
+   * @returns {Promise} - Promise resolving to API response
    */
-  isContentScript() {
-    // Check for service worker context first
-    if (typeof self !== 'undefined' && typeof window === 'undefined') {
-      return false; // We're in a service worker context
+  async callApi(endpoint, options = {}) {
+    if (!this.apiKey) {
+      await this.loadConfig();
+      if (!this.apiKey) {
+        throw new Error('API key not configured');
+      }
     }
     
-    // For browser contexts, check if we're in an iframe/content script
+    const url = `${this.apiBaseUrl}/${endpoint.replace(/^\//, '')}`;
+    
+    const headers = {
+      'Content-Type': 'application/json',
+      'X-API-Key': this.apiKey,
+      ...options.headers
+    };
+    
     try {
-      return window.self !== window.top;
-    } catch (e) {
-      // If we can't access top, we're definitely in a content script due to security restrictions
-      return true;
+      const response = await fetch(url, {
+        method: options.method || 'GET',
+        headers,
+        body: options.body ? JSON.stringify(options.body) : undefined
+      });
+      
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(`API error (${response.status}): ${errorText}`);
+      }
+      
+      return await response.json();
+    } catch (error) {
+      console.error(`Error calling API (${endpoint}):`, error);
+      throw error;
     }
   }
   
   /**
-   * Verify an API key with the server
+   * Update collection statistics
+   * @param {string} platform - Platform name
+   * @param {number} totalCount - Total posts processed
+   * @param {number} newCount - New posts added
    */
-  verifyApiKey(apiKey) {
-    return this.request('/api/verify-key/', {
-      method: 'GET',
-      headers: {
-        'X-API-Key': apiKey
+  updateCollectionStats(platform, totalCount, newCount) {
+    chrome.storage.local.get(['collectionStats'], (result) => {
+      const stats = result.collectionStats || {};
+      
+      // Initialize platform stats if not exist
+      if (!stats[platform]) {
+        stats[platform] = {
+          total: 0,
+          today: 0,
+          lastCollection: null
+        };
       }
+      
+      // Update stats
+      stats[platform].total += newCount;
+      stats[platform].today += newCount;
+      stats[platform].lastCollection = new Date().toISOString();
+      
+      // Store updated stats
+      chrome.storage.local.set({ collectionStats: stats });
     });
   }
-  
-  /**
-   * Send posts to the server
-   */
-  sendPosts(posts, platform) {
-    if (!posts || posts.length === 0) {
-      console.log("No posts provided to sendPosts");
-      return Promise.resolve({
-        success: false,
-        message: 'No posts provided'
-      });
-    }
-    
-    console.log(`Starting to send ${posts.length} ${platform} posts to server`);
-    
-    // Add platform explicitly to each post if not set
-    const enhancedPosts = posts.map(post => {
-      if (!post.platform) {
-        console.log("Adding missing platform to post:", platform);
-        return { ...post, platform };
+}
+
+// Create and export a singleton instance
+const authDashboardAPI = new AuthenticDashboardAPI();
+export default authDashboardAPI;
+
+/**
+ * Check if the API is available
+ * @returns {Promise<boolean>} - Promise resolving to API availability
+ */
+export async function checkApiAvailability() {
+  return new Promise((resolve) => {
+    chrome.storage.sync.get(['settings'], async (result) => {
+      const settings = result.settings || {};
+      const apiKey = settings.apiKey || '';
+      let apiBaseUrl = settings.apiUrl || 'http://localhost:8000';
+      
+      if (!apiBaseUrl.endsWith('/')) {
+        apiBaseUrl += '/';
       }
-      return post;
-    });
-    
-    // Special handling for Facebook platform - consider all successful
-    if (platform === 'facebook') {
-      console.log("Using special Facebook handling in sendPosts");
       
-      // Process each post but always return success
-      enhancedPosts.forEach(post => {
-        this.sendPost(post)
-          .then(result => {
-            console.log(`Processed Facebook post: ${result.success ? 'success' : 'failure'}`);
-          })
-          .catch(error => {
-            console.warn("Facebook post error, continuing anyway:", error);
-          });
-      });
+      console.log(`Checking API availability at ${apiBaseUrl}`);
       
-      // Always report success for Facebook
-      return Promise.resolve({
-        success: true,
-        successCount: enhancedPosts.length,
-        failedCount: 0,
-        total: enhancedPosts.length,
-        message: 'Facebook posts processing initiated'
-      });
-    }
-    
-    // Regular processing for other platforms
-    const promises = enhancedPosts.map(post => this.sendPost(post));
-    
-    return Promise.allSettled(promises)
-      .then(results => {
-        const successful = results.filter(r => r.status === 'fulfilled' && r.value && r.value.success).length;
-        const failed = results.length - successful;
+      try {
+        // Try multiple potential endpoints that might exist on the server
+        let response = null;
+        // Prioritize the known working endpoints
+        const endpoints = [
+          'api/health-check/',
+          'health-check/',
+          'ping/',
+          'api/ping/',
+          'health/',
+          'api/health/',
+          ''
+        ];
         
-        console.log(`Completed sending ${successful}/${results.length} posts successfully`);
-        
-        if (failed > 0) {
-          // Log the first few failures to help diagnose issues
-          results.filter(r => r.status !== 'fulfilled' || !r.value || !r.value.success)
-            .slice(0, 3)
-            .forEach((result, index) => {
-              if (result.status === 'rejected') {
-                console.error(`Failed post ${index} error:`, result.reason);
-              } else {
-                console.error(`Failed post ${index} result:`, result.value);
+        for (const endpoint of endpoints) {
+          try {
+            console.log(`Trying endpoint: ${apiBaseUrl}${endpoint}`);
+            response = await fetch(`${apiBaseUrl}${endpoint}`, {
+              method: 'GET',
+              headers: {
+                'X-API-Key': apiKey
               }
             });
-        }
-        
-        return {
-          success: successful > 0,
-          successCount: successful,
-          failedCount: failed,
-          total: results.length
-        };
-      });
-  }
-  
-  /**
-   * Send a single post to the server
-   */
-  sendPost(post) {
-    // Special handling for Facebook posts - consider it successful to bypass cached API availability
-    if (post.platform === 'facebook' || (post.content && post.content.includes('facebook'))) {
-      console.log("Special handling for Facebook post - bypassing API availability check");
-      
-      // Try to send post but always return success
-      this.checkAvailability(true)
-        .then(status => {
-          if (status.available) {
-            // API is available, send post normally
-            this.request('/api/post/', {
-              method: 'POST',
-              body: JSON.stringify(post)
-            }).catch(error => {
-              console.warn("Error sending Facebook post, but continuing:", error);
-            });
-          } else {
-            console.warn("API unavailable for Facebook post, will be stored for later sending");
-          }
-        });
-      
-      // Always return success for Facebook posts to prevent blocking
-      return Promise.resolve({
-        success: true,
-        message: 'Facebook post processing successful'
-      });
-    }
-    
-    // Regular handling for other posts
-    // Force check connectivity status before sending
-    return this.checkAvailability(true)
-      .then(status => {
-        if (!status.available) {
-          console.warn('API server is offline. Saving post for later sending.');
-          // We could add IndexedDB storage logic here for offline support
-          return {
-            success: false,
-            offline: true,
-            message: 'API server is offline. Post saved for later.'
-          };
-        }
-        
-        // Add post metadata if not present
-        const enhancedPost = {
-          ...post,
-          client_timestamp: Date.now(),
-          extension_version: chrome.runtime.getManifest().version
-        };
-        
-        return this.request('/api/post/', {
-          method: 'POST',
-          body: JSON.stringify(enhancedPost)
-        }).catch(error => {
-          console.error('Error sending post:', error);
-          return {
-            success: false,
-            message: error.message || 'Failed to send post',
-            error: error
-          };
-        });
-      });
-  }
-  
-  /**
-   * Process a post with ML
-   */
-  processML(post) {
-    return this.request('/api/process-ml/', {
-      method: 'POST',
-      body: JSON.stringify(post)
-    });
-  }
-  
-  /**
-   * Log user behavior
-   */
-  logBehavior(behavior) {
-    return this.request('/api/log/behavior/', {
-      method: 'POST',
-      body: JSON.stringify(behavior)
-    });
-  }
-  
-  /**
-   * Get post statistics
-   */
-  getPostStats() {
-    return this.request('/api/post-stats/');
-  }
-  
-  /**
-   * Make a request to the API with error handling and retries
-   */
-  request(path, options = {}, retryCount = 0) {
-    return new Promise((resolve, reject) => {
-      // Determine if this is a write operation that should force a fresh API check
-      const isWriteOperation = ['POST', 'PUT', 'PATCH', 'DELETE'].includes(options.method);
-      
-      // Force a fresh check for write operations like sending posts
-      const forceCheck = isWriteOperation || retryCount > 0;
-      
-      // Check if API is available
-      this.checkAvailability(forceCheck).then(status => {
-        if (!status.available) {
-          reject({
-            success: false,
-            message: 'API server is not available'
-          });
-          return;
-        }
-        
-        // Prepare the request
-        const url = `${this.config.currentEndpoint}${path}`;
-        
-        // Set default headers
-        const headers = options.headers || {};
-        headers['Content-Type'] = headers['Content-Type'] || 'application/json';
-        
-        // Always include API key if available
-        if (this.config.apiKey) {
-          headers['X-API-Key'] = this.config.apiKey;
-          console.log('Including API key in headers:', this.config.apiKey.substring(0, 8) + '...');
-        } else {
-          console.warn('No API key available for request');
-          
-          // Try to get API key from storage as a fallback
-          chrome.storage.local.get(['apiKey'], (result) => {
-            if (result.apiKey) {
-              headers['X-API-Key'] = result.apiKey;
-              console.log('Using fallback API key from storage');
-            }
-          });
-        }
-        
-        // Merge options
-        const fetchOptions = {
-          ...options,
-          headers
-        };
-        
-        // Make the request
-        fetch(url, fetchOptions)
-          .then(async response => {
-            // Try to parse JSON response
-            let data;
-            try {
-              data = await response.json();
-            } catch (e) {
-              data = { success: false, message: 'Invalid JSON response' };
-            }
             
-            // Handle response based on status code
             if (response.ok) {
-              resolve({
-                success: true,
-                ...data
-              });
-            } else if (response.status === 401) {
-              // Authentication error
-              reject({
-                success: false,
-                message: 'Authentication failed. Please check your API key.',
-                statusCode: 401,
-                ...data
-              });
-            } else if (response.status === 429) {
-              // Rate limiting
-              if (retryCount < this.config.retryCount) {
-                // Calculate backoff delay with exponential increase
-                const delay = Math.min(
-                  this.config.backoffDelay * Math.pow(2, retryCount),
-                  this.config.maxBackoffDelay
-                );
-                
-                console.log(`Rate limited. Retrying in ${delay}ms (attempt ${retryCount + 1}/${this.config.retryCount})`);
-                
-                // Wait and retry
-                setTimeout(() => {
-                  this.request(path, options, retryCount + 1)
-                    .then(resolve)
-                    .catch(reject);
-                }, delay);
-              } else {
-                reject({
-                  success: false,
-                  message: 'Rate limit exceeded. Try again later.',
-                  statusCode: 429,
-                  ...data
-                });
-              }
-            } else if (response.status >= 500) {
-              // Server error
-              if (retryCount < this.config.retryCount) {
-                // Calculate backoff delay with exponential increase
-                const delay = Math.min(
-                  this.config.backoffDelay * Math.pow(2, retryCount),
-                  this.config.maxBackoffDelay
-                );
-                
-                console.log(`Server error. Retrying in ${delay}ms (attempt ${retryCount + 1}/${this.config.retryCount})`);
-                
-                // Wait and retry
-                setTimeout(() => {
-                  this.request(path, options, retryCount + 1)
-                    .then(resolve)
-                    .catch(reject);
-                }, delay);
-              } else {
-                reject({
-                  success: false,
-                  message: 'Server error. Please try again later.',
-                  statusCode: response.status,
-                  ...data
-                });
-              }
-            } else {
-              // Other errors
-              reject({
-                success: false,
-                message: data.message || `Error: ${response.status}`,
-                statusCode: response.status,
-                ...data
-              });
+              console.log(`API endpoint found at ${apiBaseUrl}${endpoint}`);
+              break; // Found a working endpoint
             }
-          })
-          .catch(error => {
-            console.error('Fetch error:', error);
-            
-            // Network error or other exception
-            if (retryCount < this.config.retryCount) {
-              // Calculate backoff delay with exponential increase
-              const delay = Math.min(
-                this.config.backoffDelay * Math.pow(2, retryCount),
-                this.config.maxBackoffDelay
-              );
-              
-              console.log(`Network error. Retrying in ${delay}ms (attempt ${retryCount + 1}/${this.config.retryCount})`);
-              
-              // Wait and retry
-              setTimeout(() => {
-                this.request(path, options, retryCount + 1)
-                  .then(resolve)
-                  .catch(reject);
-              }, delay);
-            } else {
-              // Check if we should try an alternative endpoint
-              this.tryAlternativeEndpoints()
-                .then(result => {
-                  if (result.available) {
-                    // Retry with new endpoint
-                    this.request(path, options, 0)
-                      .then(resolve)
-                      .catch(reject);
-                  } else {
-                    reject({
-                      success: false,
-                      message: 'Network error. Could not connect to any server.',
-                      error: error.message
-                    });
-                  }
-                });
-            }
-          });
-      });
+          } catch (err) {
+            // Continue trying other endpoints
+            console.log(`Endpoint ${endpoint} not available, trying next...`);
+          }
+        }
+        
+        const isAvailable = response && response.ok;
+        
+        // Store availability status
+        chrome.storage.local.set({ apiAvailable: isAvailable });
+        
+        resolve(isAvailable);
+      } catch (error) {
+        console.error('API availability check failed:', error);
+        recordError('api', error, { component: 'api_check' });
+        
+        // Store availability status
+        chrome.storage.local.set({ apiAvailable: false });
+        
+        resolve(false);
+      }
     });
-  }
-}
-
-// Create a singleton instance
-const apiClient = new AuthenticDashboardAPI();
-
-// Make apiClient available in both module and non-module contexts
-if (typeof self !== 'undefined') {
-  // Make it available in service worker context
-  self.apiClient = apiClient;
-}
-
-// Make it available as a module export
-if (typeof exports !== 'undefined') {
-  // CommonJS module format
-  Object.defineProperty(exports, "__esModule", { value: true });
-  exports.default = apiClient;
-} else if (typeof window !== 'undefined') {
-  // Browser global
-  window.apiClient = apiClient;
+  });
 } 

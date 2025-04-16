@@ -11,6 +11,8 @@
  * 
  * The script is designed to be resilient to various platform layouts and changes,
  * with fallback mechanisms and extensive error handling.
+ * Cursor: This script scrapes posts from [PLATFORM] using modular selectors. Help improve selector reliability and async behavior.
+
  */
 
 // Test function to diagnose CSP issues
@@ -43,7 +45,7 @@ function testApiConnections() {
 
 /**
  * Unified API communication function that sends requests through the background script
- * to bypass Content Security Policy restrictions
+ * to bypass Content Security Policy restrictions with enhanced error handling
  * 
  * @param {string} endpoint - API endpoint path (with or without domain)
  * @param {Object} options - Request options (method, body, headers)
@@ -65,8 +67,22 @@ function communicateWithAPI(endpoint, options = {}) {
     retryCount: 0,
     success: false,
     error: null,
-    duration: 0
+    duration: 0,
+    networkErrors: 0,
+    serverErrors: 0
   };
+  
+  // Track API requests globally for debugging
+  window.apiStats = window.apiStats || {
+    total: 0,
+    succeeded: 0,
+    failed: 0,
+    networkErrors: 0,
+    serverErrors: 0,
+    rateLimited: 0,
+    authErrors: 0
+  };
+  window.apiStats.total++;
   
   return new Promise((resolve, reject) => {
     // Normalize the endpoint
@@ -94,6 +110,7 @@ function communicateWithAPI(endpoint, options = {}) {
         telemetry.error = errorMsg;
         telemetry.duration = performance.now() - startTime;
         reportTelemetry(telemetry);
+        window.apiStats.failed++;
         
         reject(errorMsg);
         return;
@@ -113,7 +130,7 @@ function communicateWithAPI(endpoint, options = {}) {
     });
     
     // Create a timer to detect potential service worker inactivity
-    const timeoutDuration = options.timeout || 15000; // 15 seconds default, configurable
+    const timeoutDuration = options.timeout || 15000;
     const timeoutId = setTimeout(() => {
       console.warn(`[API:${requestId}] No response after ${timeoutDuration}ms, service worker may be inactive`);
       
@@ -134,7 +151,7 @@ function communicateWithAPI(endpoint, options = {}) {
           }, 3, 1500); // Longer delay after wake
         })
         .then(response => processResponse(response))
-            .catch(error => {
+        .catch(error => {
           const errorMsg = `Failed to communicate after wake attempt: ${error}`;
           console.error(`[API:${requestId}] ${errorMsg}`);
           
@@ -143,6 +160,8 @@ function communicateWithAPI(endpoint, options = {}) {
           telemetry.error = errorMsg;
           telemetry.duration = performance.now() - startTime;
           reportTelemetry(telemetry);
+          window.apiStats.failed++;
+          window.apiStats.networkErrors++;
           
           reject(errorMsg);
         });
@@ -161,7 +180,10 @@ function communicateWithAPI(endpoint, options = {}) {
         telemetry.success = false;
         telemetry.error = errorMsg;
         telemetry.duration = duration;
+        telemetry.networkErrors++;
         reportTelemetry(telemetry);
+        window.apiStats.failed++;
+        window.apiStats.networkErrors++;
         
         reject(errorMsg);
         return;
@@ -180,29 +202,107 @@ function communicateWithAPI(endpoint, options = {}) {
         telemetry.success = true;
         telemetry.duration = duration;
         reportTelemetry(telemetry);
+        window.apiStats.succeeded++;
         
         resolve(response.data);
       } else {
         const errorMsg = response.error || 'Unknown API error';
-        console.error(`[API:${requestId}] Request failed: ${errorMsg}`);
+        const errorStatus = response.status;
+        console.error(`[API:${requestId}] Request failed: ${errorMsg} (Status: ${errorStatus})`);
+        
+        // Check if we should retry based on error type
+        const shouldRetry = 
+          // Network errors can be retried
+          (typeof errorMsg === 'string' && (
+            errorMsg.includes('network') || 
+            errorMsg.includes('timeout') || 
+            errorMsg.includes('connection')
+          )) ||
+          // Server errors (500s) can be retried
+          (errorStatus >= 500 && errorStatus < 600);
+            
+        // If we have retries left and this error is retryable, try again
+        if (shouldRetry && telemetry.retryCount < (options.maxRetries || 3)) {
+          telemetry.retryCount++;
+          const isServerError = errorStatus >= 500 && errorStatus < 600;
+          
+          if (isServerError) {
+            telemetry.serverErrors++;
+            window.apiStats.serverErrors++;
+            console.warn(`[API:${requestId}] Server error detected, retrying (${telemetry.retryCount}/${options.maxRetries || 3})...`);
+          } else {
+            telemetry.networkErrors++;
+            window.apiStats.networkErrors++;
+            console.warn(`[API:${requestId}] Network error detected, retrying (${telemetry.retryCount}/${options.maxRetries || 3})...`);
+          }
+          
+          // Calculate delay with exponential backoff
+          const retryDelay = Math.min(1000 * Math.pow(2, telemetry.retryCount - 1), 10000);
+          
+          // Add jitter to avoid all clients retrying simultaneously
+          const jitter = Math.random() * 0.3 + 0.85; // 0.85-1.15
+          const delay = Math.floor(retryDelay * jitter);
+          
+          console.log(`[API:${requestId}] Retrying in ${delay}ms...`);
+          
+          setTimeout(() => {
+            console.log(`[API:${requestId}] Executing retry ${telemetry.retryCount}...`);
+            
+            // Retry the request with the same parameters
+            sendMessageWithRetry({
+              action: 'proxyApiCall',
+              requestId,
+              endpoint: fullEndpoint,
+              method: requestMethod,
+              headers: options.headers || {},
+              body: options.body || null,
+              retry: telemetry.retryCount
+            }, 
+            options.maxRetries || 3,
+            options.retryDelay || 1000)
+            .then(response => processResponse(response))
+            .catch(error => {
+              const errorMsg = `Error during retry: ${error}`;
+              console.error(`[API:${requestId}] ${errorMsg}`);
+              
+              // Complete telemetry
+              telemetry.success = false;
+              telemetry.error = errorMsg;
+              telemetry.duration = performance.now() - startTime;
+              reportTelemetry(telemetry);
+              window.apiStats.failed++;
+              
+              reject(errorMsg);
+            });
+          }, delay);
+          
+          return;
+        }
         
         // Check for specific error types that warrant special handling
         if (typeof errorMsg === 'string') {
           // Handle rate limiting
-          if (errorMsg.includes('429') || errorMsg.toLowerCase().includes('rate limit')) {
+          if (errorStatus === 429 || errorMsg.includes('429') || errorMsg.toLowerCase().includes('rate limit')) {
             console.warn(`[API:${requestId}] Rate limited - backing off`);
+            window.apiStats.rateLimited++;
+            
             // Store rate limit status in session storage
             try {
+              const rateLimitDuration = 60 * 1000; // Default to 1 minute
               sessionStorage.setItem('api_rate_limited', 'true');
-              sessionStorage.setItem('api_rate_limit_until', Date.now() + (60 * 1000));
+              sessionStorage.setItem('api_rate_limit_until', Date.now() + rateLimitDuration);
             } catch (e) {
               // Session storage might not be available
             }
           }
           
           // Handle authentication errors
-          if (errorMsg.includes('401') || errorMsg.includes('403') || errorMsg.toLowerCase().includes('unauthorized')) {
+          if (errorStatus === 401 || errorStatus === 403 || 
+              errorMsg.includes('401') || errorMsg.includes('403') || 
+              errorMsg.toLowerCase().includes('unauthorized')) {
             console.warn(`[API:${requestId}] Authentication error - may need to re-authenticate`);
+            window.apiStats.authErrors++;
+            
             // Notify UI to potentially prompt for re-auth
             chrome.runtime.sendMessage({
               action: 'authenticationError',
@@ -216,30 +316,48 @@ function communicateWithAPI(endpoint, options = {}) {
         telemetry.error = errorMsg;
         telemetry.duration = duration;
         reportTelemetry(telemetry);
+        window.apiStats.failed++;
         
         reject(errorMsg);
       }
     };
     
-    // Check for active rate limiting before making request
+    // Smart rate limit backoff system
     let isRateLimited = false;
+    let rateLimitDelay = 0;
+    
     try {
       const rateLimitUntil = parseInt(sessionStorage.getItem('api_rate_limit_until') || '0');
       if (rateLimitUntil > Date.now()) {
         isRateLimited = true;
-        const secondsLeft = Math.ceil((rateLimitUntil - Date.now()) / 1000);
-        console.warn(`[API:${requestId}] Rate limit active for ${secondsLeft}s more`);
+        rateLimitDelay = Math.ceil((rateLimitUntil - Date.now()) / 1000);
+        console.warn(`[API:${requestId}] Rate limit active for ${rateLimitDelay}s more`);
       } else if (sessionStorage.getItem('api_rate_limited')) {
         // Clear expired rate limit
         sessionStorage.removeItem('api_rate_limited');
         sessionStorage.removeItem('api_rate_limit_until');
       }
-  } catch (e) {
+    } catch (e) {
       // Session storage might not be available
     }
     
-    // Don't attempt if rate limited
+    // Allow request to bypass rate limiting if specified
     if (isRateLimited && !options.ignoreRateLimit) {
+      // If the request is marked as essential, wait and then try anyway
+      if (options.essential) {
+        const waitTime = Math.min(rateLimitDelay * 1000, 10000); // Wait at most 10 seconds
+        console.warn(`[API:${requestId}] Essential request will wait ${waitTime/1000}s for rate limit to clear`);
+        
+        setTimeout(() => {
+          // Try the request after waiting (with ignoreRateLimit set to true)
+          const newOptions = {...options, ignoreRateLimit: true};
+          communicateWithAPI(endpoint, newOptions)
+            .then(resolve)
+            .catch(reject);
+        }, waitTime);
+        return;
+      }
+      
       const errorMsg = 'Request blocked due to active rate limiting';
       console.error(`[API:${requestId}] ${errorMsg}`);
       
@@ -248,6 +366,8 @@ function communicateWithAPI(endpoint, options = {}) {
       telemetry.error = errorMsg;
       telemetry.duration = performance.now() - startTime;
       reportTelemetry(telemetry);
+      window.apiStats.failed++;
+      window.apiStats.rateLimited++;
       
       reject(errorMsg);
       return;
@@ -384,42 +504,155 @@ function wakeServiceWorker() {
   });
 }
 
-// Enhanced version of sendMessageWithRetry with better logging
-function sendMessageWithRetry(message, maxRetries = 3, retryDelay = 1000) {
+// Import the error handling module
+import { recordError, createErrorHandler } from './modules/error_handling.js';
+
+// Enhanced version of sendMessageWithRetry with exponential backoff and jitter
+function sendMessageWithRetry(message, maxRetries = 3, baseRetryDelay = 1000) {
   console.log(`Sending message to background script (attempt 1/${maxRetries + 1}):`, message.action);
+  
+  // Create a unique retry ID for tracking
+  const retryId = generateRequestId();
+  console.log(`[Retry:${retryId}] Starting retry sequence for ${message.action}`);
+  
+  // Store global retry stats for debugging
+  window.retryStats = window.retryStats || {
+    total: 0,
+    succeeded: 0,
+    failed: 0,
+    inProgress: 0
+  };
+  window.retryStats.total++;
+  window.retryStats.inProgress++;
   
   return new Promise((resolve, reject) => {
     let currentRetry = 0;
+    const startTime = performance.now();
+    
+    // Add jitter to avoid thundering herd problem
+    const getJitter = () => Math.random() * 0.3 + 0.85; // 0.85-1.15 randomization factor
+    
+    // Calculate next retry delay with exponential backoff and jitter
+    const getNextDelay = (retry) => {
+      const exponentialDelay = baseRetryDelay * Math.pow(2, retry);
+      const cappedDelay = Math.min(exponentialDelay, 30000); // Cap at 30 seconds
+      return Math.round(cappedDelay * getJitter());
+    };
+    
+    // Function to handle connection errors
+    const handleConnectionError = (error) => {
+      const errorMsg = error?.message || "Unknown error";
+      console.error(`[Retry:${retryId}] Error sending message (attempt ${currentRetry + 1}/${maxRetries + 1}):`, errorMsg);
+      
+      // Record the error in the centralized system
+      recordError('messaging', error, {
+        retryId,
+        messageAction: message.action,
+        attempt: currentRetry + 1,
+        maxRetries: maxRetries + 1
+      });
+      
+      // Check if the error indicates a potential service worker issue
+      const isServiceWorkerError = 
+        errorMsg.includes("receiving end does not exist") || 
+        errorMsg.includes("could not establish connection") ||
+        errorMsg.includes("disconnected");
+      
+      // If it looks like a service worker issue, try to wake it first
+      if (isServiceWorkerError && currentRetry === 0) {
+        console.warn(`[Retry:${retryId}] Service worker appears to be inactive, attempting to wake...`);
+        
+        // Update the error registry
+        recordError('messaging', 'Service worker disconnected', { disconnects: 1 });
+        
+        return wakeServiceWorker()
+          .then(() => {
+            console.log(`[Retry:${retryId}] Service worker wakened, continuing retry sequence`);
+            // Record the successful reconnection
+            recordError('messaging', 'Service worker reconnected', { reconnects: 1 });
+            
+            // Don't increment retry count for this special case
+            const wakeupDelay = 1000; // Small delay to allow worker to initialize
+            setTimeout(sendMessage, wakeupDelay);
+          })
+          .catch(wakeError => {
+            console.error(`[Retry:${retryId}] Failed to wake service worker:`, wakeError);
+            // Continue with normal retry process
+            continueRetry();
+          });
+      }
+      
+      return continueRetry();
+    };
+    
+    // Function to handle retry logic
+    const continueRetry = () => {
+      // Check if we should retry
+      if (currentRetry < maxRetries) {
+        currentRetry++;
+        const nextDelay = getNextDelay(currentRetry - 1);
+        
+        console.log(`[Retry:${retryId}] Retrying in ${nextDelay}ms (attempt ${currentRetry + 1}/${maxRetries + 1})...`);
+        
+        // Wait and retry with exponential backoff
+        setTimeout(sendMessage, nextDelay);
+        return true;
+      }
+      
+      // Maximum retries reached, reject the promise
+      const duration = performance.now() - startTime;
+      const failMsg = `Failed to send message after ${maxRetries + 1} attempts (${duration.toFixed(0)}ms)`;
+      console.error(`[Retry:${retryId}] ${failMsg}`);
+      
+      // Update retry stats
+      window.retryStats.failed++;
+      window.retryStats.inProgress--;
+      
+      // Record the max retry failure
+      recordError('messaging', failMsg, {
+        retryId,
+        messageAction: message.action,
+        attempts: maxRetries + 1,
+        duration: Math.round(duration)
+      });
+      
+      reject(new Error(failMsg));
+      return false;
+    };
     
     const sendMessage = () => {
       // Add timestamp to help with debugging
       message.timestamp = Date.now();
+      message.retryId = retryId;
+      message.retryCount = currentRetry;
       
-      chrome.runtime.sendMessage(message, (response) => {
-        // Check if there was an error communicating with the background script
-        if (chrome.runtime.lastError) {
-          const errorMsg = chrome.runtime.lastError.message || "Unknown error";
-          console.error(`Error sending message (attempt ${currentRetry + 1}/${maxRetries + 1}):`, errorMsg);
-          
-          // Check if we should retry
-          if (currentRetry < maxRetries) {
-            currentRetry++;
-            console.log(`Retrying in ${retryDelay}ms (attempt ${currentRetry + 1}/${maxRetries + 1})...`);
-            
-            // Wait and retry with exponential backoff
-            setTimeout(sendMessage, retryDelay * Math.pow(2, currentRetry - 1));
-            return;
+      try {
+        chrome.runtime.sendMessage(message, (response) => {
+          // Check if there was an error communicating with the background script
+          if (chrome.runtime.lastError) {
+            return handleConnectionError(chrome.runtime.lastError);
           }
           
-          // Maximum retries reached, reject the promise
-          reject(new Error(`Failed to send message after ${maxRetries + 1} attempts: ${errorMsg}`));
-          return;
-        }
-        
-        // No error, resolve with the response
-        console.log(`Message ${message.action} received response:`, response ? "success" : "empty");
-        resolve(response);
-      });
+          // Check for empty response (could indicate background script issue)
+          if (!response) {
+            console.warn(`[Retry:${retryId}] Empty response received from background script`);
+            return continueRetry();
+          }
+          
+          // No error, resolve with the response
+          const duration = performance.now() - startTime;
+          console.log(`[Retry:${retryId}] Message ${message.action} succeeded after ${currentRetry} retries (${duration.toFixed(0)}ms)`);
+          
+          // Update retry stats
+          window.retryStats.succeeded++;
+          window.retryStats.inProgress--;
+          
+          resolve(response);
+        });
+      } catch (error) {
+        // Handle unexpected exceptions during message sending
+        return handleConnectionError(error);
+      }
     };
     
     // Start the first attempt
@@ -1840,7 +2073,7 @@ async function collectLinkedInPosts() {
     // Use the standardized infinite scroll for LinkedIn
     const postsFound = await simulateInfiniteScroll({
       maxScrollTime: 25000,  // 25 seconds max for LinkedIn
-      postSelector: '.feed-shared-update-v2',
+      postSelector: '.feed-shared-update-v2, .occludable-update, .update-components-actor',
       noNewPostsThreshold: 3,
       pauseInterval: 4000,  // LinkedIn needs more time to load content
       pauseDuration: 2000
@@ -1851,11 +2084,57 @@ async function collectLinkedInPosts() {
     const posts = [];
     const processedIds = new Set();
     
-    // Use the adaptive selector system for resilience
-    const postElements = findElements('linkedin', 'posts');
+    // Enhanced LinkedIn selectors
+    const postSelectors = [
+      '.feed-shared-update-v2',
+      '.occludable-update',
+      '.update-components-actor',
+      '.scaffold-finite-scroll__content > div > div',
+      '.feed-shared-card',
+      '.feed-shared-update'
+    ];
+    
+    let postElements = [];
+    
+    // Try each selector until we find posts
+    for (const selector of postSelectors) {
+      const elements = document.querySelectorAll(selector);
+      if (elements && elements.length > 0) {
+        console.log(`[Authentic] Found ${elements.length} LinkedIn posts with selector: ${selector}`);
+        postElements = Array.from(elements);
+        break;
+      }
+    }
+    
+    // If no posts found with standard selectors, try fallback approach
+    if (postElements.length === 0) {
+      console.warn("[Authentic] No LinkedIn posts found with standard selectors, trying alternative approach");
+      
+      // Look for content elements that are likely posts
+      const contentElements = document.querySelectorAll('.feed-shared-text, .update-components-text');
+      
+      contentElements.forEach(el => {
+        // Find potential post container parent
+        let postContainer = el;
+        for (let i = 0; i < 5; i++) { // Check up to 5 levels up
+          postContainer = postContainer.parentElement;
+          if (!postContainer) break;
+          
+          // If this container has characteristics of a post
+          const rect = postContainer.getBoundingClientRect();
+          if (rect.width > 300 && rect.height > 150) {
+            postElements.push(postContainer);
+            break;
+          }
+        }
+      });
+      
+      console.log(`[Authentic] Found ${postElements.length} LinkedIn posts using fallback detection`);
+    }
     
     console.log(`[Authentic] Processing ${postElements.length} LinkedIn posts`);
     
+    // Process each post element
     for (const postElement of postElements) {
       try {
         // Generate a stable ID for the post to prevent duplicates
@@ -1866,43 +2145,188 @@ async function collectLinkedInPosts() {
         }
         processedIds.add(contentHash);
         
-        // Extract post content
-        const contentElements = postElement.querySelectorAll('.feed-shared-update-v2__description, .feed-shared-text, .break-words');
+        // Extract post content - using multiple possible content selectors
+        const contentSelectors = [
+          '.feed-shared-update-v2__description',
+          '.feed-shared-text',
+          '.break-words',
+          '.update-components-text',
+          '.feed-shared-update__description',
+          '.feed-shared-text__text-view'
+        ];
+        
         let content = '';
         
-        for (const el of contentElements) {
-          // Skip elements that are too small or likely to be UI elements
-          if (el.textContent.length < 5) continue;
+        // Try each content selector
+        for (const selector of contentSelectors) {
+          const contentElements = postElement.querySelectorAll(selector);
+          if (contentElements && contentElements.length > 0) {
+            for (const el of contentElements) {
+              // Skip elements that are too small or likely to be UI elements
+              if (el.textContent.length < 5) continue;
+              
+              content += el.textContent.trim() + ' ';
+            }
+            if (content.length > 0) break;
+          }
+        }
+        
+        // If no content found with selectors, try getting inner text directly
+        if (!content || content.length < 5) {
+          // Find text nodes that might contain post content
+          const textElements = Array.from(postElement.querySelectorAll('p, span'))
+            .filter(el => el.textContent.length > 10 && !el.querySelector('button, a[role="button"]'));
           
-          content += el.textContent + ' ';
+          for (const el of textElements) {
+            content += el.textContent.trim() + ' ';
+          }
         }
         
         content = content.trim();
         
         // Skip posts with no meaningful content
-        if (content.length < 5) continue;
+        if (content.length < 5) {
+          console.log('[Authentic] Skipping LinkedIn post with insufficient content');
+          continue;
+        }
+        
+        // Extract author/username
+        let author = 'unknown';
+        const authorSelectors = [
+          '.feed-shared-actor__name',
+          '.update-components-actor__name',
+          '.feed-shared-actor__title',
+          '.update-components-actor__meta a[data-control-name="actor"]',
+          'a[data-control-name="actor_container"] span'
+        ];
+        
+        for (const selector of authorSelectors) {
+          const authorEl = postElement.querySelector(selector);
+          if (authorEl && authorEl.textContent.trim().length > 0) {
+            author = authorEl.textContent.trim();
+            break;
+          }
+        }
+        
+        // Extract hashtags from content
+        const hashtags = [];
+        const hashtagMatches = content.match(/#[a-zA-Z0-9_]+/g);
+        if (hashtagMatches) {
+          hashtagMatches.forEach(tag => {
+            hashtags.push(tag.substring(1)); // Remove the # symbol
+          });
+        }
         
         // Extract image URLs if present
-        const imageElements = postElement.querySelectorAll('img[src*="media.licdn.com"]');
-        const imageUrls = Array.from(imageElements).map(img => img.src).filter(Boolean);
+        const imageSelectors = [
+          'img[src*="media.licdn.com"]',
+          '.feed-shared-image__container img',
+          '.feed-shared-article__preview-image',
+          '.update-components-image img',
+          '.feed-shared-carousel__slide img',
+          '.ivm-image-view-model img'
+        ];
+        
+        const imageUrls = [];
+        
+        for (const selector of imageSelectors) {
+          const imageElements = postElement.querySelectorAll(selector);
+          if (imageElements && imageElements.length > 0) {
+            Array.from(imageElements).forEach(img => {
+              if (img.src && !img.src.includes('ghost-person') && !img.src.includes('profile-pic') && img.width > 50) {
+                imageUrls.push(img.src);
+              }
+            });
+          }
+        }
+        
+        // Extract engagement metrics if possible
+        let likes = 0;
+        let comments = 0;
+        let shares = 0;
+        
+        // Extract likes
+        const likeSelectors = [
+          '.social-details-social-counts__reactions-count',
+          '.social-details-social-counts__count-value',
+          '.feed-shared-social-action-bar__action-button[aria-label*="like"] span',
+          '.update-components-social-activity-count span'
+        ];
+        
+        for (const selector of likeSelectors) {
+          const likeEl = postElement.querySelector(selector);
+          if (likeEl && likeEl.textContent) {
+            const likeText = likeEl.textContent.trim();
+            if (likeText.match(/\d+/)) {
+              likes = parseSocialCount(likeText);
+              break;
+            }
+          }
+        }
+        
+        // Extract comments
+        const commentSelectors = [
+          '.social-details-social-counts__comments-count',
+          '.feed-shared-social-action-bar__action-button[aria-label*="comment"] span',
+          '.update-components-social-activity-count--has-comments'
+        ];
+        
+        for (const selector of commentSelectors) {
+          const commentEl = postElement.querySelector(selector);
+          if (commentEl && commentEl.textContent) {
+            const commentText = commentEl.textContent.trim();
+            if (commentText.match(/\d+/)) {
+              comments = parseSocialCount(commentText);
+              break;
+            }
+          }
+        }
         
         // Detect if the post is an ad/sponsored content
         const isSponsored = detectSponsoredPost(postElement, 'linkedin');
         
+        // Detect if it's a job post
+        const isJobPost = content.toLowerCase().includes('hiring') || 
+                         content.toLowerCase().includes('job opening') ||
+                         content.toLowerCase().includes('apply now') ||
+                         content.toLowerCase().includes('we are looking for') ||
+                         postElement.querySelector('.job-card') !== null;
+                         
+        // Get post URL if possible
+        let postUrl = window.location.href;
+        const contentLinks = postElement.querySelectorAll('a[data-control-name="detail_page_url"]');
+        if (contentLinks && contentLinks.length > 0 && contentLinks[0].href) {
+          postUrl = contentLinks[0].href;
+        }
+        
         // Create the post object
-        posts.push({
+        const post = {
           platform: 'linkedin',
           content: content,
+          original_user: author,
           timestamp: new Date().toISOString(),
-          images: imageUrls,
-          isSponsored: isSponsored,
-          url: window.location.href,
+          collected_at: new Date().toISOString(),
+          image_urls: imageUrls.join(','),
+          url: postUrl,
+          likes: likes,
+          comments: comments,
+          shares: shares,
+          is_sponsored: isSponsored,
+          is_job_post: isJobPost,
+          verified: false, // LinkedIn doesn't have verified badges like other platforms
+          is_friend: false,
+          is_family: false,
+          content_length: content.length,
+          hashtags: hashtags.join(','),
           metadata: {
             contentHash,
-            hasComments: postElement.querySelector('.social-details-social-counts__comments-count') !== null,
-            hasReactions: postElement.querySelector('.social-details-social-counts__reactions-count') !== null
+            hasComments: comments > 0 || postElement.querySelector('.feed-shared-comments-list') !== null,
+            hasReactions: likes > 0
           }
-        });
+        };
+        
+        console.log(`[Authentic] Added LinkedIn post from ${author}${content ? ': "' + content.substring(0, 30) + '..."' : ''}`);
+        posts.push(post);
         
       } catch (error) {
         console.error('[Authentic] Error processing LinkedIn post:', error);
@@ -1916,10 +2340,21 @@ async function collectLinkedInPosts() {
       return sendPostsToAPI(posts, 'linkedin')
         .then(response => {
           console.log(`Successfully sent ${posts.length} LinkedIn posts:`, response);
+          // Show in-page notification of success
+          showInPageNotification(
+            `LinkedIn Data Collected`,
+            `Successfully collected ${posts.length} posts from LinkedIn.`
+          );
           return posts;
         })
         .catch(error => {
           console.error("Error sending LinkedIn posts:", error);
+          // Show error notification
+          showInPageNotification(
+            `Error Collecting LinkedIn Data`,
+            `Failed to send ${posts.length} posts: ${error}`,
+            'error'
+          );
           // Still return posts even if sending failed
           return posts;
         });
@@ -1992,3 +2427,2754 @@ function generateContentHash(content) {
   return hash.toString();
 }
 
+/**
+ * Set up Instagram MutationObserver to detect new posts being loaded
+ * This helps capture posts as they are dynamically loaded into the feed
+ */
+function setupInstagramMutationObserver() {
+  // Only run on Instagram
+  if (!window.location.href.includes('instagram.com')) {
+    return;
+  }
+  
+  console.log('[Authentic] Setting up MutationObserver for Instagram post loading');
+  
+  // Keep track of the last time we processed posts to avoid processing too frequently
+  let lastProcessTime = 0;
+  const THROTTLE_TIME = 2000; // Only process at most once every 2 seconds
+  
+  // Track processed posts to avoid duplicates
+  const processedPostIds = new Set();
+  
+  // Define a function to handle changes
+  const handleMutations = (mutations) => {
+    // Check if we need to throttle
+    const now = Date.now();
+    if (now - lastProcessTime < THROTTLE_TIME) {
+      return;
+    }
+    
+    // Check if any mutations added new posts
+    let newPostsFound = false;
+    const postSelectors = SELECTORS.instagram.posts;
+    
+    for (const mutation of mutations) {
+      // Check if nodes were added
+      if (mutation.type === 'childList' && mutation.addedNodes.length > 0) {
+        // Check each added node
+        for (const node of mutation.addedNodes) {
+          if (node.nodeType === Node.ELEMENT_NODE) {
+            // First, check if the node itself is a post
+            const isPost = postSelectors.some(selector => node.matches && node.matches(selector));
+            
+            // Then check if it contains posts
+            const hasPosts = postSelectors.some(selector => 
+              node.querySelectorAll && node.querySelectorAll(selector).length > 0
+            );
+            
+            if (isPost || hasPosts) {
+              newPostsFound = true;
+              break;
+            }
+          }
+        }
+        
+        if (newPostsFound) {
+          break;
+        }
+      }
+    }
+    
+    if (newPostsFound) {
+      console.log('[Authentic] MutationObserver detected new Instagram posts');
+      lastProcessTime = now;
+      
+      // Only collect newly detected posts
+      collectNewInstagramPosts(processedPostIds);
+    }
+  };
+  
+  // Create and configure the observer
+  const observer = new MutationObserver(handleMutations);
+  
+  // Start observing the document with the configured parameters
+  observer.observe(document.body, {
+    childList: true,
+    subtree: true,
+    attributes: false,
+    characterData: false
+  });
+  
+  console.log('[Authentic] Instagram MutationObserver started');
+  
+  return observer;
+}
+
+/**
+ * Collect newly loaded Instagram posts and avoid processing duplicates
+ * @param {Set} processedIds - Set of already processed post IDs
+ */
+function collectNewInstagramPosts(processedIds) {
+  // Find all Instagram posts currently in the DOM
+  const postElements = [];
+  
+  for (const selector of SELECTORS.instagram.posts) {
+    const elements = document.querySelectorAll(selector);
+    if (elements && elements.length > 0) {
+      console.log(`[Authentic] Found ${elements.length} Instagram posts with ${selector}`);
+      elements.forEach(el => {
+        // Generate a simple hash to identify this post element
+        const rect = el.getBoundingClientRect();
+        const positionData = `${rect.top.toFixed(0)}_${rect.left.toFixed(0)}_${rect.width.toFixed(0)}_${rect.height.toFixed(0)}`;
+        const contentHash = el.innerText ? generateContentHash(el.innerText.substring(0, 100)) : '';
+        const postId = `${positionData}_${contentHash}`;
+        
+        // Only process posts we haven't seen before
+        if (!processedIds.has(postId)) {
+          processedIds.add(postId);
+          postElements.push(el);
+        }
+      });
+      break;
+    }
+  }
+  
+  if (postElements.length === 0) {
+    console.log('[Authentic] No new Instagram posts found to process');
+    return;
+  }
+  
+  console.log(`[Authentic] Processing ${postElements.length} new Instagram posts`);
+  
+  // Process these elements into post data
+  const pageType = detectInstagramPageType();
+  
+  try {
+    // Extract data from the post elements
+    const posts = [];
+    
+    // Process each post element
+    postElements.forEach((el, index) => {
+      try {
+        // Extract content/caption (reusing the existing extraction logic)
+        let content = "";
+        
+        // Try various selectors for content
+        const contentSelectors = [
+          'div._a9zs', 'div._a9zr', 'span._aacl', 'div._a9zr div',
+          'span[class*="x193iq5w"]', 'div[dir="auto"] span', 
+          'div.x1lliihq', 'h1 + div',
+          'div[role="button"] + div span', // New pattern
+          'span[dir="auto"]', // For alt text/captions
+          'div[style*="padding-bottom"] + div', // For some layouts
+          'a[role="link"] + div' // Feed captions
+        ];
+        
+        for (const selector of contentSelectors) {
+          const contentEl = el.querySelector(selector) || document.querySelector(selector);
+          if (contentEl && contentEl.innerText) {
+            content = contentEl.innerText.trim();
+            if (content.length > 0) break;
+          }
+        }
+        
+        // Extract username (reusing the existing extraction logic)
+        let username = "unknown";
+        const usernameSelectors = [
+          'a.notranslate', 'a.x1i10hfl', 'div._aaqt', 'h2',
+          'span.x1lliihq', 'a[role="link"]', 'header a',
+          'a[tabindex="0"]', 
+          'div[style*="flex-direction: row"] a',
+          'h2 + div a',
+          'a[href*="/"]'
+        ];
+        
+        for (const selector of usernameSelectors) {
+          const usernameEl = el.querySelector(selector) || document.querySelector(selector);
+          if (usernameEl && usernameEl.innerText) {
+            const potentialUser = usernameEl.innerText.trim();
+            if (potentialUser.length > 0 && 
+                potentialUser.length < 40 && 
+                !potentialUser.includes("\n") && 
+                usernameEl.href && 
+                usernameEl.href.includes("/")) {
+              username = potentialUser;
+              break;
+            }
+          }
+        }
+        
+        // Other extraction logic (reusing existing)
+        // Extract image URLs, likes, etc...
+        const imageUrls = [];
+        const imgElements = el.querySelectorAll('img') || document.querySelectorAll('img');
+        imgElements.forEach(img => {
+          if (img.src && !img.src.includes('profile_pic') && 
+              img.width > 100 && img.height > 100) {
+            if (img.srcset) {
+              const bestSrc = getBestImageSrc(img.srcset);
+              if (bestSrc) {
+                imageUrls.push(bestSrc);
+              } else {
+                imageUrls.push(img.src);
+              }
+            } else {
+              imageUrls.push(img.src);
+            }
+          }
+        });
+        
+        // Extract hashtags
+        const hashtags = [];
+        if (content) {
+          const hashtagMatches = content.match(/#[a-zA-Z0-9_]+/g);
+          if (hashtagMatches) {
+            hashtagMatches.forEach(tag => {
+              hashtags.push(tag.substring(1)); // Remove the # symbol
+            });
+          }
+        }
+        
+        // Skip if content is too short and not on a single post page
+        if ((!content || content.length < 3) && pageType !== 'post') {
+          return;
+        }
+        
+        // Create post object
+        const post = {
+          content: content || "",
+          platform: 'instagram',
+          original_user: username,
+          verified: false,
+          is_friend: false,
+          is_family: false,
+          likes: 0,
+          comments: 0,
+          shares: 0,
+          image_urls: imageUrls.join(','),
+          collected_at: new Date().toISOString(),
+          is_sponsored: content.toLowerCase().includes('paid partnership') || 
+                       el.innerText.toLowerCase().includes('sponsored'),
+          is_job_post: content.toLowerCase().includes('hiring') || 
+                       content.toLowerCase().includes('job opening'),
+          content_length: content ? content.length : 0,
+          hashtags: hashtags.join(',')
+        };
+        
+        posts.push(post);
+        console.log(`[Authentic] Added Instagram post from ${username}${content ? ': "' + content.substring(0, 30) + '..."' : ''}`);
+      } catch (error) {
+        console.error(`[Authentic] Error processing Instagram post ${index}:`, error);
+      }
+    });
+    
+    console.log(`[Authentic] Collected ${posts.length} Instagram posts using MutationObserver`);
+    
+    // Send posts through the background script
+    if (posts.length > 0) {
+      sendPostsToAPI(posts, 'instagram')
+        .then(response => {
+          console.log(`[Authentic] Successfully sent ${posts.length} Instagram posts:`, response);
+        })
+        .catch(error => {
+          console.error("[Authentic] Error sending Instagram posts:", error);
+        });
+    }
+  } catch (error) {
+    console.error("[Authentic] Error in collectNewInstagramPosts:", error);
+  }
+}
+
+// Initialize the MutationObserver when on Instagram
+if (window.location.href.includes('instagram.com')) {
+  setTimeout(() => {
+    setupInstagramMutationObserver();
+  }, 2000); // Wait for page to load before setting up observer
+}
+
+// Set up Chrome message listener if not already done elsewhere
+if (typeof messageListenerInitialized === 'undefined') {
+  chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
+    console.log('[Authentic] Content script received message:', request.action);
+    
+    if (request.action === 'collectPosts') {
+      const platform = request.platform || detectCurrentPlatform();
+      console.log(`[Authentic] Starting post collection for ${platform}`);
+      
+      // Call the appropriate collection function based on platform
+      let collectionPromise;
+      
+      switch (platform) {
+        case 'instagram':
+          collectionPromise = collectInstagramPosts();
+          break;
+        case 'facebook':
+          collectionPromise = collectFacebookPosts();
+          break;
+        case 'linkedin':
+          collectionPromise = collectLinkedInPosts();
+          break;
+        default:
+          sendResponse({ success: false, error: 'Unsupported platform' });
+          return true;
+      }
+      
+      // Process and return the result
+      collectionPromise
+        .then(posts => {
+          console.log(`[Authentic] Successfully collected ${posts.length} posts from ${platform}`);
+          sendResponse({ success: true, postsCount: posts.length, platform });
+        })
+        .catch(error => {
+          console.error(`[Authentic] Error collecting ${platform} posts:`, error);
+          sendResponse({ success: false, error: error.toString() });
+        });
+      
+      return true; // Keep the message channel open for the async response
+    }
+    
+    return false; // Let other handlers process the message
+  });
+  
+  // Mark that we've initialized the listener to avoid duplicates
+  window.messageListenerInitialized = true;
+}
+
+/**
+ * Toggle between different display modes for social media feeds
+ * Applies filters based on user preferences and provides visual feedback
+ * 
+ * @param {string} mode - The display mode to enable ('friends-only', 'interest-only', 'minimal-feed', 'default')
+ * @param {Object} options - Additional options for the display mode
+ * @returns {Promise} - Promise that resolves with the result of the operation
+ */
+function displayModeToggle(mode, options = {}) {
+  console.log(`Toggling display mode to: ${mode}`);
+  
+  // Check if we have a valid platform
+  const platform = detectCurrentPlatform();
+  if (!platform) {
+    return Promise.reject("Could not detect current platform");
+  }
+  
+  const toggleId = generateRequestId();
+  console.log(`[Toggle:${toggleId}] Applying ${mode} mode on ${platform}`);
+  
+  // Store the current mode in session storage
+  try {
+    sessionStorage.setItem('current_display_mode', mode);
+  } catch (e) {
+    // Session storage might not be available
+  }
+  
+  return new Promise((resolve, reject) => {
+    // First, get the user preferences from the background script
+    chrome.runtime.sendMessage({ action: 'getUserPreferences' }, (response) => {
+      if (chrome.runtime.lastError) {
+        const error = chrome.runtime.lastError.message;
+        console.error(`[Toggle:${toggleId}] Error getting preferences: ${error}`);
+        showInPageNotification('Error', `Failed to apply display mode: ${error}`, 'error');
+        reject(error);
+        return;
+      }
+      
+      if (!response || !response.success) {
+        const error = response?.error || 'Failed to get user preferences';
+        console.error(`[Toggle:${toggleId}] ${error}`);
+        showInPageNotification('Error', `Failed to apply display mode: ${error}`, 'error');
+        reject(error);
+        return;
+      }
+      
+      const preferences = response.data || {};
+      console.log(`[Toggle:${toggleId}] Retrieved user preferences`, preferences);
+      
+      // Create a filter function based on the selected mode
+      let filterFn = null;
+      let modeTitle = '';
+      let modeDescription = '';
+      
+      switch (mode) {
+        case 'friends-only':
+          modeTitle = 'Friends Only Mode';
+          modeDescription = 'Showing only posts from friends';
+          filterFn = (post) => post.is_friend === true;
+          break;
+          
+        case 'interest-only':
+          const interests = preferences.interest_filter ? 
+                           preferences.interest_filter.split(',').map(i => i.trim().toLowerCase()) : 
+                           [];
+          const hashtags = preferences.favorite_hashtags ? 
+                          preferences.favorite_hashtags.split(',').map(h => h.trim().toLowerCase()) : 
+                          [];
+                          
+          modeTitle = 'Interests Only Mode';
+          modeDescription = `Showing posts matching your interests: ${interests.join(', ')}`;
+          
+          if (interests.length === 0 && hashtags.length === 0) {
+            showInPageNotification('Warning', 'No interests configured. Please update your preferences.', 'warning');
+            reject('No interests configured');
+            return;
+          }
+          
+          filterFn = (post) => {
+            // Check if the post content matches any interest
+            const content = post.content?.toLowerCase() || '';
+            const postHashtags = post.hashtags?.toLowerCase() || '';
+            
+            // Check for matching interests in content
+            for (const interest of interests) {
+              if (content.includes(interest)) {
+                return true;
+              }
+            }
+            
+            // Check for matching hashtags in content
+            for (const hashtag of hashtags) {
+              if (postHashtags.includes(hashtag)) {
+                return true;
+              }
+            }
+            
+            return false;
+          };
+          break;
+          
+        case 'minimal-feed':
+          modeTitle = 'Minimal Feed Mode';
+          modeDescription = 'Showing only the most relevant posts';
+          filterFn = (post) => {
+            // This is a placeholder filter for Minimal Feed mode
+            // You can implement your own logic here
+            return true;
+          };
+          break;
+          
+        default:
+          modeTitle = 'Default Mode';
+          modeDescription = 'Showing all posts';
+          filterFn = (post) => true;
+          break;
+      }
+      
+      // Create a filter function based on the selected mode
+      let filterFn = null;
+      let modeTitle = '';
+      let modeDescription = '';
+      
+      switch (mode) {
+        case 'friends-only':
+          modeTitle = 'Friends Only Mode';
+          modeDescription = 'Showing only posts from friends';
+          filterFn = (post) => post.is_friend === true;
+          break;
+          
+        case 'interest-only':
+          const interests = preferences.interest_filter ? 
+                           preferences.interest_filter.split(',').map(i => i.trim().toLowerCase()) : 
+                           [];
+          const hashtags = preferences.favorite_hashtags ? 
+                          preferences.favorite_hashtags.split(',').map(h => h.trim().toLowerCase()) : 
+                          [];
+                          
+          modeTitle = 'Interests Only Mode';
+          modeDescription = `Showing posts matching your interests: ${interests.join(', ')}`;
+          
+          if (interests.length === 0 && hashtags.length === 0) {
+            showInPageNotification('Warning', 'No interests configured. Please update your preferences.', 'warning');
+            reject('No interests configured');
+            return;
+          }
+          
+          filterFn = (post) => {
+            // Check if the post content matches any interest
+            const content = post.content?.toLowerCase() || '';
+            const postHashtags = post.hashtags?.toLowerCase() || '';
+            
+            // Check for matching interests in content
+            for (const interest of interests) {
+              if (content.includes(interest)) {
+                return true;
+              }
+            }
+            
+            // Check for matching hashtags in content
+            for (const hashtag of hashtags) {
+              if (postHashtags.includes(hashtag)) {
+                return true;
+              }
+            }
+            
+            return false;
+          };
+          break;
+          
+        case 'minimal-feed':
+          modeTitle = 'Minimal Feed Mode';
+          modeDescription = 'Showing only the most relevant posts';
+          filterFn = (post) => {
+            // This is a placeholder filter for Minimal Feed mode
+            // You can implement your own logic here
+            return true;
+          };
+          break;
+          
+        default:
+          modeTitle = 'Default Mode';
+          modeDescription = 'Showing all posts';
+          filterFn = (post) => true;
+          break;
+      }
+      
+      // Create a filter function based on the selected mode
+      let filterFn = null;
+      let modeTitle = '';
+      let modeDescription = '';
+      
+      switch (mode) {
+        case 'friends-only':
+          modeTitle = 'Friends Only Mode';
+          modeDescription = 'Showing only posts from friends';
+          filterFn = (post) => post.is_friend === true;
+          break;
+          
+        case 'interest-only':
+          const interests = preferences.interest_filter ? 
+                           preferences.interest_filter.split(',').map(i => i.trim().toLowerCase()) : 
+                           [];
+          const hashtags = preferences.favorite_hashtags ? 
+                          preferences.favorite_hashtags.split(',').map(h => h.trim().toLowerCase()) : 
+                          [];
+                          
+          modeTitle = 'Interests Only Mode';
+          modeDescription = `Showing posts matching your interests: ${interests.join(', ')}`;
+          
+          if (interests.length === 0 && hashtags.length === 0) {
+            showInPageNotification('Warning', 'No interests configured. Please update your preferences.', 'warning');
+            reject('No interests configured');
+            return;
+          }
+          
+          filterFn = (post) => {
+            // Check if the post content matches any interest
+            const content = post.content?.toLowerCase() || '';
+            const postHashtags = post.hashtags?.toLowerCase() || '';
+            
+            // Check for matching interests in content
+            for (const interest of interests) {
+              if (content.includes(interest)) {
+                return true;
+              }
+            }
+            
+            // Check for matching hashtags in content
+            for (const hashtag of hashtags) {
+              if (postHashtags.includes(hashtag)) {
+                return true;
+              }
+            }
+            
+            return false;
+          };
+          break;
+          
+        case 'minimal-feed':
+          modeTitle = 'Minimal Feed Mode';
+          modeDescription = 'Showing only the most relevant posts';
+          filterFn = (post) => {
+            // This is a placeholder filter for Minimal Feed mode
+            // You can implement your own logic here
+            return true;
+          };
+          break;
+          
+        default:
+          modeTitle = 'Default Mode';
+          modeDescription = 'Showing all posts';
+          filterFn = (post) => true;
+          break;
+      }
+      
+      // Create a filter function based on the selected mode
+      let filterFn = null;
+      let modeTitle = '';
+      let modeDescription = '';
+      
+      switch (mode) {
+        case 'friends-only':
+          modeTitle = 'Friends Only Mode';
+          modeDescription = 'Showing only posts from friends';
+          filterFn = (post) => post.is_friend === true;
+          break;
+          
+        case 'interest-only':
+          const interests = preferences.interest_filter ? 
+                           preferences.interest_filter.split(',').map(i => i.trim().toLowerCase()) : 
+                           [];
+          const hashtags = preferences.favorite_hashtags ? 
+                          preferences.favorite_hashtags.split(',').map(h => h.trim().toLowerCase()) : 
+                          [];
+                          
+          modeTitle = 'Interests Only Mode';
+          modeDescription = `Showing posts matching your interests: ${interests.join(', ')}`;
+          
+          if (interests.length === 0 && hashtags.length === 0) {
+            showInPageNotification('Warning', 'No interests configured. Please update your preferences.', 'warning');
+            reject('No interests configured');
+            return;
+          }
+          
+          filterFn = (post) => {
+            // Check if the post content matches any interest
+            const content = post.content?.toLowerCase() || '';
+            const postHashtags = post.hashtags?.toLowerCase() || '';
+            
+            // Check for matching interests in content
+            for (const interest of interests) {
+              if (content.includes(interest)) {
+                return true;
+              }
+            }
+            
+            // Check for matching hashtags in content
+            for (const hashtag of hashtags) {
+              if (postHashtags.includes(hashtag)) {
+                return true;
+              }
+            }
+            
+            return false;
+          };
+          break;
+          
+        case 'minimal-feed':
+          modeTitle = 'Minimal Feed Mode';
+          modeDescription = 'Showing only the most relevant posts';
+          filterFn = (post) => {
+            // This is a placeholder filter for Minimal Feed mode
+            // You can implement your own logic here
+            return true;
+          };
+          break;
+          
+        default:
+          modeTitle = 'Default Mode';
+          modeDescription = 'Showing all posts';
+          filterFn = (post) => true;
+          break;
+      }
+      
+      // Create a filter function based on the selected mode
+      let filterFn = null;
+      let modeTitle = '';
+      let modeDescription = '';
+      
+      switch (mode) {
+        case 'friends-only':
+          modeTitle = 'Friends Only Mode';
+          modeDescription = 'Showing only posts from friends';
+          filterFn = (post) => post.is_friend === true;
+          break;
+          
+        case 'interest-only':
+          const interests = preferences.interest_filter ? 
+                           preferences.interest_filter.split(',').map(i => i.trim().toLowerCase()) : 
+                           [];
+          const hashtags = preferences.favorite_hashtags ? 
+                          preferences.favorite_hashtags.split(',').map(h => h.trim().toLowerCase()) : 
+                          [];
+                          
+          modeTitle = 'Interests Only Mode';
+          modeDescription = `Showing posts matching your interests: ${interests.join(', ')}`;
+          
+          if (interests.length === 0 && hashtags.length === 0) {
+            showInPageNotification('Warning', 'No interests configured. Please update your preferences.', 'warning');
+            reject('No interests configured');
+            return;
+          }
+          
+          filterFn = (post) => {
+            // Check if the post content matches any interest
+            const content = post.content?.toLowerCase() || '';
+            const postHashtags = post.hashtags?.toLowerCase() || '';
+            
+            // Check for matching interests in content
+            for (const interest of interests) {
+              if (content.includes(interest)) {
+                return true;
+              }
+            }
+            
+            // Check for matching hashtags in content
+            for (const hashtag of hashtags) {
+              if (postHashtags.includes(hashtag)) {
+                return true;
+              }
+            }
+            
+            return false;
+          };
+          break;
+          
+        case 'minimal-feed':
+          modeTitle = 'Minimal Feed Mode';
+          modeDescription = 'Showing only the most relevant posts';
+          filterFn = (post) => {
+            // This is a placeholder filter for Minimal Feed mode
+            // You can implement your own logic here
+            return true;
+          };
+          break;
+          
+        default:
+          modeTitle = 'Default Mode';
+          modeDescription = 'Showing all posts';
+          filterFn = (post) => true;
+          break;
+      }
+      
+      // Create a filter function based on the selected mode
+      let filterFn = null;
+      let modeTitle = '';
+      let modeDescription = '';
+      
+      switch (mode) {
+        case 'friends-only':
+          modeTitle = 'Friends Only Mode';
+          modeDescription = 'Showing only posts from friends';
+          filterFn = (post) => post.is_friend === true;
+          break;
+          
+        case 'interest-only':
+          const interests = preferences.interest_filter ? 
+                           preferences.interest_filter.split(',').map(i => i.trim().toLowerCase()) : 
+                           [];
+          const hashtags = preferences.favorite_hashtags ? 
+                          preferences.favorite_hashtags.split(',').map(h => h.trim().toLowerCase()) : 
+                          [];
+                          
+          modeTitle = 'Interests Only Mode';
+          modeDescription = `Showing posts matching your interests: ${interests.join(', ')}`;
+          
+          if (interests.length === 0 && hashtags.length === 0) {
+            showInPageNotification('Warning', 'No interests configured. Please update your preferences.', 'warning');
+            reject('No interests configured');
+            return;
+          }
+          
+          filterFn = (post) => {
+            // Check if the post content matches any interest
+            const content = post.content?.toLowerCase() || '';
+            const postHashtags = post.hashtags?.toLowerCase() || '';
+            
+            // Check for matching interests in content
+            for (const interest of interests) {
+              if (content.includes(interest)) {
+                return true;
+              }
+            }
+            
+            // Check for matching hashtags in content
+            for (const hashtag of hashtags) {
+              if (postHashtags.includes(hashtag)) {
+                return true;
+              }
+            }
+            
+            return false;
+          };
+          break;
+          
+        case 'minimal-feed':
+          modeTitle = 'Minimal Feed Mode';
+          modeDescription = 'Showing only the most relevant posts';
+          filterFn = (post) => {
+            // This is a placeholder filter for Minimal Feed mode
+            // You can implement your own logic here
+            return true;
+          };
+          break;
+          
+        default:
+          modeTitle = 'Default Mode';
+          modeDescription = 'Showing all posts';
+          filterFn = (post) => true;
+          break;
+      }
+      
+      // Create a filter function based on the selected mode
+      let filterFn = null;
+      let modeTitle = '';
+      let modeDescription = '';
+      
+      switch (mode) {
+        case 'friends-only':
+          modeTitle = 'Friends Only Mode';
+          modeDescription = 'Showing only posts from friends';
+          filterFn = (post) => post.is_friend === true;
+          break;
+          
+        case 'interest-only':
+          const interests = preferences.interest_filter ? 
+                           preferences.interest_filter.split(',').map(i => i.trim().toLowerCase()) : 
+                           [];
+          const hashtags = preferences.favorite_hashtags ? 
+                          preferences.favorite_hashtags.split(',').map(h => h.trim().toLowerCase()) : 
+                          [];
+                          
+          modeTitle = 'Interests Only Mode';
+          modeDescription = `Showing posts matching your interests: ${interests.join(', ')}`;
+          
+          if (interests.length === 0 && hashtags.length === 0) {
+            showInPageNotification('Warning', 'No interests configured. Please update your preferences.', 'warning');
+            reject('No interests configured');
+            return;
+          }
+          
+          filterFn = (post) => {
+            // Check if the post content matches any interest
+            const content = post.content?.toLowerCase() || '';
+            const postHashtags = post.hashtags?.toLowerCase() || '';
+            
+            // Check for matching interests in content
+            for (const interest of interests) {
+              if (content.includes(interest)) {
+                return true;
+              }
+            }
+            
+            // Check for matching hashtags in content
+            for (const hashtag of hashtags) {
+              if (postHashtags.includes(hashtag)) {
+                return true;
+              }
+            }
+            
+            return false;
+          };
+          break;
+          
+        case 'minimal-feed':
+          modeTitle = 'Minimal Feed Mode';
+          modeDescription = 'Showing only the most relevant posts';
+          filterFn = (post) => {
+            // This is a placeholder filter for Minimal Feed mode
+            // You can implement your own logic here
+            return true;
+          };
+          break;
+          
+        default:
+          modeTitle = 'Default Mode';
+          modeDescription = 'Showing all posts';
+          filterFn = (post) => true;
+          break;
+      }
+      
+      // Create a filter function based on the selected mode
+      let filterFn = null;
+      let modeTitle = '';
+      let modeDescription = '';
+      
+      switch (mode) {
+        case 'friends-only':
+          modeTitle = 'Friends Only Mode';
+          modeDescription = 'Showing only posts from friends';
+          filterFn = (post) => post.is_friend === true;
+          break;
+          
+        case 'interest-only':
+          const interests = preferences.interest_filter ? 
+                           preferences.interest_filter.split(',').map(i => i.trim().toLowerCase()) : 
+                           [];
+          const hashtags = preferences.favorite_hashtags ? 
+                          preferences.favorite_hashtags.split(',').map(h => h.trim().toLowerCase()) : 
+                          [];
+                          
+          modeTitle = 'Interests Only Mode';
+          modeDescription = `Showing posts matching your interests: ${interests.join(', ')}`;
+          
+          if (interests.length === 0 && hashtags.length === 0) {
+            showInPageNotification('Warning', 'No interests configured. Please update your preferences.', 'warning');
+            reject('No interests configured');
+            return;
+          }
+          
+          filterFn = (post) => {
+            // Check if the post content matches any interest
+            const content = post.content?.toLowerCase() || '';
+            const postHashtags = post.hashtags?.toLowerCase() || '';
+            
+            // Check for matching interests in content
+            for (const interest of interests) {
+              if (content.includes(interest)) {
+                return true;
+              }
+            }
+            
+            // Check for matching hashtags in content
+            for (const hashtag of hashtags) {
+              if (postHashtags.includes(hashtag)) {
+                return true;
+              }
+            }
+            
+            return false;
+          };
+          break;
+          
+        case 'minimal-feed':
+          modeTitle = 'Minimal Feed Mode';
+          modeDescription = 'Showing only the most relevant posts';
+          filterFn = (post) => {
+            // This is a placeholder filter for Minimal Feed mode
+            // You can implement your own logic here
+            return true;
+          };
+          break;
+          
+        default:
+          modeTitle = 'Default Mode';
+          modeDescription = 'Showing all posts';
+          filterFn = (post) => true;
+          break;
+      }
+      
+      // Create a filter function based on the selected mode
+      let filterFn = null;
+      let modeTitle = '';
+      let modeDescription = '';
+      
+      switch (mode) {
+        case 'friends-only':
+          modeTitle = 'Friends Only Mode';
+          modeDescription = 'Showing only posts from friends';
+          filterFn = (post) => post.is_friend === true;
+          break;
+          
+        case 'interest-only':
+          const interests = preferences.interest_filter ? 
+                           preferences.interest_filter.split(',').map(i => i.trim().toLowerCase()) : 
+                           [];
+          const hashtags = preferences.favorite_hashtags ? 
+                          preferences.favorite_hashtags.split(',').map(h => h.trim().toLowerCase()) : 
+                          [];
+                          
+          modeTitle = 'Interests Only Mode';
+          modeDescription = `Showing posts matching your interests: ${interests.join(', ')}`;
+          
+          if (interests.length === 0 && hashtags.length === 0) {
+            showInPageNotification('Warning', 'No interests configured. Please update your preferences.', 'warning');
+            reject('No interests configured');
+            return;
+          }
+          
+          filterFn = (post) => {
+            // Check if the post content matches any interest
+            const content = post.content?.toLowerCase() || '';
+            const postHashtags = post.hashtags?.toLowerCase() || '';
+            
+            // Check for matching interests in content
+            for (const interest of interests) {
+              if (content.includes(interest)) {
+                return true;
+              }
+            }
+            
+            // Check for matching hashtags in content
+            for (const hashtag of hashtags) {
+              if (postHashtags.includes(hashtag)) {
+                return true;
+              }
+            }
+            
+            return false;
+          };
+          break;
+          
+        case 'minimal-feed':
+          modeTitle = 'Minimal Feed Mode';
+          modeDescription = 'Showing only the most relevant posts';
+          filterFn = (post) => {
+            // This is a placeholder filter for Minimal Feed mode
+            // You can implement your own logic here
+            return true;
+          };
+          break;
+          
+        default:
+          modeTitle = 'Default Mode';
+          modeDescription = 'Showing all posts';
+          filterFn = (post) => true;
+          break;
+      }
+      
+      // Create a filter function based on the selected mode
+      let filterFn = null;
+      let modeTitle = '';
+      let modeDescription = '';
+      
+      switch (mode) {
+        case 'friends-only':
+          modeTitle = 'Friends Only Mode';
+          modeDescription = 'Showing only posts from friends';
+          filterFn = (post) => post.is_friend === true;
+          break;
+          
+        case 'interest-only':
+          const interests = preferences.interest_filter ? 
+                           preferences.interest_filter.split(',').map(i => i.trim().toLowerCase()) : 
+                           [];
+          const hashtags = preferences.favorite_hashtags ? 
+                          preferences.favorite_hashtags.split(',').map(h => h.trim().toLowerCase()) : 
+                          [];
+                          
+          modeTitle = 'Interests Only Mode';
+          modeDescription = `Showing posts matching your interests: ${interests.join(', ')}`;
+          
+          if (interests.length === 0 && hashtags.length === 0) {
+            showInPageNotification('Warning', 'No interests configured. Please update your preferences.', 'warning');
+            reject('No interests configured');
+            return;
+          }
+          
+          filterFn = (post) => {
+            // Check if the post content matches any interest
+            const content = post.content?.toLowerCase() || '';
+            const postHashtags = post.hashtags?.toLowerCase() || '';
+            
+            // Check for matching interests in content
+            for (const interest of interests) {
+              if (content.includes(interest)) {
+                return true;
+              }
+            }
+            
+            // Check for matching hashtags in content
+            for (const hashtag of hashtags) {
+              if (postHashtags.includes(hashtag)) {
+                return true;
+              }
+            }
+            
+            return false;
+          };
+          break;
+          
+        case 'minimal-feed':
+          modeTitle = 'Minimal Feed Mode';
+          modeDescription = 'Showing only the most relevant posts';
+          filterFn = (post) => {
+            // This is a placeholder filter for Minimal Feed mode
+            // You can implement your own logic here
+            return true;
+          };
+          break;
+          
+        default:
+          modeTitle = 'Default Mode';
+          modeDescription = 'Showing all posts';
+          filterFn = (post) => true;
+          break;
+      }
+      
+      // Create a filter function based on the selected mode
+      let filterFn = null;
+      let modeTitle = '';
+      let modeDescription = '';
+      
+      switch (mode) {
+        case 'friends-only':
+          modeTitle = 'Friends Only Mode';
+          modeDescription = 'Showing only posts from friends';
+          filterFn = (post) => post.is_friend === true;
+          break;
+          
+        case 'interest-only':
+          const interests = preferences.interest_filter ? 
+                           preferences.interest_filter.split(',').map(i => i.trim().toLowerCase()) : 
+                           [];
+          const hashtags = preferences.favorite_hashtags ? 
+                          preferences.favorite_hashtags.split(',').map(h => h.trim().toLowerCase()) : 
+                          [];
+                          
+          modeTitle = 'Interests Only Mode';
+          modeDescription = `Showing posts matching your interests: ${interests.join(', ')}`;
+          
+          if (interests.length === 0 && hashtags.length === 0) {
+            showInPageNotification('Warning', 'No interests configured. Please update your preferences.', 'warning');
+            reject('No interests configured');
+            return;
+          }
+          
+          filterFn = (post) => {
+            // Check if the post content matches any interest
+            const content = post.content?.toLowerCase() || '';
+            const postHashtags = post.hashtags?.toLowerCase() || '';
+            
+            // Check for matching interests in content
+            for (const interest of interests) {
+              if (content.includes(interest)) {
+                return true;
+              }
+            }
+            
+            // Check for matching hashtags in content
+            for (const hashtag of hashtags) {
+              if (postHashtags.includes(hashtag)) {
+                return true;
+              }
+            }
+            
+            return false;
+          };
+          break;
+          
+        case 'minimal-feed':
+          modeTitle = 'Minimal Feed Mode';
+          modeDescription = 'Showing only the most relevant posts';
+          filterFn = (post) => {
+            // This is a placeholder filter for Minimal Feed mode
+            // You can implement your own logic here
+            return true;
+          };
+          break;
+          
+        default:
+          modeTitle = 'Default Mode';
+          modeDescription = 'Showing all posts';
+          filterFn = (post) => true;
+          break;
+      }
+      
+      // Create a filter function based on the selected mode
+      let filterFn = null;
+      let modeTitle = '';
+      let modeDescription = '';
+      
+      switch (mode) {
+        case 'friends-only':
+          modeTitle = 'Friends Only Mode';
+          modeDescription = 'Showing only posts from friends';
+          filterFn = (post) => post.is_friend === true;
+          break;
+          
+        case 'interest-only':
+          const interests = preferences.interest_filter ? 
+                           preferences.interest_filter.split(',').map(i => i.trim().toLowerCase()) : 
+                           [];
+          const hashtags = preferences.favorite_hashtags ? 
+                          preferences.favorite_hashtags.split(',').map(h => h.trim().toLowerCase()) : 
+                          [];
+                          
+          modeTitle = 'Interests Only Mode';
+          modeDescription = `Showing posts matching your interests: ${interests.join(', ')}`;
+          
+          if (interests.length === 0 && hashtags.length === 0) {
+            showInPageNotification('Warning', 'No interests configured. Please update your preferences.', 'warning');
+            reject('No interests configured');
+            return;
+          }
+          
+          filterFn = (post) => {
+            // Check if the post content matches any interest
+            const content = post.content?.toLowerCase() || '';
+            const postHashtags = post.hashtags?.toLowerCase() || '';
+            
+            // Check for matching interests in content
+            for (const interest of interests) {
+              if (content.includes(interest)) {
+                return true;
+              }
+            }
+            
+            // Check for matching hashtags in content
+            for (const hashtag of hashtags) {
+              if (postHashtags.includes(hashtag)) {
+                return true;
+              }
+            }
+            
+            return false;
+          };
+          break;
+          
+        case 'minimal-feed':
+          modeTitle = 'Minimal Feed Mode';
+          modeDescription = 'Showing only the most relevant posts';
+          filterFn = (post) => {
+            // This is a placeholder filter for Minimal Feed mode
+            // You can implement your own logic here
+            return true;
+          };
+          break;
+          
+        default:
+          modeTitle = 'Default Mode';
+          modeDescription = 'Showing all posts';
+          filterFn = (post) => true;
+          break;
+      }
+      
+      // Create a filter function based on the selected mode
+      let filterFn = null;
+      let modeTitle = '';
+      let modeDescription = '';
+      
+      switch (mode) {
+        case 'friends-only':
+          modeTitle = 'Friends Only Mode';
+          modeDescription = 'Showing only posts from friends';
+          filterFn = (post) => post.is_friend === true;
+          break;
+          
+        case 'interest-only':
+          const interests = preferences.interest_filter ? 
+                           preferences.interest_filter.split(',').map(i => i.trim().toLowerCase()) : 
+                           [];
+          const hashtags = preferences.favorite_hashtags ? 
+                          preferences.favorite_hashtags.split(',').map(h => h.trim().toLowerCase()) : 
+                          [];
+                          
+          modeTitle = 'Interests Only Mode';
+          modeDescription = `Showing posts matching your interests: ${interests.join(', ')}`;
+          
+          if (interests.length === 0 && hashtags.length === 0) {
+            showInPageNotification('Warning', 'No interests configured. Please update your preferences.', 'warning');
+            reject('No interests configured');
+            return;
+          }
+          
+          filterFn = (post) => {
+            // Check if the post content matches any interest
+            const content = post.content?.toLowerCase() || '';
+            const postHashtags = post.hashtags?.toLowerCase() || '';
+            
+            // Check for matching interests in content
+            for (const interest of interests) {
+              if (content.includes(interest)) {
+                return true;
+              }
+            }
+            
+            // Check for matching hashtags in content
+            for (const hashtag of hashtags) {
+              if (postHashtags.includes(hashtag)) {
+                return true;
+              }
+            }
+            
+            return false;
+          };
+          break;
+          
+        case 'minimal-feed':
+          modeTitle = 'Minimal Feed Mode';
+          modeDescription = 'Showing only the most relevant posts';
+          filterFn = (post) => {
+            // This is a placeholder filter for Minimal Feed mode
+            // You can implement your own logic here
+            return true;
+          };
+          break;
+          
+        default:
+          modeTitle = 'Default Mode';
+          modeDescription = 'Showing all posts';
+          filterFn = (post) => true;
+          break;
+      }
+      
+      // Create a filter function based on the selected mode
+      let filterFn = null;
+      let modeTitle = '';
+      let modeDescription = '';
+      
+      switch (mode) {
+        case 'friends-only':
+          modeTitle = 'Friends Only Mode';
+          modeDescription = 'Showing only posts from friends';
+          filterFn = (post) => post.is_friend === true;
+          break;
+          
+        case 'interest-only':
+          const interests = preferences.interest_filter ? 
+                           preferences.interest_filter.split(',').map(i => i.trim().toLowerCase()) : 
+                           [];
+          const hashtags = preferences.favorite_hashtags ? 
+                          preferences.favorite_hashtags.split(',').map(h => h.trim().toLowerCase()) : 
+                          [];
+                          
+          modeTitle = 'Interests Only Mode';
+          modeDescription = `Showing posts matching your interests: ${interests.join(', ')}`;
+          
+          if (interests.length === 0 && hashtags.length === 0) {
+            showInPageNotification('Warning', 'No interests configured. Please update your preferences.', 'warning');
+            reject('No interests configured');
+            return;
+          }
+          
+          filterFn = (post) => {
+            // Check if the post content matches any interest
+            const content = post.content?.toLowerCase() || '';
+            const postHashtags = post.hashtags?.toLowerCase() || '';
+            
+            // Check for matching interests in content
+            for (const interest of interests) {
+              if (content.includes(interest)) {
+                return true;
+              }
+            }
+            
+            // Check for matching hashtags in content
+            for (const hashtag of hashtags) {
+              if (postHashtags.includes(hashtag)) {
+                return true;
+              }
+            }
+            
+            return false;
+          };
+          break;
+          
+        case 'minimal-feed':
+          modeTitle = 'Minimal Feed Mode';
+          modeDescription = 'Showing only the most relevant posts';
+          filterFn = (post) => {
+            // This is a placeholder filter for Minimal Feed mode
+            // You can implement your own logic here
+            return true;
+          };
+          break;
+          
+        default:
+          modeTitle = 'Default Mode';
+          modeDescription = 'Showing all posts';
+          filterFn = (post) => true;
+          break;
+      }
+      
+      // Create a filter function based on the selected mode
+      let filterFn = null;
+      let modeTitle = '';
+      let modeDescription = '';
+      
+      switch (mode) {
+        case 'friends-only':
+          modeTitle = 'Friends Only Mode';
+          modeDescription = 'Showing only posts from friends';
+          filterFn = (post) => post.is_friend === true;
+          break;
+          
+        case 'interest-only':
+          const interests = preferences.interest_filter ? 
+                           preferences.interest_filter.split(',').map(i => i.trim().toLowerCase()) : 
+                           [];
+          const hashtags = preferences.favorite_hashtags ? 
+                          preferences.favorite_hashtags.split(',').map(h => h.trim().toLowerCase()) : 
+                          [];
+                          
+          modeTitle = 'Interests Only Mode';
+          modeDescription = `Showing posts matching your interests: ${interests.join(', ')}`;
+          
+          if (interests.length === 0 && hashtags.length === 0) {
+            showInPageNotification('Warning', 'No interests configured. Please update your preferences.', 'warning');
+            reject('No interests configured');
+            return;
+          }
+          
+          filterFn = (post) => {
+            // Check if the post content matches any interest
+            const content = post.content?.toLowerCase() || '';
+            const postHashtags = post.hashtags?.toLowerCase() || '';
+            
+            // Check for matching interests in content
+            for (const interest of interests) {
+              if (content.includes(interest)) {
+                return true;
+              }
+            }
+            
+            // Check for matching hashtags in content
+            for (const hashtag of hashtags) {
+              if (postHashtags.includes(hashtag)) {
+                return true;
+              }
+            }
+            
+            return false;
+          };
+          break;
+          
+        case 'minimal-feed':
+          modeTitle = 'Minimal Feed Mode';
+          modeDescription = 'Showing only the most relevant posts';
+          filterFn = (post) => {
+            // This is a placeholder filter for Minimal Feed mode
+            // You can implement your own logic here
+            return true;
+          };
+          break;
+          
+        default:
+          modeTitle = 'Default Mode';
+          modeDescription = 'Showing all posts';
+          filterFn = (post) => true;
+          break;
+      }
+      
+      // Create a filter function based on the selected mode
+      let filterFn = null;
+      let modeTitle = '';
+      let modeDescription = '';
+      
+      switch (mode) {
+        case 'friends-only':
+          modeTitle = 'Friends Only Mode';
+          modeDescription = 'Showing only posts from friends';
+          filterFn = (post) => post.is_friend === true;
+          break;
+          
+        case 'interest-only':
+          const interests = preferences.interest_filter ? 
+                           preferences.interest_filter.split(',').map(i => i.trim().toLowerCase()) : 
+                           [];
+          const hashtags = preferences.favorite_hashtags ? 
+                          preferences.favorite_hashtags.split(',').map(h => h.trim().toLowerCase()) : 
+                          [];
+                          
+          modeTitle = 'Interests Only Mode';
+          modeDescription = `Showing posts matching your interests: ${interests.join(', ')}`;
+          
+          if (interests.length === 0 && hashtags.length === 0) {
+            showInPageNotification('Warning', 'No interests configured. Please update your preferences.', 'warning');
+            reject('No interests configured');
+            return;
+          }
+          
+          filterFn = (post) => {
+            // Check if the post content matches any interest
+            const content = post.content?.toLowerCase() || '';
+            const postHashtags = post.hashtags?.toLowerCase() || '';
+            
+            // Check for matching interests in content
+            for (const interest of interests) {
+              if (content.includes(interest)) {
+                return true;
+              }
+            }
+            
+            // Check for matching hashtags in content
+            for (const hashtag of hashtags) {
+              if (postHashtags.includes(hashtag)) {
+                return true;
+              }
+            }
+            
+            return false;
+          };
+          break;
+          
+        case 'minimal-feed':
+          modeTitle = 'Minimal Feed Mode';
+          modeDescription = 'Showing only the most relevant posts';
+          filterFn = (post) => {
+            // This is a placeholder filter for Minimal Feed mode
+            // You can implement your own logic here
+            return true;
+          };
+          break;
+          
+        default:
+          modeTitle = 'Default Mode';
+          modeDescription = 'Showing all posts';
+          filterFn = (post) => true;
+          break;
+      }
+      
+      // Create a filter function based on the selected mode
+      let filterFn = null;
+      let modeTitle = '';
+      let modeDescription = '';
+      
+      switch (mode) {
+        case 'friends-only':
+          modeTitle = 'Friends Only Mode';
+          modeDescription = 'Showing only posts from friends';
+          filterFn = (post) => post.is_friend === true;
+          break;
+          
+        case 'interest-only':
+          const interests = preferences.interest_filter ? 
+                           preferences.interest_filter.split(',').map(i => i.trim().toLowerCase()) : 
+                           [];
+          const hashtags = preferences.favorite_hashtags ? 
+                          preferences.favorite_hashtags.split(',').map(h => h.trim().toLowerCase()) : 
+                          [];
+                          
+          modeTitle = 'Interests Only Mode';
+          modeDescription = `Showing posts matching your interests: ${interests.join(', ')}`;
+          
+          if (interests.length === 0 && hashtags.length === 0) {
+            showInPageNotification('Warning', 'No interests configured. Please update your preferences.', 'warning');
+            reject('No interests configured');
+            return;
+          }
+          
+          filterFn = (post) => {
+            // Check if the post content matches any interest
+            const content = post.content?.toLowerCase() || '';
+            const postHashtags = post.hashtags?.toLowerCase() || '';
+            
+            // Check for matching interests in content
+            for (const interest of interests) {
+              if (content.includes(interest)) {
+                return true;
+              }
+            }
+            
+            // Check for matching hashtags in content
+            for (const hashtag of hashtags) {
+              if (postHashtags.includes(hashtag)) {
+                return true;
+              }
+            }
+            
+            return false;
+          };
+          break;
+          
+        case 'minimal-feed':
+          modeTitle = 'Minimal Feed Mode';
+          modeDescription = 'Showing only the most relevant posts';
+          filterFn = (post) => {
+            // This is a placeholder filter for Minimal Feed mode
+            // You can implement your own logic here
+            return true;
+          };
+          break;
+          
+        default:
+          modeTitle = 'Default Mode';
+          modeDescription = 'Showing all posts';
+          filterFn = (post) => true;
+          break;
+      }
+      
+      // Create a filter function based on the selected mode
+      let filterFn = null;
+      let modeTitle = '';
+      let modeDescription = '';
+      
+      switch (mode) {
+        case 'friends-only':
+          modeTitle = 'Friends Only Mode';
+          modeDescription = 'Showing only posts from friends';
+          filterFn = (post) => post.is_friend === true;
+          break;
+          
+        case 'interest-only':
+          const interests = preferences.interest_filter ? 
+                           preferences.interest_filter.split(',').map(i => i.trim().toLowerCase()) : 
+                           [];
+          const hashtags = preferences.favorite_hashtags ? 
+                          preferences.favorite_hashtags.split(',').map(h => h.trim().toLowerCase()) : 
+                          [];
+                          
+          modeTitle = 'Interests Only Mode';
+          modeDescription = `Showing posts matching your interests: ${interests.join(', ')}`;
+          
+          if (interests.length === 0 && hashtags.length === 0) {
+            showInPageNotification('Warning', 'No interests configured. Please update your preferences.', 'warning');
+            reject('No interests configured');
+            return;
+          }
+          
+          filterFn = (post) => {
+            // Check if the post content matches any interest
+            const content = post.content?.toLowerCase() || '';
+            const postHashtags = post.hashtags?.toLowerCase() || '';
+            
+            // Check for matching interests in content
+            for (const interest of interests) {
+              if (content.includes(interest)) {
+                return true;
+              }
+            }
+            
+            // Check for matching hashtags in content
+            for (const hashtag of hashtags) {
+              if (postHashtags.includes(hashtag)) {
+                return true;
+              }
+            }
+            
+            return false;
+          };
+          break;
+          
+        case 'minimal-feed':
+          modeTitle = 'Minimal Feed Mode';
+          modeDescription = 'Showing only the most relevant posts';
+          filterFn = (post) => {
+            // This is a placeholder filter for Minimal Feed mode
+            // You can implement your own logic here
+            return true;
+          };
+          break;
+          
+        default:
+          modeTitle = 'Default Mode';
+          modeDescription = 'Showing all posts';
+          filterFn = (post) => true;
+          break;
+      }
+      
+      // Create a filter function based on the selected mode
+      let filterFn = null;
+      let modeTitle = '';
+      let modeDescription = '';
+      
+      switch (mode) {
+        case 'friends-only':
+          modeTitle = 'Friends Only Mode';
+          modeDescription = 'Showing only posts from friends';
+          filterFn = (post) => post.is_friend === true;
+          break;
+          
+        case 'interest-only':
+          const interests = preferences.interest_filter ? 
+                           preferences.interest_filter.split(',').map(i => i.trim().toLowerCase()) : 
+                           [];
+          const hashtags = preferences.favorite_hashtags ? 
+                          preferences.favorite_hashtags.split(',').map(h => h.trim().toLowerCase()) : 
+                          [];
+                          
+          modeTitle = 'Interests Only Mode';
+          modeDescription = `Showing posts matching your interests: ${interests.join(', ')}`;
+          
+          if (interests.length === 0 && hashtags.length === 0) {
+            showInPageNotification('Warning', 'No interests configured. Please update your preferences.', 'warning');
+            reject('No interests configured');
+            return;
+          }
+          
+          filterFn = (post) => {
+            // Check if the post content matches any interest
+            const content = post.content?.toLowerCase() || '';
+            const postHashtags = post.hashtags?.toLowerCase() || '';
+            
+            // Check for matching interests in content
+            for (const interest of interests) {
+              if (content.includes(interest)) {
+                return true;
+              }
+            }
+            
+            // Check for matching hashtags in content
+            for (const hashtag of hashtags) {
+              if (postHashtags.includes(hashtag)) {
+                return true;
+              }
+            }
+            
+            return false;
+          };
+          break;
+          
+        case 'minimal-feed':
+          modeTitle = 'Minimal Feed Mode';
+          modeDescription = 'Showing only the most relevant posts';
+          filterFn = (post) => {
+            // This is a placeholder filter for Minimal Feed mode
+            // You can implement your own logic here
+            return true;
+          };
+          break;
+          
+        default:
+          modeTitle = 'Default Mode';
+          modeDescription = 'Showing all posts';
+          filterFn = (post) => true;
+          break;
+      }
+      
+      // Create a filter function based on the selected mode
+      let filterFn = null;
+      let modeTitle = '';
+      let modeDescription = '';
+      
+      switch (mode) {
+        case 'friends-only':
+          modeTitle = 'Friends Only Mode';
+          modeDescription = 'Showing only posts from friends';
+          filterFn = (post) => post.is_friend === true;
+          break;
+          
+        case 'interest-only':
+          const interests = preferences.interest_filter ? 
+                           preferences.interest_filter.split(',').map(i => i.trim().toLowerCase()) : 
+                           [];
+          const hashtags = preferences.favorite_hashtags ? 
+                          preferences.favorite_hashtags.split(',').map(h => h.trim().toLowerCase()) : 
+                          [];
+                          
+          modeTitle = 'Interests Only Mode';
+          modeDescription = `Showing posts matching your interests: ${interests.join(', ')}`;
+          
+          if (interests.length === 0 && hashtags.length === 0) {
+            showInPageNotification('Warning', 'No interests configured. Please update your preferences.', 'warning');
+            reject('No interests configured');
+            return;
+          }
+          
+          filterFn = (post) => {
+            // Check if the post content matches any interest
+            const content = post.content?.toLowerCase() || '';
+            const postHashtags = post.hashtags?.toLowerCase() || '';
+            
+            // Check for matching interests in content
+            for (const interest of interests) {
+              if (content.includes(interest)) {
+                return true;
+              }
+            }
+            
+            // Check for matching hashtags in content
+            for (const hashtag of hashtags) {
+              if (postHashtags.includes(hashtag)) {
+                return true;
+              }
+            }
+            
+            return false;
+          };
+          break;
+          
+        case 'minimal-feed':
+          modeTitle = 'Minimal Feed Mode';
+          modeDescription = 'Showing only the most relevant posts';
+          filterFn = (post) => {
+            // This is a placeholder filter for Minimal Feed mode
+            // You can implement your own logic here
+            return true;
+          };
+          break;
+          
+        default:
+          modeTitle = 'Default Mode';
+          modeDescription = 'Showing all posts';
+          filterFn = (post) => true;
+          break;
+      }
+      
+      // Create a filter function based on the selected mode
+      let filterFn = null;
+      let modeTitle = '';
+      let modeDescription = '';
+      
+      switch (mode) {
+        case 'friends-only':
+          modeTitle = 'Friends Only Mode';
+          modeDescription = 'Showing only posts from friends';
+          filterFn = (post) => post.is_friend === true;
+          break;
+          
+        case 'interest-only':
+          const interests = preferences.interest_filter ? 
+                           preferences.interest_filter.split(',').map(i => i.trim().toLowerCase()) : 
+                           [];
+          const hashtags = preferences.favorite_hashtags ? 
+                          preferences.favorite_hashtags.split(',').map(h => h.trim().toLowerCase()) : 
+                          [];
+                          
+          modeTitle = 'Interests Only Mode';
+          modeDescription = `Showing posts matching your interests: ${interests.join(', ')}`;
+          
+          if (interests.length === 0 && hashtags.length === 0) {
+            showInPageNotification('Warning', 'No interests configured. Please update your preferences.', 'warning');
+            reject('No interests configured');
+            return;
+          }
+          
+          filterFn = (post) => {
+            // Check if the post content matches any interest
+            const content = post.content?.toLowerCase() || '';
+            const postHashtags = post.hashtags?.toLowerCase() || '';
+            
+            // Check for matching interests in content
+            for (const interest of interests) {
+              if (content.includes(interest)) {
+                return true;
+              }
+            }
+            
+            // Check for matching hashtags in content
+            for (const hashtag of hashtags) {
+              if (postHashtags.includes(hashtag)) {
+                return true;
+              }
+            }
+            
+            return false;
+          };
+          break;
+          
+        case 'minimal-feed':
+          modeTitle = 'Minimal Feed Mode';
+          modeDescription = 'Showing only the most relevant posts';
+          filterFn = (post) => {
+            // This is a placeholder filter for Minimal Feed mode
+            // You can implement your own logic here
+            return true;
+          };
+          break;
+          
+        default:
+          modeTitle = 'Default Mode';
+          modeDescription = 'Showing all posts';
+          filterFn = (post) => true;
+          break;
+      }
+      
+      // Create a filter function based on the selected mode
+      let filterFn = null;
+      let modeTitle = '';
+      let modeDescription = '';
+      
+      switch (mode) {
+        case 'friends-only':
+          modeTitle = 'Friends Only Mode';
+          modeDescription = 'Showing only posts from friends';
+          filterFn = (post) => post.is_friend === true;
+          break;
+          
+        case 'interest-only':
+          const interests = preferences.interest_filter ? 
+                           preferences.interest_filter.split(',').map(i => i.trim().toLowerCase()) : 
+                           [];
+          const hashtags = preferences.favorite_hashtags ? 
+                          preferences.favorite_hashtags.split(',').map(h => h.trim().toLowerCase()) : 
+                          [];
+                          
+          modeTitle = 'Interests Only Mode';
+          modeDescription = `Showing posts matching your interests: ${interests.join(', ')}`;
+          
+          if (interests.length === 0 && hashtags.length === 0) {
+            showInPageNotification('Warning', 'No interests configured. Please update your preferences.', 'warning');
+            reject('No interests configured');
+            return;
+          }
+          
+          filterFn = (post) => {
+            // Check if the post content matches any interest
+            const content = post.content?.toLowerCase() || '';
+            const postHashtags = post.hashtags?.toLowerCase() || '';
+            
+            // Check for matching interests in content
+            for (const interest of interests) {
+              if (content.includes(interest)) {
+                return true;
+              }
+            }
+            
+            // Check for matching hashtags in content
+            for (const hashtag of hashtags) {
+              if (postHashtags.includes(hashtag)) {
+                return true;
+              }
+            }
+            
+            return false;
+          };
+          break;
+          
+        case 'minimal-feed':
+          modeTitle = 'Minimal Feed Mode';
+          modeDescription = 'Showing only the most relevant posts';
+          filterFn = (post) => {
+            // This is a placeholder filter for Minimal Feed mode
+            // You can implement your own logic here
+            return true;
+          };
+          break;
+          
+        default:
+          modeTitle = 'Default Mode';
+          modeDescription = 'Showing all posts';
+          filterFn = (post) => true;
+          break;
+      }
+      
+      // Create a filter function based on the selected mode
+      let filterFn = null;
+      let modeTitle = '';
+      let modeDescription = '';
+      
+      switch (mode) {
+        case 'friends-only':
+          modeTitle = 'Friends Only Mode';
+          modeDescription = 'Showing only posts from friends';
+          filterFn = (post) => post.is_friend === true;
+          break;
+          
+        case 'interest-only':
+          const interests = preferences.interest_filter ? 
+                           preferences.interest_filter.split(',').map(i => i.trim().toLowerCase()) : 
+                           [];
+          const hashtags = preferences.favorite_hashtags ? 
+                          preferences.favorite_hashtags.split(',').map(h => h.trim().toLowerCase()) : 
+                          [];
+                          
+          modeTitle = 'Interests Only Mode';
+          modeDescription = `Showing posts matching your interests: ${interests.join(', ')}`;
+          
+          if (interests.length === 0 && hashtags.length === 0) {
+            showInPageNotification('Warning', 'No interests configured. Please update your preferences.', 'warning');
+            reject('No interests configured');
+            return;
+          }
+          
+          filterFn = (post) => {
+            // Check if the post content matches any interest
+            const content = post.content?.toLowerCase() || '';
+            const postHashtags = post.hashtags?.toLowerCase() || '';
+            
+            // Check for matching interests in content
+            for (const interest of interests) {
+              if (content.includes(interest)) {
+                return true;
+              }
+            }
+            
+            // Check for matching hashtags in content
+            for (const hashtag of hashtags) {
+              if (postHashtags.includes(hashtag)) {
+                return true;
+              }
+            }
+            
+            return false;
+          };
+          break;
+          
+        case 'minimal-feed':
+          modeTitle = 'Minimal Feed Mode';
+          modeDescription = 'Showing only the most relevant posts';
+          filterFn = (post) => {
+            // This is a placeholder filter for Minimal Feed mode
+            // You can implement your own logic here
+            return true;
+          };
+          break;
+          
+        default:
+          modeTitle = 'Default Mode';
+          modeDescription = 'Showing all posts';
+          filterFn = (post) => true;
+          break;
+      }
+      
+      // Create a filter function based on the selected mode
+      let filterFn = null;
+      let modeTitle = '';
+      let modeDescription = '';
+      
+      switch (mode) {
+        case 'friends-only':
+          modeTitle = 'Friends Only Mode';
+          modeDescription = 'Showing only posts from friends';
+          filterFn = (post) => post.is_friend === true;
+          break;
+          
+        case 'interest-only':
+          const interests = preferences.interest_filter ? 
+                           preferences.interest_filter.split(',').map(i => i.trim().toLowerCase()) : 
+                           [];
+          const hashtags = preferences.favorite_hashtags ? 
+                          preferences.favorite_hashtags.split(',').map(h => h.trim().toLowerCase()) : 
+                          [];
+                          
+          modeTitle = 'Interests Only Mode';
+          modeDescription = `Showing posts matching your interests: ${interests.join(', ')}`;
+          
+          if (interests.length === 0 && hashtags.length === 0) {
+            showInPageNotification('Warning', 'No interests configured. Please update your preferences.', 'warning');
+            reject('No interests configured');
+            return;
+          }
+          
+          filterFn = (post) => {
+            // Check if the post content matches any interest
+            const content = post.content?.toLowerCase() || '';
+            const postHashtags = post.hashtags?.toLowerCase() || '';
+            
+            // Check for matching interests in content
+            for (const interest of interests) {
+              if (content.includes(interest)) {
+                return true;
+              }
+            }
+            
+            // Check for matching hashtags in content
+            for (const hashtag of hashtags) {
+              if (postHashtags.includes(hashtag)) {
+                return true;
+              }
+            }
+            
+            return false;
+          };
+          break;
+          
+        case 'minimal-feed':
+          modeTitle = 'Minimal Feed Mode';
+          modeDescription = 'Showing only the most relevant posts';
+          filterFn = (post) => {
+            // This is a placeholder filter for Minimal Feed mode
+            // You can implement your own logic here
+            return true;
+          };
+          break;
+          
+        default:
+          modeTitle = 'Default Mode';
+          modeDescription = 'Showing all posts';
+          filterFn = (post) => true;
+          break;
+      }
+      
+      // Create a filter function based on the selected mode
+      let filterFn = null;
+      let modeTitle = '';
+      let modeDescription = '';
+      
+      switch (mode) {
+        case 'friends-only':
+          modeTitle = 'Friends Only Mode';
+          modeDescription = 'Showing only posts from friends';
+          filterFn = (post) => post.is_friend === true;
+          break;
+          
+        case 'interest-only':
+          const interests = preferences.interest_filter ? 
+                           preferences.interest_filter.split(',').map(i => i.trim().toLowerCase()) : 
+                           [];
+          const hashtags = preferences.favorite_hashtags ? 
+                          preferences.favorite_hashtags.split(',').map(h => h.trim().toLowerCase()) : 
+                          [];
+                          
+          modeTitle = 'Interests Only Mode';
+          modeDescription = `Showing posts matching your interests: ${interests.join(', ')}`;
+          
+          if (interests.length === 0 && hashtags.length === 0) {
+            showInPageNotification('Warning', 'No interests configured. Please update your preferences.', 'warning');
+            reject('No interests configured');
+            return;
+          }
+          
+          filterFn = (post) => {
+            // Check if the post content matches any interest
+            const content = post.content?.toLowerCase() || '';
+            const postHashtags = post.hashtags?.toLowerCase() || '';
+            
+            // Check for matching interests in content
+            for (const interest of interests) {
+              if (content.includes(interest)) {
+                return true;
+              }
+            }
+            
+            // Check for matching hashtags in content
+            for (const hashtag of hashtags) {
+              if (postHashtags.includes(hashtag)) {
+                return true;
+              }
+            }
+            
+            return false;
+          };
+          break;
+          
+        case 'minimal-feed':
+          modeTitle = 'Minimal Feed Mode';
+          modeDescription = 'Showing only the most relevant posts';
+          filterFn = (post) => {
+            // This is a placeholder filter for Minimal Feed mode
+            // You can implement your own logic here
+            return true;
+          };
+          break;
+          
+        default:
+          modeTitle = 'Default Mode';
+          modeDescription = 'Showing all posts';
+          filterFn = (post) => true;
+          break;
+      }
+      
+      // Create a filter function based on the selected mode
+      let filterFn = null;
+      let modeTitle = '';
+      let modeDescription = '';
+      
+      switch (mode) {
+        case 'friends-only':
+          modeTitle = 'Friends Only Mode';
+          modeDescription = 'Showing only posts from friends';
+          filterFn = (post) => post.is_friend === true;
+          break;
+          
+        case 'interest-only':
+          const interests = preferences.interest_filter ? 
+                           preferences.interest_filter.split(',').map(i => i.trim().toLowerCase()) : 
+                           [];
+          const hashtags = preferences.favorite_hashtags ? 
+                          preferences.favorite_hashtags.split(',').map(h => h.trim().toLowerCase()) : 
+                          [];
+                          
+          modeTitle = 'Interests Only Mode';
+          modeDescription = `Showing posts matching your interests: ${interests.join(', ')}`;
+          
+          if (interests.length === 0 && hashtags.length === 0) {
+            showInPageNotification('Warning', 'No interests configured. Please update your preferences.', 'warning');
+            reject('No interests configured');
+            return;
+          }
+          
+          filterFn = (post) => {
+            // Check if the post content matches any interest
+            const content = post.content?.toLowerCase() || '';
+            const postHashtags = post.hashtags?.toLowerCase() || '';
+            
+            // Check for matching interests in content
+            for (const interest of interests) {
+              if (content.includes(interest)) {
+                return true;
+              }
+            }
+            
+            // Check for matching hashtags in content
+            for (const hashtag of hashtags) {
+              if (postHashtags.includes(hashtag)) {
+                return true;
+              }
+            }
+            
+            return false;
+          };
+          break;
+          
+        case 'minimal-feed':
+          modeTitle = 'Minimal Feed Mode';
+          modeDescription = 'Showing only the most relevant posts';
+          filterFn = (post) => {
+            // This is a placeholder filter for Minimal Feed mode
+            // You can implement your own logic here
+            return true;
+          };
+          break;
+          
+        default:
+          modeTitle = 'Default Mode';
+          modeDescription = 'Showing all posts';
+          filterFn = (post) => true;
+          break;
+      }
+      
+      // Create a filter function based on the selected mode
+      let filterFn = null;
+      let modeTitle = '';
+      let modeDescription = '';
+      
+      switch (mode) {
+        case 'friends-only':
+          modeTitle = 'Friends Only Mode';
+          modeDescription = 'Showing only posts from friends';
+          filterFn = (post) => post.is_friend === true;
+          break;
+          
+        case 'interest-only':
+          const interests = preferences.interest_filter ? 
+                           preferences.interest_filter.split(',').map(i => i.trim().toLowerCase()) : 
+                           [];
+          const hashtags = preferences.favorite_hashtags ? 
+                          preferences.favorite_hashtags.split(',').map(h => h.trim().toLowerCase()) : 
+                          [];
+                          
+          modeTitle = 'Interests Only Mode';
+          modeDescription = `Showing posts matching your interests: ${interests.join(', ')}`;
+          
+          if (interests.length === 0 && hashtags.length === 0) {
+            showInPageNotification('Warning', 'No interests configured. Please update your preferences.', 'warning');
+            reject('No interests configured');
+            return;
+          }
+          
+          filterFn = (post) => {
+            // Check if the post content matches any interest
+            const content = post.content?.toLowerCase() || '';
+            const postHashtags = post.hashtags?.toLowerCase() || '';
+            
+            // Check for matching interests in content
+            for (const interest of interests) {
+              if (content.includes(interest)) {
+                return true;
+              }
+            }
+            
+            // Check for matching hashtags in content
+            for (const hashtag of hashtags) {
+              if (postHashtags.includes(hashtag)) {
+                return true;
+              }
+            }
+            
+            return false;
+          };
+          break;
+          
+        case 'minimal-feed':
+          modeTitle = 'Minimal Feed Mode';
+          modeDescription = 'Showing only the most relevant posts';
+          filterFn = (post) => {
+            // This is a placeholder filter for Minimal Feed mode
+            // You can implement your own logic here
+            return true;
+          };
+          break;
+          
+        default:
+          modeTitle = 'Default Mode';
+          modeDescription = 'Showing all posts';
+          filterFn = (post) => true;
+          break;
+      }
+      
+      // Create a filter function based on the selected mode
+      let filterFn = null;
+      let modeTitle = '';
+      let modeDescription = '';
+      
+      switch (mode) {
+        case 'friends-only':
+          modeTitle = 'Friends Only Mode';
+          modeDescription = 'Showing only posts from friends';
+          filterFn = (post) => post.is_friend === true;
+          break;
+          
+        case 'interest-only':
+          const interests = preferences.interest_filter ? 
+                           preferences.interest_filter.split(',').map(i => i.trim().toLowerCase()) : 
+                           [];
+          const hashtags = preferences.favorite_hashtags ? 
+                          preferences.favorite_hashtags.split(',').map(h => h.trim().toLowerCase()) : 
+                          [];
+                          
+          modeTitle = 'Interests Only Mode';
+          modeDescription = `Showing posts matching your interests: ${interests.join(', ')}`;
+          
+          if (interests.length === 0 && hashtags.length === 0) {
+            showInPageNotification('Warning', 'No interests configured. Please update your preferences.', 'warning');
+            reject('No interests configured');
+            return;
+          }
+          
+          filterFn = (post) => {
+            // Check if the post content matches any interest
+            const content = post.content?.toLowerCase() || '';
+            const postHashtags = post.hashtags?.toLowerCase() || '';
+            
+            // Check for matching interests in content
+            for (const interest of interests) {
+              if (content.includes(interest)) {
+                return true;
+              }
+            }
+            
+            // Check for matching hashtags in content
+            for (const hashtag of hashtags) {
+              if (postHashtags.includes(hashtag)) {
+                return true;
+              }
+            }
+            
+            return false;
+          };
+          break;
+          
+        case 'minimal-feed':
+          modeTitle = 'Minimal Feed Mode';
+          modeDescription = 'Showing only the most relevant posts';
+          filterFn = (post) => {
+            // This is a placeholder filter for Minimal Feed mode
+            // You can implement your own logic here
+            return true;
+          };
+          break;
+          
+        default:
+          modeTitle = 'Default Mode';
+          modeDescription = 'Showing all posts';
+          filterFn = (post) => true;
+          break;
+      }
+      
+      // Create a filter function based on the selected mode
+      let filterFn = null;
+      let modeTitle = '';
+      let modeDescription = '';
+      
+      switch (mode) {
+        case 'friends-only':
+          modeTitle = 'Friends Only Mode';
+          modeDescription = 'Showing only posts from friends';
+          filterFn = (post) => post.is_friend === true;
+          break;
+          
+        case 'interest-only':
+          const interests = preferences.interest_filter ? 
+                           preferences.interest_filter.split(',').map(i => i.trim().toLowerCase()) : 
+                           [];
+          const hashtags = preferences.favorite_hashtags ? 
+                          preferences.favorite_hashtags.split(',').map(h => h.trim().toLowerCase()) : 
+                          [];
+                          
+          modeTitle = 'Interests Only Mode';
+          modeDescription = `Showing posts matching your interests: ${interests.join(', ')}`;
+          
+          if (interests.length === 0 && hashtags.length === 0) {
+            showInPageNotification('Warning', 'No interests configured. Please update your preferences.', 'warning');
+            reject('No interests configured');
+            return;
+          }
+          
+          filterFn = (post) => {
+            // Check if the post content matches any interest
+            const content = post.content?.toLowerCase() || '';
+            const postHashtags = post.hashtags?.toLowerCase() || '';
+            
+            // Check for matching interests in content
+            for (const interest of interests) {
+              if (content.includes(interest)) {
+                return true;
+              }
+            }
+            
+            // Check for matching hashtags in content
+            for (const hashtag of hashtags) {
+              if (postHashtags.includes(hashtag)) {
+                return true;
+              }
+            }
+            
+            return false;
+          };
+          break;
+          
+        case 'minimal-feed':
+          modeTitle = 'Minimal Feed Mode';
+          modeDescription = 'Showing only the most relevant posts';
+          filterFn = (post) => {
+            // This is a placeholder filter for Minimal Feed mode
+            // You can implement your own logic here
+            return true;
+          };
+          break;
+          
+        default:
+          modeTitle = 'Default Mode';
+          modeDescription = 'Showing all posts';
+          filterFn = (post) => true;
+          break;
+      }
+      
+      // Create a filter function based on the selected mode
+      let filterFn = null;
+      let modeTitle = '';
+      let modeDescription = '';
+      
+      switch (mode) {
+        case 'friends-only':
+          modeTitle = 'Friends Only Mode';
+          modeDescription = 'Showing only posts from friends';
+          filterFn = (post) => post.is_friend === true;
+          break;
+          
+        case 'interest-only':
+          const interests = preferences.interest_filter ? 
+                           preferences.interest_filter.split(',').map(i => i.trim().toLowerCase()) : 
+                           [];
+          const hashtags = preferences.favorite_hashtags ? 
+                          preferences.favorite_hashtags.split(',').map(h => h.trim().toLowerCase()) : 
+                          [];
+                          
+          modeTitle = 'Interests Only Mode';
+          modeDescription = `Showing posts matching your interests: ${interests.join(', ')}`;
+          
+          if (interests.length === 0 && hashtags.length === 0) {
+            showInPageNotification('Warning', 'No interests configured. Please update your preferences.', 'warning');
+            reject('No interests configured');
+            return;
+          }
+          
+          filterFn = (post) => {
+            // Check if the post content matches any interest
+            const content = post.content?.toLowerCase() || '';
+            const postHashtags = post.hashtags?.toLowerCase() || '';
+            
+            // Check for matching interests in content
+            for (const interest of interests) {
+              if (content.includes(interest)) {
+                return true;
+              }
+            }
+            
+            // Check for matching hashtags in content
+            for (const hashtag of hashtags) {
+              if (postHashtags.includes(hashtag)) {
+                return true;
+              }
+            }
+            
+            return false;
+          };
+          break;
+          
+        case 'minimal-feed':
+          modeTitle = 'Minimal Feed Mode';
+          modeDescription = 'Showing only the most relevant posts';
+          filterFn = (post) => {
+            // This is a placeholder filter for Minimal Feed mode
+            // You can implement your own logic here
+            return true;
+          };
+          break;
+          
+        default:
+          modeTitle = 'Default Mode';
+          modeDescription = 'Showing all posts';
+          filterFn = (post) => true;
+          break;
+      }
+      
+      // Create a filter function based on the selected mode
+      let filterFn = null;
+      let modeTitle = '';
+      let modeDescription = '';
+      
+      switch (mode) {
+        case 'friends-only':
+          modeTitle = 'Friends Only Mode';
+          modeDescription = 'Showing only posts from friends';
+          filterFn = (post) => post.is_friend === true;
+          break;
+          
+        case 'interest-only':
+          const interests = preferences.interest_filter ? 
+                           preferences.interest_filter.split(',').map(i => i.trim().toLowerCase()) : 
+                           [];
+          const hashtags = preferences.favorite_hashtags ? 
+                          preferences.favorite_hashtags.split(',').map(h => h.trim().toLowerCase()) : 
+                          [];
+                          
+          modeTitle = 'Interests Only Mode';
+          modeDescription = `Showing posts matching your interests: ${interests.join(', ')}`;
+          
+          if (interests.length === 0 && hashtags.length === 0) {
+            showInPageNotification('Warning', 'No interests configured. Please update your preferences.', 'warning');
+            reject('No interests configured');
+            return;
+          }
+          
+          filterFn = (post) => {
+            // Check if the post content matches any interest
+            const content = post.content?.toLowerCase() || '';
+            const postHashtags = post.hashtags?.toLowerCase() || '';
+            
+            // Check for matching interests in content
+            for (const interest of interests) {
+              if (content.includes(interest)) {
+                return true;
+              }
+            }
+            
+            // Check for matching hashtags in content
+            for (const hashtag of hashtags) {
+              if (postHashtags.includes(hashtag)) {
+                return true;
+              }
+            }
+            
+            return false;
+          };
+          break;
+          
+        case 'minimal-feed':
+          modeTitle = 'Minimal Feed Mode';
+          modeDescription = 'Showing only the most relevant posts';
+          filterFn = (post) => {
+            // This is a placeholder filter for Minimal Feed mode
+            // You can implement your own logic here
+            return true;
+          };
+          break;
+          
+        default:
+          modeTitle = 'Default Mode';
+          modeDescription = 'Showing all posts';
+          filterFn = (post) => true;
+          break;
+      }
+      
+      // Create a filter function based on the selected mode
+      let filterFn = null;
+      let modeTitle = '';
+      let modeDescription = '';
+      
+      switch (mode) {
+        case 'friends-only':
+          modeTitle = 'Friends Only Mode';
+          modeDescription = 'Showing only posts from friends';
+          filterFn = (post) => post.is_friend === true;
+          break;
+          
+        case 'interest-only':
+          const interests = preferences.interest_filter ? 
+                           preferences.interest_filter.split(',').map(i => i.trim().toLowerCase()) : 
+                           [];
+          const hashtags = preferences.favorite_hashtags ? 
+                          preferences.favorite_hashtags.split(',').map(h => h.trim().toLowerCase()) : 
+                          [];
+                          
+          modeTitle = 'Interests Only Mode';
+          modeDescription = `Showing posts matching your interests: ${interests.join(', ')}`;
+          
+          if (interests.length === 0 && hashtags.length === 0) {
+            showInPageNotification('Warning', 'No interests configured. Please update your preferences.', 'warning');
+            reject('No interests configured');
+            return;
+          }
+          
+          filterFn = (post) => {
+            // Check if the post content matches any interest
+            const content = post.content?.toLowerCase() || '';
+            const postHashtags = post.hashtags?.toLowerCase() || '';
+            
+            // Check for matching interests in content
+            for (const interest of interests) {
+              if (content.includes(interest)) {
+                return true;
+              }
+            }
+            
+            // Check for matching hashtags in content
+            for (const hashtag of hashtags) {
+              if (postHashtags.includes(hashtag)) {
+                return true;
+              }
+            }
+            
+            return false;
+          };
+          break;
+          
+        case 'minimal-feed':
+          modeTitle = 'Minimal Feed Mode';
+          modeDescription = 'Showing only the most relevant posts';
+          filterFn = (post) => {
+            // This is a placeholder filter for Minimal Feed mode
+            // You can implement your own logic here
+            return true;
+          };
+          break;
+          
+        default:
+          modeTitle = 'Default Mode';
+          modeDescription = 'Showing all posts';
+          filterFn = (post) => true;
+          break;
+      }
+      
+      // Create a filter function based on the selected mode
+      let filterFn = null;
+      let modeTitle = '';
+      let modeDescription = '';
+      
+      switch (mode) {
+        case 'friends-only':
+          modeTitle = 'Friends Only Mode';
+          modeDescription = 'Showing only posts from friends';
+          filterFn = (post) => post.is_friend === true;
+          break;
+          
+        case 'interest-only':
+          const interests = preferences.interest_filter ? 
+                           preferences.interest_filter.split(',').map(i => i.trim().toLowerCase()) : 
+                           [];
+          const hashtags = preferences.favorite_hashtags ? 
+                          preferences.favorite_hashtags.split(',').map(h => h.trim().toLowerCase()) : 
+                          [];
+                          
+          modeTitle = 'Interests Only Mode';
+          modeDescription = `Showing posts matching your interests: ${interests.join(', ')}`;
+          
+          if (interests.length === 0 && hashtags.length === 0) {
+            showInPageNotification('Warning', 'No interests configured. Please update your preferences.', 'warning');
+            reject('No interests configured');
+            return;
+          }
+          
+          filterFn = (post) => {
+            // Check if the post content matches any interest
+            const content = post.content?.toLowerCase() || '';
+            const postHashtags = post.hashtags?.toLowerCase() || '';
+            
+            // Check for matching interests in content
+            for (const interest of interests) {
+              if (content.includes(interest)) {
+                return true;
+              }
+            }
+            
+            // Check for matching hashtags in content
+            for (const hashtag of hashtags) {
+              if (postHashtags.includes(hashtag)) {
+                return true;
+              }
+            }
+            
+            return false;
+          };
+          break;
+          
+        case 'minimal-feed':
+          modeTitle = 'Minimal Feed Mode';
+          modeDescription = 'Showing only the most relevant posts';
+          filterFn = (post) => {
+            // This is a placeholder filter for Minimal Feed mode
+            // You can implement your own logic here
+            return true;
+          };
+          break;
+          
+        default:
+          modeTitle = 'Default Mode';
+          modeDescription = 'Showing all posts';
+          filterFn = (post) => true;
+          break;
+      }
+      
+      // Create a filter function based on the selected mode
+      let filterFn = null;
+      let modeTitle = '';
+      let modeDescription = '';
+      
+      switch (mode) {
+        case 'friends-only':
+          modeTitle = 'Friends Only Mode';
+          modeDescription = 'Showing only posts from friends';
+          filterFn = (post) => post.is_friend === true;
+          break;
+          
+        case 'interest-only':
+          const interests = preferences.interest_filter ? 
+                           preferences.interest_filter.split(',').map(i => i.trim().toLowerCase()) : 
+                           [];
+          const hashtags = preferences.favorite_hashtags ? 
+                          preferences.favorite_hashtags.split(',').map(h => h.trim().toLowerCase()) : 
+                          [];
+                          
+          modeTitle = 'Interests Only Mode';
+          modeDescription = `Showing posts matching your interests: ${interests.join(', ')}`;
+          
+          if (interests.length === 0 && hashtags.length === 0) {
+            showInPageNotification('Warning', 'No interests configured. Please update your preferences.', 'warning');
+            reject('No interests configured');
+            return;
+          }
+          
+          filterFn = (post) => {
+            // Check if the post content matches any interest
+            const content = post.content?.toLowerCase() || '';
+            const postHashtags = post.hashtags?.toLowerCase() || '';
+            
+            // Check for matching interests in content
+            for (const interest of interests) {
+              if (content.includes(interest)) {
+                return true;
+              }
+            }
+            
+            // Check for matching hashtags in content
+            for (const hashtag of hashtags) {
+              if (postHashtags.includes(hashtag)) {
+                return true;
+              }
+            }
+            
+            return false;
+          };
+          break;
+          
+        case 'minimal-feed':
+          modeTitle = 'Minimal Feed Mode';
+          modeDescription = 'Showing only the most relevant posts';
+          filterFn = (post) => {
+            // This is a placeholder filter for Minimal Feed mode
+            // You can implement your own logic here
+            return true;
+          };
+          break;
+          
+        default:
+          modeTitle = 'Default Mode';
+          modeDescription = 'Showing all posts';
+          filterFn = (post) => true;
+          break;
+      }
+      
+      // Create a filter function based on the selected mode
+      let filterFn = null;
+      let modeTitle = '';
+      let modeDescription = '';
+      
+      switch (mode) {
+        case 'friends-only':
+          modeTitle = 'Friends Only Mode';
+          modeDescription = 'Showing only posts from friends';
+          filterFn = (post) => post.is_friend === true;
+          break;
+          
+        case 'interest-only':
+          const interests = preferences.interest_filter ? 
+                           preferences.interest_filter.split(',').map(i => i.trim().toLowerCase()) : 
+                           [];
+          const hashtags = preferences.favorite_hashtags ? 
+                          preferences.favorite_hashtags.split(',').map(h => h.trim().toLowerCase()) : 
+                          [];
+                          
+          modeTitle = 'Interests Only Mode';
+          modeDescription = `Showing posts matching your interests: ${interests.join(', ')}`;
+          
+          if (interests.length === 0 && hashtags.length === 0) {
+            showInPageNotification('Warning', 'No interests configured. Please update your preferences.', 'warning');
+            reject('No interests configured');
+            return;
+          }
+          
+          filterFn = (post) => {
+            // Check if the post content matches any interest
+            const content = post.content?.toLowerCase() || '';
+            const postHashtags = post.hashtags?.toLowerCase() || '';
+            
+            // Check for matching interests in content
+            for (const interest of interests) {
+              if (content.includes(interest)) {
+                return true;
+              }
+            }
+            
+            // Check for matching hashtags in content
+            for (const hashtag of hashtags) {

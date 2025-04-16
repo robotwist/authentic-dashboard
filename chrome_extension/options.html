@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Authentic Dashboard - Settings</title>
+  <link rel="stylesheet" href="styles/options.css">
+</head>
+<body>
+  <div class="container">
+    <header>
+      <h1>Authentic Dashboard Settings</h1>
+      <p class="subtitle">Configure your data collection preferences</p>
+    </header>
+
+    <div class="settings-section">
+      <h2>API Configuration</h2>
+      
+      <div class="setting-group">
+        <label for="api-key">API Key</label>
+        <div class="input-group">
+          <input type="password" id="api-key" placeholder="Enter your API key">
+          <button id="save-api-key" class="btn">Save</button>
+        </div>
+        <p class="help-text">Required to connect to the Authentic Dashboard backend</p>
+      </div>
+      
+      <div class="setting-group">
+        <label for="api-url">API URL</label>
+        <input type="text" id="api-url" placeholder="https://api.example.com/v1">
+        <p class="help-text">Leave empty to use the default API endpoint</p>
+      </div>
+    </div>
+
+    <div class="settings-section">
+      <h2>Collection Settings</h2>
+      
+      <div class="setting-group">
+        <label for="auto-collect">
+          <input type="checkbox" id="auto-collect">
+          Enable automatic collection
+        </label>
+        <p class="help-text">Automatically collect posts when visiting supported platforms</p>
+      </div>
+      
+      <div class="setting-group dependent-setting" id="auto-collect-interval-group">
+        <label for="auto-collect-interval">Collection Interval (minutes)</label>
+        <input type="number" id="auto-collect-interval" min="5" max="60" value="30">
+        <p class="help-text">How often to collect posts when on supported sites (minimum 5 minutes)</p>
+      </div>
+      
+      <div class="setting-group">
+        <label for="collect-sponsored">
+          <input type="checkbox" id="collect-sponsored">
+          Collect sponsored content
+        </label>
+        <p class="help-text">Include sponsored posts and advertisements in collection</p>
+      </div>
+      
+      <div class="setting-group">
+        <label for="max-posts">Maximum posts per collection</label>
+        <input type="number" id="max-posts" min="10" max="100" value="25">
+        <p class="help-text">Maximum number of posts to collect in a single batch</p>
+      </div>
+    </div>
+
+    <div class="settings-section">
+      <h2>Platform Settings</h2>
+      
+      <div class="setting-group">
+        <label for="enable-facebook">
+          <input type="checkbox" id="enable-facebook" checked>
+          Enable Facebook collection
+        </label>
+      </div>
+      
+      <div class="setting-group">
+        <label for="enable-instagram">
+          <input type="checkbox" id="enable-instagram" checked>
+          Enable Instagram collection
+        </label>
+      </div>
+      
+      <div class="setting-group">
+        <label for="enable-linkedin">
+          <input type="checkbox" id="enable-linkedin" checked>
+          Enable LinkedIn collection
+        </label>
+      </div>
+    </div>
+
+    <div class="settings-section">
+      <h2>Privacy Settings</h2>
+      
+      <div class="setting-group">
+        <label for="collect-engagement">
+          <input type="checkbox" id="collect-engagement" checked>
+          Collect engagement metrics (likes, comments, shares)
+        </label>
+      </div>
+      
+      <div class="setting-group">
+        <label for="collect-user-info">
+          <input type="checkbox" id="collect-user-info" checked>
+          Collect user information (usernames)
+        </label>
+      </div>
+      
+      <div class="setting-group">
+        <label for="collect-images">
+          <input type="checkbox" id="collect-images" checked>
+          Collect image URLs
+        </label>
+      </div>
+    </div>
+
+    <div class="settings-section">
+      <h2>Advanced Settings</h2>
+      
+      <div class="setting-group">
+        <label for="enable-debug">
+          <input type="checkbox" id="enable-debug">
+          Enable debug mode
+        </label>
+        <p class="help-text">Show additional debug information in the console</p>
+      </div>
+      
+      <div class="setting-group">
+        <label for="show-notifications">
+          <input type="checkbox" id="show-notifications" checked>
+          Show browser notifications
+        </label>
+        <p class="help-text">Display notifications when posts are collected</p>
+      </div>
+      
+      <div class="action-group">
+        <button id="clear-data" class="btn btn-danger">Clear Collected Data</button>
+        <button id="export-data" class="btn btn-secondary">Export Settings</button>
+        <button id="import-data" class="btn btn-secondary">Import Settings</button>
+      </div>
+    </div>
+
+    <div class="status-bar">
+      <div class="status-message" id="status-message">Settings saved successfully</div>
+    </div>
+
+    <footer>
+      <button id="save-all" class="btn btn-primary">Save All Settings</button>
+      <a href="#" id="view-dashboard" class="link">View Dashboard</a>
+    </footer>
+  </div>
+
+  <script src="options.js" type="module"></script>
+</body>
+</html> 

@@ -1,312 +1,66 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-    <title>Authentic Dashboard</title>
-    <!-- Core design system -->
-    <link rel="stylesheet" href="shared/design-tokens.css">
-    <link rel="stylesheet" href="shared/components.css">
-    <!-- Legacy styles (to be gradually migrated) -->
-    <link rel="stylesheet" href="design-system.css">
-    <link rel="stylesheet" href="popup.css">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Authentic Dashboard</title>
+  <link rel="stylesheet" href="popup.css">
 </head>
 <body>
-    <div class="header">
-        <h1>Authentic Dashboard</h1>
-        <div class="description">Empowering you to take control of your social media experience.</div>
-        <!-- Connection message container will be inserted here by JS -->
+  <div class="header">
+    <h1>Authentic Dashboard</h1>
+    <div class="status-container">
+      <div id="status-indicator" class="status-indicator"></div>
+      <span id="status-text">Checking connection...</span>
+    </div>
+  </div>
+  
+  <div class="platform-grid">
+    <div class="platform-card">
+      <img src="icons/facebook.png" alt="Facebook" class="platform-icon">
+      <h2>Facebook</h2>
+      <div class="status">
+        <span class="count" id="facebook-count">0</span>
+        <span class="label">Posts</span>
+      </div>
+      <button class="collect-btn" data-platform="facebook">Collect Now</button>
     </div>
     
-    <button id="scanButton" class="btn btn-primary">Scan Current Page</button>
-    <div id="status" class="status">Checking connection status...</div>
-    
-    <div class="stats-card">
-        <div class="stat-row">
-            <span class="stat-label">Posts collected today</span>
-            <span class="stat-count" id="postsToday">0</span>
-        </div>
-        <div class="stat-row">
-            <span class="stat-label">Total posts</span>
-            <span class="stat-count" id="postsTotal">0</span>
-        </div>
-        <div class="stat-row">
-            <span class="stat-label">ML processed</span>
-            <span class="stat-count" id="mlProcessed">0</span>
-        </div>
+    <div class="platform-card">
+      <img src="icons/instagram.png" alt="Instagram" class="platform-icon">
+      <h2>Instagram</h2>
+      <div class="status">
+        <span class="count" id="instagram-count">0</span>
+        <span class="label">Posts</span>
+      </div>
+      <button class="collect-btn" data-platform="instagram">Collect Now</button>
     </div>
     
-    <h3 class="section-title mb-sm">Recent Activity</h3>
-    <div class="recent-scans" id="recentScans">
-        <!-- Recent scans will be inserted here -->
+    <div class="platform-card">
+      <img src="icons/linkedin.png" alt="LinkedIn" class="platform-icon">
+      <h2>LinkedIn</h2>
+      <div class="status">
+        <span class="count" id="linkedin-count">0</span>
+        <span class="label">Posts</span>
+      </div>
+      <button class="collect-btn" data-platform="linkedin">Collect Now</button>
     </div>
-    
-    <div class="tab-container">
-        <div class="tab-buttons">
-            <button id="settingsTabBtn" class="tab-button active">
-                <span class="tab-icon settings-icon"></span>
-                Settings
-            </button>
-            <button id="transparencyTabBtn" class="tab-button">
-                <span class="tab-icon transparency-icon"></span>
-                Transparency
-            </button>
-            <button id="insightsTabBtn" class="tab-button">
-                <span class="tab-icon insights-icon"></span>
-                Insights
-            </button>
-            <button id="pureFeedTabBtn" class="tab-button">
-                <span class="tab-icon pure-feed-icon"></span>
-                Pure Feed
-            </button>
-        </div>
-        
-        <!-- Settings Tab -->
-        <div id="settingsTab" class="tab-content active">
-            <h3 class="section-title">Scanner Settings</h3>
-            
-            <div class="toggle-row">
-                <span class="toggle-label">Auto-scan on page load</span>
-                <label class="toggle">
-                    <input type="checkbox" id="autoScan" checked>
-                    <span class="slider"></span>
-                </label>
-            </div>
-            
-            <div class="toggle-row">
-                <span class="toggle-label">Advanced ML processing</span>
-                <label class="toggle">
-                    <input type="checkbox" id="advancedML" checked>
-                    <span class="slider"></span>
-                </label>
-            </div>
-            
-            <div class="toggle-row">
-                <span class="toggle-label">Collect sponsored content</span>
-                <label class="toggle">
-                    <input type="checkbox" id="collectSponsored" checked>
-                    <span class="slider"></span>
-                </label>
-            </div>
-            
-            <div class="toggle-row">
-                <span class="toggle-label">Show notifications</span>
-                <label class="toggle">
-                    <input type="checkbox" id="showNotifications" checked>
-                    <span class="slider"></span>
-                </label>
-            </div>
-            
-            <div class="api-key-section">
-                <label for="apiKey" class="form-label">API Key:</label>
-                <div class="input-with-button">
-                    <input type="text" id="apiKey" class="form-input" placeholder="Enter your API key">
-                    <button id="saveApiKey" class="btn btn-secondary">Save</button>
-                </div>
-            </div>
-        </div>
-        
-        <!-- Transparency Tab -->
-        <div id="transparencyTab" class="tab-content">
-            <h3 style="font-size: 14px; margin-bottom: 10px; color: #222;">Data Collection Transparency</h3>
-            <p style="font-size: 12px; color: #444; margin-bottom: 15px;">
-                Control exactly what data we collect to align with your preferences.
-            </p>
-            
-            <div class="data-category">
-                <h4>Post Content <span class="tooltip">ⓘ<span class="tooltiptext">Text content of posts from your feed</span></span></h4>
-                <div class="data-items">The main text of each post</div>
-                <div class="data-control">
-                    <label>
-                        <input type="checkbox" id="collectContent" checked>
-                        Collect post content
-                    </label>
-                </div>
-            </div>
-            
-            <div class="data-category">
-                <h4>Engagement Metrics <span class="tooltip">ⓘ<span class="tooltiptext">Like counts, comments, shares</span></span></h4>
-                <div class="data-items">Likes, comments, shares, reactions</div>
-                <div class="data-control">
-                    <label>
-                        <input type="checkbox" id="collectEngagement" checked>
-                        Collect engagement data
-                    </label>
-                </div>
-            </div>
-            
-            <div class="data-category">
-                <h4>User Identification <span class="tooltip">ⓘ<span class="tooltiptext">Who posted the content</span></span></h4>
-                <div class="data-items">Usernames of post authors</div>
-                <div class="data-control">
-                    <label>
-                        <input type="checkbox" id="collectUsers" checked>
-                        Collect user information
-                    </label>
-                    <div style="font-size: 10px; color: #444; margin-top: 5px;">
-                        <i class="fas fa-info-circle"></i> We auto-detect friends; you can mark family members on the dashboard
-                    </div>
-                </div>
-            </div>
-            
-            <div class="data-category">
-                <h4>Hashtags & Links <span class="tooltip">ⓘ<span class="tooltiptext">Categories and external resources</span></span></h4>
-                <div class="data-items">Hashtags and external links in posts</div>
-                <div class="data-control">
-                    <label>
-                        <input type="checkbox" id="collectHashtags" checked>
-                        Collect hashtags and links
-                    </label>
-                </div>
-            </div>
-            
-            <div class="data-category">
-                <h4>Local ML Analysis <span class="tooltip">ⓘ<span class="tooltiptext">Analysis performed in-browser</span></span></h4>
-                <div class="data-items">Sentiment, topics, bizfluencer score</div>
-                <div class="data-control">
-                    <label>
-                        <input type="checkbox" id="collectLocalML" checked>
-                        Perform local ML analysis
-                    </label>
-                </div>
-            </div>
-            
-            <div class="data-category" style="margin-top: 15px; border-top: 1px solid #e0e0e0; padding-top: 10px;">
-                <h4>Friend & Family Filtering <span class="tooltip">ⓘ<span class="tooltiptext">Post filtering options on the dashboard</span></span></h4>
-                <div class="data-items" style="font-size: 11px; line-height: 1.4;">
-                    We automatically detect friends as people you follow. Visit the dashboard to mark specific users as family members for focused viewing.
-                </div>
-            </div>
-            
-            <button id="saveDataPreferences" class="small-button" style="width: 100%; margin-top: 15px;">Save Preferences</button>
-        </div>
-        
-        <!-- Insights Tab -->
-        <div id="insightsTab" class="tab-content">
-            <h3 class="section-title">Your Feed Insights</h3>
-            <p class="text-muted mb-md">Real-time analysis of content from your social feeds.</p>
-            
-            <div id="currentPageInsights">
-                <div class="no-insights-state">
-                    <div class="empty-state-icon">📊</div>
-                    <h4 class="empty-state-title">No insights yet</h4>
-                    <p class="empty-state-message">To see insights about your current feed, click "Scan Current Page" above.</p>
-                    
-                    <div class="quick-insights-preview">
-                        <h5 class="mt-md mb-sm">What insights will you get?</h5>
-                        <ul class="insights-list">
-                            <li><span class="insight-icon">🧮</span> Post type breakdown</li>
-                            <li><span class="insight-icon">💼</span> Promotional content percentage</li>
-                            <li><span class="insight-icon">💬</span> Content sentiment analysis</li>
-                            <li><span class="insight-icon">👥</span> Friends vs. brands ratio</li>
-                            <li><span class="insight-icon">📈</span> Authenticity rating</li>
-                        </ul>
-                    </div>
-                    
-                    <div class="action-container">
-                        <button id="insightsScanButton" class="btn btn-primary">Scan Now</button>
-                        <a href="#" id="viewPastInsightsLink" class="btn-link ml-sm">View past insights</a>
-                    </div>
-                </div>
-            </div>
-            
-            <div id="insightsTips" class="tips-section">
-                <h5 class="tips-title">Pro Tips</h5>
-                <div class="tip-card">
-                    <div class="tip-icon">💡</div>
-                    <div class="tip-content">
-                        <p>Scan multiple platforms to compare content quality across your social feeds.</p>
-                    </div>
-                </div>
-                <div class="tip-card">
-                    <div class="tip-icon">⚡</div>
-                    <div class="tip-content">
-                        <p>Use the <strong>Pure Feed</strong> tab to see your content ranked by authenticity instead of platform algorithms.</p>
-                    </div>
-                </div>
-            </div>
-        </div>
-        
-        <!-- Pure Feed Tab -->
-        <div id="pureFeedTab" class="tab-content">
-            <div class="pure-feed-header">
-                <h3 class="section-title">Pure Feed</h3>
-                <p class="mb-md">Content ranked by authenticity, not engagement algorithms.</p>
-            </div>
-            
-            <div class="filter-controls card">
-                <div class="filter-group">
-                    <label for="feedPlatform">Platform</label>
-                    <select id="feedPlatform" class="form-input">
-                        <option value="all">All Platforms</option>
-                        <option value="facebook">Facebook</option>
-                        <option value="instagram">Instagram</option>
-                        <option value="linkedin">LinkedIn</option>
-                    </select>
-                </div>
-                
-                <div class="filter-group">
-                    <label for="feedCategory">Authenticity Category</label>
-                    <select id="feedCategory" class="form-input">
-                        <option value="all">All Categories</option>
-                        <option value="pure soul">Pure Soul (90-100)</option>
-                        <option value="insightful">Insightful (70-89)</option>
-                        <option value="neutral">Neutral (40-69)</option>
-                        <option value="performative">Performative (20-39)</option>
-                        <option value="spam/ads">Spam/Ads (0-19)</option>
-                    </select>
-                </div>
-                
-                <div class="filter-actions">
-                    <button id="refreshFeedBtn" class="btn btn-small">
-                        <span class="refresh-icon"></span> Refresh
-                    </button>
-                </div>
-            </div>
-            
-            <div class="authenticity-legend mb-sm">
-                <div class="legend-title text-center mb-xs">Authenticity Scale</div>
-                <div class="legend-items">
-                    <div class="legend-item">
-                        <span class="color-dot score-excellent"></span>
-                        <span class="legend-label">Pure Soul</span>
-                    </div>
-                    <div class="legend-item">
-                        <span class="color-dot score-good"></span>
-                        <span class="legend-label">Insightful</span>
-                    </div>
-                    <div class="legend-item">
-                        <span class="color-dot score-neutral"></span>
-                        <span class="legend-label">Neutral</span>
-                    </div>
-                    <div class="legend-item">
-                        <span class="color-dot score-poor"></span>
-                        <span class="legend-label">Performative</span>
-                    </div>
-                    <div class="legend-item">
-                        <span class="color-dot score-bad"></span>
-                        <span class="legend-label">Spam/Ads</span>
-                    </div>
-                </div>
-            </div>
-            
-            <div id="pureFeedContainer" class="pure-feed-container">
-                <div class="loading-indicator">
-                    <div class="spinner"></div>
-                    <p>Loading your ranked posts...</p>
-                </div>
-            </div>
-        </div>
-    </div>
-    
-    <div class="footer">
-        <p>View your <a href="#" id="dashboardLink">Dashboard</a> | <a href="#" id="mlDashboardLink">ML Insights</a></p>
-        <p><a href="#" id="troubleshootLink" class="troubleshoot-link">Troubleshoot Connection</a></p>
-    </div>
+  </div>
+  
+  <div class="notification" id="notification">
+    <span id="notification-message"></span>
+    <button id="notification-close">&times;</button>
+  </div>
+  
+  <div class="footer">
+    <button id="settings-btn" class="icon-btn">
+      <svg viewBox="0 0 24 24" class="icon">
+        <path d="M19.14,12.94c0.04-0.3,0.06-0.61,0.06-0.94c0-0.32-0.02-0.64-0.07-0.94l2.03-1.58c0.18-0.14,0.23-0.41,0.12-0.61 l-1.92-3.32c-0.12-0.22-0.37-0.29-0.59-0.22l-2.39,0.96c-0.5-0.38-1.03-0.7-1.62-0.94L14.4,2.81c-0.04-0.24-0.24-0.41-0.48-0.41 h-3.84c-0.24,0-0.43,0.17-0.47,0.41L9.25,5.35C8.66,5.59,8.12,5.92,7.63,6.29L5.24,5.33c-0.22-0.08-0.47,0-0.59,0.22L2.74,8.87 C2.62,9.08,2.66,9.34,2.86,9.48l2.03,1.58C4.84,11.36,4.8,11.69,4.8,12s0.02,0.64,0.07,0.94l-2.03,1.58 c-0.18,0.14-0.23,0.41-0.12,0.61l1.92,3.32c0.12,0.22,0.37,0.29,0.59,0.22l2.39-0.96c0.5,0.38,1.03,0.7,1.62,0.94l0.36,2.54 c0.05,0.24,0.24,0.41,0.48,0.41h3.84c0.24,0,0.44-0.17,0.47-0.41l0.36-2.54c0.59-0.24,1.13-0.56,1.62-0.94l2.39,0.96 c0.22,0.08,0.47,0,0.59-0.22l1.92-3.32c0.12-0.22,0.07-0.47-0.12-0.61L19.14,12.94z M12,15.6c-1.98,0-3.6-1.62-3.6-3.6 s1.62-3.6,3.6-3.6s3.6,1.62,3.6,3.6S13.98,15.6,12,15.6z"></path>
+      </svg>
+    </button>
+    <button id="dashboard-btn" class="btn-primary">View Dashboard</button>
+  </div>
 
-    <!-- Include the API Client -->
-    <script src="api_client.js"></script>
-    
-    <!-- Include the main popup script -->
-    <script src="popup.js"></script>
+  <script type="module" src="popup.js"></script>
 </body>
 </html>

@@ -6,9 +6,7 @@ from django.db import migrations
 class Migration(migrations.Migration):
 
     dependencies = [
-        ('brandsensor', '0003_fix_authenticity_score'),
         ('brandsensor', '0019_add_socialpost_image_analysis'),
-        ('brandsensor', 'add_authenticity_score'),
     ]
 
     operations = [

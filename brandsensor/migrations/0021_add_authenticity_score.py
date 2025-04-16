@@ -4,7 +4,7 @@ from django.db import migrations, models
 class Migration(migrations.Migration):
 
     dependencies = [
-        ('brandsensor', '0001_initial'),
+        ('brandsensor', '0020_merge_20250411_0417'),
     ]
 
     operations = [

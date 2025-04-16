@@ -1,3 +1,200 @@
+/**
+ * popup.js - Handles the extension popup UI interactions
+ */
+
+import authDashboardAPI from './api_client.js';
+
+// DOM elements
+const statusIndicator = document.getElementById('status-indicator');
+const statusText = document.getElementById('status-text');
+const facebookCount = document.getElementById('facebook-count');
+const instagramCount = document.getElementById('instagram-count');
+const linkedinCount = document.getElementById('linkedin-count');
+const collectButtons = document.querySelectorAll('.collect-btn');
+const settingsBtn = document.getElementById('settings-btn');
+const dashboardBtn = document.getElementById('dashboard-btn');
+const notification = document.getElementById('notification');
+const notificationMessage = document.getElementById('notification-message');
+const notificationClose = document.getElementById('notification-close');
+
+// Initialize popup
+document.addEventListener('DOMContentLoaded', async () => {
+  console.log('Popup initialized');
+  
+  // Check API connection
+  checkApiConnection();
+  
+  // Load post counts
+  updatePostCounts();
+  
+  // Set up event listeners
+  setupEventListeners();
+});
+
+/**
+ * Check API connection status
+ */
+async function checkApiConnection() {
+  try {
+    statusText.textContent = 'Checking connection...';
+    
+    const isConnected = await authDashboardAPI.checkAvailability();
+    
+    if (isConnected) {
+      statusIndicator.classList.add('connected');
+      statusText.textContent = 'Connected';
+    } else {
+      statusIndicator.classList.add('disconnected');
+      statusText.textContent = 'Not connected';
+    }
+  } catch (error) {
+    console.error('Error checking API connection:', error);
+    statusIndicator.classList.add('disconnected');
+    statusText.textContent = 'Connection error';
+  }
+}
+
+/**
+ * Update post counts for all platforms
+ */
+async function updatePostCounts() {
+  try {
+    // Get collection stats from storage
+    chrome.storage.local.get(['collectionStats'], (result) => {
+      const stats = result.collectionStats || {
+        facebook: { total: 0 },
+        instagram: { total: 0 },
+        linkedin: { total: 0 }
+      };
+      
+      // Update UI
+      facebookCount.textContent = stats.facebook.total || 0;
+      instagramCount.textContent = stats.instagram.total || 0;
+      linkedinCount.textContent = stats.linkedin.total || 0;
+    });
+  } catch (error) {
+    console.error('Error updating post counts:', error);
+    showNotification('Error loading statistics', 'error');
+  }
+}
+
+/**
+ * Set up event listeners for UI elements
+ */
+function setupEventListeners() {
+  // Collection buttons
+  collectButtons.forEach(button => {
+    button.addEventListener('click', async () => {
+      const platform = button.dataset.platform;
+      await collectPosts(platform);
+    });
+  });
+  
+  // Settings button
+  settingsBtn.addEventListener('click', () => {
+    chrome.runtime.openOptionsPage();
+  });
+  
+  // Dashboard button
+  dashboardBtn.addEventListener('click', () => {
+    chrome.tabs.create({ url: authDashboardAPI.getDashboardUrl() });
+  });
+  
+  // Notification close button
+  notificationClose.addEventListener('click', () => {
+    hideNotification();
+  });
+}
+
+/**
+ * Collect posts from the specified platform
+ * @param {string} platform - The platform to collect from (facebook, instagram, linkedin)
+ */
+async function collectPosts(platform) {
+  try {
+    // Get the active tab
+    const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
+    const activeTab = tabs[0];
+    
+    // Check if we're on the right platform
+    if (!activeTab.url.includes(platform)) {
+      showNotification(`Please navigate to ${platform}.com first`, 'warning');
+      return;
+    }
+    
+    // Update button state
+    const button = document.querySelector(`.collect-btn[data-platform="${platform}"]`);
+    button.textContent = 'Collecting...';
+    button.disabled = true;
+    
+    // Send message to content script
+    chrome.tabs.sendMessage(activeTab.id, {
+      action: 'scrollAndCollect',
+      maxScrollTime: 30000 // 30 seconds of scrolling
+    }, (response) => {
+      if (chrome.runtime.lastError) {
+        console.error('Error sending message:', chrome.runtime.lastError);
+        showNotification(`Error: ${chrome.runtime.lastError.message}`, 'error');
+        resetButton(button, platform);
+        return;
+      }
+      
+      if (response && response.success) {
+        showNotification(`Found ${response.postCount} posts on ${platform}`);
+        updatePostCounts();
+      } else {
+        showNotification(`Error collecting posts: ${response?.error || 'Unknown error'}`, 'error');
+      }
+      
+      resetButton(button, platform);
+    });
+  } catch (error) {
+    console.error(`Error collecting ${platform} posts:`, error);
+    showNotification(`Error: ${error.message}`, 'error');
+    
+    // Reset button state
+    const button = document.querySelector(`.collect-btn[data-platform="${platform}"]`);
+    resetButton(button, platform);
+  }
+}
+
+/**
+ * Reset collection button state
+ * @param {Element} button - The button element
+ * @param {string} platform - The platform name
+ */
+function resetButton(button, platform) {
+  // Reset button state after a short delay
+  setTimeout(() => {
+    button.textContent = 'Collect Now';
+    button.disabled = false;
+  }, 1000);
+}
+
+/**
+ * Show a notification message
+ * @param {string} message - The message to display
+ * @param {string} type - The notification type (success, error, warning)
+ */
+function showNotification(message, type = 'success') {
+  notificationMessage.textContent = message;
+  notification.className = 'notification show';
+  
+  if (type) {
+    notification.classList.add(type);
+  }
+  
+  // Auto-hide after 5 seconds
+  setTimeout(hideNotification, 5000);
+}
+
+/**
+ * Hide the notification
+ */
+function hideNotification() {
+  notification.classList.remove('show');
+}
+
 // Store extension settings in chrome.storage
 const DEFAULT_SETTINGS = {
     autoScan: true,
@@ -171,8 +368,14 @@ document.addEventListener('DOMContentLoaded', function() {
 // Function to check backend connection
 function checkBackendConnection() {
     const statusElement = document.getElementById('status');
-    statusElement.textContent = 'Checking connection to dashboard...';
-    statusElement.className = 'status';
+    
+    // Check if element exists
+    if (statusElement) {
+        statusElement.textContent = 'Checking connection to dashboard...';
+        statusElement.className = 'status';
+    } else {
+        console.log('Status element not found in DOM');
+    }
     
     // Check if connection message container exists, create if not
     let connectionMessageContainer = document.getElementById('connectionMessage');
@@ -180,7 +383,12 @@ function checkBackendConnection() {
         connectionMessageContainer = document.createElement('div');
         connectionMessageContainer.id = 'connectionMessage';
         connectionMessageContainer.className = 'connection-warning';
-        document.querySelector('.header').appendChild(connectionMessageContainer);
+        const headerElement = document.querySelector('.header');
+        if (headerElement) {
+            headerElement.appendChild(connectionMessageContainer);
+        } else {
+            console.log('Header element not found in DOM');
+        }
     }
     
     // Get API key from storage for the health check

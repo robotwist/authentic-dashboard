@@ -33,7 +33,7 @@ transformers>=4.9.2  # Hugging Face transformers
 sentence-transformers>=2.0.0  # Sentence-BERT embeddings
 
 # Optional: Install if using these models
-# deepface>=0.0.75  # Face analysis
+deepface>=0.0.75  # Face analysis
 # yolov5>=6.0.0  # Object detection in images
 # lightfm>=1.16  # Recommender system
 # surprise>=1.1.1  # Recommender system
@@ -47,3 +47,29 @@ coverage>=5.5
 flake8>=3.9.2
 black>=21.7b0
 isort>=5.9.3
+
+# Django and REST framework
+djangorestframework>=3.12.0,<4.0.0
+django-cors-headers>=3.10.0,<4.0.0
+
+# Image processing
+Pillow>=9.0.0,<10.0.0
+opencv-python>=4.5.5,<5.0.0
+
+# Machine Learning
+torch>=1.10.0
+torchvision>=0.11.0
+numpy>=1.21.0,<1.24.0  # Specific version for compatibility
+
+# Utilities
+tqdm>=4.62.0,<5.0.0
+uuid>=1.30,<2.0.0
+
+# Development
+black>=21.12b0,<23.0.0
+flake8>=4.0.0,<5.0.0
+pytest>=7.0.0,<8.0.0
+
+# Celery and Redis
+celery>=5.2.7
+redis>=4.3.4

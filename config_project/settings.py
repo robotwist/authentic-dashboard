@@ -41,6 +41,8 @@ INSTALLED_APPS = [
     'brandsensor',
     'brandsensor.templatetags',  # Add templatetags as a separate app for custom filters
     'corsheaders',  # Enable CORS for cross-origin requests
+    'ml_processor',  # ML processing module for face analysis and object detection
+    'dashboard',  # Dashboard app for Chrome extension error reporting and analytics
 ]
 
 MIDDLEWARE = [
@@ -160,6 +162,10 @@ USE_TZ = True
 
 STATIC_URL = 'static/'
 
+# Media files (Uploads, Images processed by ML)
+MEDIA_URL = '/media/'
+MEDIA_ROOT = BASE_DIR / 'media'
+
 # Default primary key field type
 # https://docs.djangoproject.com/en/5.0/ref/settings/#default-auto-field
 
@@ -216,3 +222,14 @@ REST_FRAMEWORK = {
     'DEFAULT_PAGINATION_CLASS': 'rest_framework.pagination.PageNumberPagination',
     'PAGE_SIZE': 20,
 }
+
+# Celery Configuration
+CELERY_BROKER_URL = 'redis://localhost:6379/0'  # Use Redis as the broker
+CELERY_RESULT_BACKEND = 'redis://localhost:6379/0'
+CELERY_ACCEPT_CONTENT = ['json']
+CELERY_TASK_SERIALIZER = 'json'
+CELERY_RESULT_SERIALIZER = 'json'
+CELERY_TIMEZONE = TIME_ZONE
+CELERY_TASK_TRACK_STARTED = True
+CELERY_TASK_TIME_LIMIT = 30 * 60  # 30 minutes
+CELERY_TASK_SOFT_TIME_LIMIT = 25 * 60  # 25 minutes

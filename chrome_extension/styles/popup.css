@@ -1,0 +1,226 @@
+/* popup.css - Styles for the extension popup */
+
+:root {
+  --primary-color: #4a6cf7;
+  --primary-hover: #3a5de6;
+  --success-color: #28a745;
+  --warning-color: #ffc107;
+  --danger-color: #dc3545;
+  --light-gray: #f8f9fa;
+  --medium-gray: #e9ecef;
+  --dark-gray: #343a40;
+  --text-color: #212529;
+  --border-radius: 4px;
+  --box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
+  --transition: all 0.3s ease;
+}
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+  font-size: 14px;
+  color: var(--text-color);
+  background-color: #fff;
+  width: 380px;
+  overflow-x: hidden;
+}
+
+.container {
+  padding: 16px;
+}
+
+header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 16px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--medium-gray);
+}
+
+h1 {
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--primary-color);
+}
+
+h2 {
+  font-size: 16px;
+  margin-bottom: 12px;
+}
+
+h3 {
+  font-size: 14px;
+  margin-bottom: 8px;
+}
+
+.api-status {
+  display: flex;
+  align-items: center;
+  font-size: 12px;
+}
+
+#status-indicator {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background-color: var(--warning-color);
+  margin-right: 6px;
+}
+
+#status-indicator.connected {
+  background-color: var(--success-color);
+}
+
+#status-indicator.disconnected {
+  background-color: var(--danger-color);
+}
+
+.stats-container {
+  margin-bottom: 20px;
+}
+
+.platform-stats {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 12px;
+}
+
+.platform-card {
+  background-color: var(--light-gray);
+  border-radius: var(--border-radius);
+  padding: 12px;
+  text-align: center;
+  box-shadow: var(--box-shadow);
+  transition: var(--transition);
+}
+
+.platform-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.15);
+}
+
+.platform-card img {
+  width: 32px;
+  height: 32px;
+  margin-bottom: 8px;
+}
+
+.stats {
+  margin: 8px 0;
+  font-size: 13px;
+}
+
+.count {
+  font-weight: bold;
+  color: var(--primary-color);
+}
+
+.collect-btn {
+  background-color: var(--primary-color);
+  color: white;
+  border: none;
+  border-radius: var(--border-radius);
+  padding: 6px 12px;
+  font-size: 12px;
+  cursor: pointer;
+  transition: var(--transition);
+  width: 100%;
+}
+
+.collect-btn:hover {
+  background-color: var(--primary-hover);
+}
+
+.actions {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 16px;
+}
+
+.actions button {
+  flex: 1;
+  padding: 8px 16px;
+  border: none;
+  border-radius: var(--border-radius);
+  background-color: var(--light-gray);
+  cursor: pointer;
+  transition: var(--transition);
+  margin: 0 6px;
+}
+
+.actions button:first-child {
+  margin-left: 0;
+}
+
+.actions button:last-child {
+  margin-right: 0;
+}
+
+#settings-btn {
+  background-color: var(--light-gray);
+  color: var(--dark-gray);
+}
+
+#settings-btn:hover {
+  background-color: var(--medium-gray);
+}
+
+#dashboard-btn {
+  background-color: var(--primary-color);
+  color: white;
+}
+
+#dashboard-btn:hover {
+  background-color: var(--primary-hover);
+}
+
+.notification {
+  position: fixed;
+  bottom: 16px;
+  left: 16px;
+  right: 16px;
+  background-color: var(--success-color);
+  color: white;
+  padding: 10px;
+  border-radius: var(--border-radius);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  box-shadow: var(--box-shadow);
+  transform: translateY(100px);
+  opacity: 0;
+  transition: var(--transition);
+}
+
+.notification.show {
+  transform: translateY(0);
+  opacity: 1;
+}
+
+.notification.error {
+  background-color: var(--danger-color);
+}
+
+.notification.warning {
+  background-color: var(--warning-color);
+  color: var(--dark-gray);
+}
+
+#notification-close {
+  background: none;
+  border: none;
+  color: white;
+  font-size: 18px;
+  cursor: pointer;
+}
+
+.notification.warning #notification-close {
+  color: var(--dark-gray);
+} 
