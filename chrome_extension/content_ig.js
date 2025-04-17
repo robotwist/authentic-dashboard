@@ -5,7 +5,63 @@
  * for dynamically loaded content.
  */
 
-import { extractPostData, findElements, sendPostsToAPI, simulateInfiniteScroll } from './modules/utils.js';
+// Access utils from the global scope instead of using import
+// The functions we need are exposed through window.authenticDashboard
+
+// Get references to shared functionality from authenticDashboard global object
+const { reportError } = window.authenticDashboard || {};
+
+// Define utility functions or load them from global context
+function extractPostData(element) {
+  // Implementation for Instagram posts
+  console.log("[Authentic] Extracting data from Instagram post", element);
+  // Custom implementation for Instagram...
+  return {
+    platform: 'instagram',
+    content: element.textContent || '',
+    // Additional fields as needed
+  };
+}
+
+function findElements(platform, elementType, pageType) {
+  // Implementation for finding elements on Instagram
+  if (platform !== 'instagram') return [];
+  
+  if (elementType === 'posts') {
+    // Instagram-specific selectors for posts based on page type
+    if (pageType === 'profile') {
+      return Array.from(document.querySelectorAll('article._aayp'));
+    } else if (pageType === 'post') {
+      return Array.from(document.querySelectorAll('article[role="presentation"]'));
+    } else {
+      // Main feed and other pages
+      return Array.from(document.querySelectorAll('article._ab6k'));
+    }
+  }
+  
+  return [];
+}
+
+function simulateInfiniteScroll(duration) {
+  return new Promise((resolve) => {
+    const startTime = Date.now();
+    let scrollCount = 0;
+    
+    const scroll = () => {
+      window.scrollBy(0, 500);
+      scrollCount++;
+      
+      if (Date.now() - startTime < duration) {
+        setTimeout(scroll, 500);
+      } else {
+        console.log(`[Authentic] Scrolled ${scrollCount} times`);
+        resolve(scrollCount);
+      }
+    };
+    
+    scroll();
+  });
+}
 
 // Track processed posts to avoid duplicates
 const processedPosts = new Set();

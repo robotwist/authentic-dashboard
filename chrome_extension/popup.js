@@ -2,64 +2,671 @@
  * popup.js - Handles the extension popup UI interactions
  */
 
-import authDashboardAPI from './api_client.js';
+// Instead of import statements, we'll define these as global variables
+let authDashboardAPI = null;
+let recordError = function(context, error) {
+  console.error(`Error (${context}):`, error);
+};
 
 // DOM elements
-const statusIndicator = document.getElementById('status-indicator');
-const statusText = document.getElementById('status-text');
-const facebookCount = document.getElementById('facebook-count');
-const instagramCount = document.getElementById('instagram-count');
-const linkedinCount = document.getElementById('linkedin-count');
-const collectButtons = document.querySelectorAll('.collect-btn');
-const settingsBtn = document.getElementById('settings-btn');
-const dashboardBtn = document.getElementById('dashboard-btn');
-const notification = document.getElementById('notification');
-const notificationMessage = document.getElementById('notification-message');
-const notificationClose = document.getElementById('notification-close');
+let statusIndicator, statusText, facebookCount, instagramCount, linkedinCount;
+let collectButtons, settingsBtn, dashboardBtn, notification, notificationMessage, notificationClose;
+let insightsTabBtn, settingsTabBtn, transparencyTabBtn;
+let serverConnected = false;
+let connectionErrorMessage = '';
 
 // Initialize popup
 document.addEventListener('DOMContentLoaded', async () => {
   console.log('Popup initialized');
   
-  // Check API connection
-  checkApiConnection();
+  // Load API client through a script tag (should be already loaded via popup.html)
+  try {
+    // Try to get the API client from the global scope or initialize a simple one
+    if (window.authDashboardAPI) {
+      authDashboardAPI = window.authDashboardAPI;
+      console.log('Using authDashboardAPI from global scope');
+    } else {
+      console.warn('authDashboardAPI not found in global scope, creating a simple one');
+      authDashboardAPI = {
+        checkAvailability: async function(force = false) {
+          try {
+            // Simple implementation that tries to ping the server
+            const response = await fetch('http://localhost:8000/health-check/', {
+              method: 'GET',
+              headers: {
+                'Accept': 'application/json',
+                'Cache-Control': 'no-cache'
+              }
+            });
+            return response.ok;
+          } catch (error) {
+            console.error('Error checking API availability:', error);
+            return false;
+          }
+        },
+        getDashboardUrl: function() {
+          return 'http://localhost:8000/dashboard/';
+        },
+        setApiKey: function(apiKey) {
+          console.log('Setting API key:', apiKey);
+          this.apiKey = apiKey;
+        }
+      };
+    }
+    
+    // Try to get recordError from global scope
+    if (window.recordError) {
+      recordError = window.recordError;
+    }
+  } catch (error) {
+    console.error('Error initializing API client:', error);
+  }
+  
+  // Initialize DOM elements
+  initializeElements();
+  
+  // Check API connection right away
+  checkAPIConnection();
   
   // Load post counts
   updatePostCounts();
   
-  // Set up event listeners
+  // Set up event listeners for all buttons
   setupEventListeners();
+  
+  // Make sure tab buttons work
+  setupTabButtons();
+  
+  // Debug element presence
+  console.log('Settings button found:', settingsBtn !== null);
+  console.log('Dashboard button found:', dashboardBtn !== null);
+  
+  // Load icons safely
+  loadIconsSafely();
 });
 
 /**
- * Check API connection status
+ * Initialize DOM element references
  */
-async function checkApiConnection() {
-  try {
-    statusText.textContent = 'Checking connection...';
-    
-    const isConnected = await authDashboardAPI.checkAvailability();
-    
-    if (isConnected) {
-      statusIndicator.classList.add('connected');
-      statusText.textContent = 'Connected';
-    } else {
-      statusIndicator.classList.add('disconnected');
-      statusText.textContent = 'Not connected';
-    }
-  } catch (error) {
-    console.error('Error checking API connection:', error);
-    statusIndicator.classList.add('disconnected');
-    statusText.textContent = 'Connection error';
+function initializeElements() {
+  console.log('Initializing DOM elements');
+  
+  // Find all the required elements
+  statusIndicator = document.getElementById('status-indicator');
+  statusText = document.getElementById('status-text');
+  facebookCount = document.getElementById('facebook-count');
+  instagramCount = document.getElementById('instagram-count');
+  linkedinCount = document.getElementById('linkedin-count');
+  collectButtons = document.querySelectorAll('.collect-btn');
+  settingsBtn = document.getElementById('settings-btn');
+  dashboardBtn = document.getElementById('dashboard-btn');
+  notification = document.getElementById('notification');
+  notificationMessage = document.getElementById('notification-message');
+  notificationClose = document.getElementById('notification-close');
+  insightsTabBtn = document.getElementById('insightsTabBtn');
+  settingsTabBtn = document.getElementById('settingsTabBtn');
+  transparencyTabBtn = document.getElementById('transparencyTabBtn');
+  
+  // Log missing elements for debugging
+  if (!statusIndicator) console.warn('Missing element: status-indicator');
+  if (!statusText) console.warn('Missing element: status-text');
+  if (!facebookCount) console.warn('Missing element: facebook-count');
+  if (!instagramCount) console.warn('Missing element: instagram-count');
+  if (!linkedinCount) console.warn('Missing element: linkedin-count');
+  if (!settingsBtn) console.warn('Missing element: settings-btn');
+  if (!dashboardBtn) console.warn('Missing element: dashboard-btn');
+  if (!notification) console.warn('Missing element: notification');
+  if (!notificationMessage) console.warn('Missing element: notification-message');
+  if (!notificationClose) console.warn('Missing element: notification-close');
+  
+  if (!collectButtons || collectButtons.length === 0) {
+    console.warn('No collect buttons found');
   }
 }
 
 /**
- * Update post counts for all platforms
+ * Unified function to update status in the UI
+ * @param {string} status - Status text to display
+ * @param {string} type - Status type: 'success', 'error', 'warning', 'checking', etc.
+ * @param {Object} options - Additional options
+ * @param {string} options.detail - Additional detail text to display
+ * @param {boolean} options.showNotification - Whether to show a notification
+ * @param {boolean} options.showTroubleshooting - Whether to show troubleshooting tips
+ * @param {Error} options.error - Error object if there was an error
+ */
+function updateStatus(status, type = 'default', options = {}) {
+  console.log(`Status update: ${status} (${type})`, options);
+  
+  // Default options
+  const defaults = {
+    detail: '',
+    showNotification: false,
+    showTroubleshooting: false,
+    error: null
+  };
+  
+  // Merge options with defaults
+  options = { ...defaults, ...options };
+  
+  // Update status indicator if it exists
+  if (statusIndicator) {
+    statusIndicator.className = 'status-indicator';
+    
+    // Add appropriate class based on type
+    switch (type) {
+      case 'success':
+        statusIndicator.classList.add('connected');
+        break;
+      case 'error':
+        statusIndicator.classList.add('disconnected');
+        break;
+      case 'warning':
+        statusIndicator.classList.add('warning');
+        break;
+      case 'checking':
+        statusIndicator.classList.add('checking');
+        break;
+      default:
+        // Default styling
+        break;
+    }
+  }
+  
+  // Update status text if it exists
+  if (statusText) {
+    if (options.detail) {
+      statusText.innerHTML = `${status}<br><span class="error-details">${options.detail}</span>`;
+    } else {
+      statusText.textContent = status;
+    }
+  }
+  
+  // Update generic status element if it exists
+  const statusElement = document.getElementById('status');
+  if (statusElement) {
+    statusElement.textContent = status;
+    statusElement.className = 'status';
+    statusElement.classList.add(type);
+  }
+  
+  // Show notification if requested
+  if (options.showNotification && notification && notificationMessage) {
+    notificationMessage.textContent = status;
+    notification.className = 'notification show';
+    
+    if (type) {
+      notification.classList.add(type);
+    }
+    
+    // Auto-hide after 5 seconds
+    setTimeout(() => {
+      notification.classList.remove('show');
+    }, 5000);
+  }
+  
+  // Show troubleshooting tips if requested
+  if (options.showTroubleshooting && type === 'error') {
+    showServerTroubleshootingTips();
+  }
+  
+  // Store connection status globally if this was a connection check
+  if (status.includes('Connected') || status.includes('connection')) {
+    serverConnected = type === 'success';
+    if (options.error) {
+      connectionErrorMessage = options.error.message || 'Unknown error';
+    }
+  }
+  
+  // Store error information in local storage if there was an error
+  if (options.error) {
+    chrome.storage.local.set({
+      connectionError: options.error.message || 'Unknown error',
+      lastErrorTimestamp: Date.now()
+    });
+  }
+}
+
+/**
+ * Check API connection status - improved and simplified
+ */
+async function checkAPIConnection() {
+  try {
+    // Update UI to show we're checking
+    updateStatus('Checking connection...', 'checking');
+    
+    console.log('Checking API connection...');
+    
+    // Remove existing retry button if any
+    const existingRetryBtn = document.querySelector('.retry-btn');
+    if (existingRetryBtn) {
+      existingRetryBtn.remove();
+    }
+    
+    // Set a timeout for the API check to prevent UI from hanging
+    // Add a safety check for authDashboardAPI
+    if (!authDashboardAPI) {
+      console.error('API client not properly initialized');
+      updateStatus('Connection error', 'error', {
+        detail: 'API client not properly initialized. Try reloading the extension.',
+        showNotification: true,
+        showTroubleshooting: true,
+        error: new Error('API client not initialized')
+      });
+      return;
+    }
+    
+    // Set a timeout for the connection check
+    let isTimedOut = false;
+    const timeout = setTimeout(() => {
+      isTimedOut = true;
+      updateStatus('Connection timed out', 'error', {
+        detail: 'Server did not respond within 15 seconds',
+        showNotification: true,
+        showTroubleshooting: true,
+        error: new Error('Connection check timed out after 15 seconds')
+      });
+      
+      // Add retry button
+      addRetryButton();
+      
+      // Check if server is running
+      checkIfServerRunning();
+    }, 15000);
+    
+    // Try to check API availability
+    let isConnected = false;
+    try {
+      if (typeof authDashboardAPI.checkAvailability === 'function') {
+        // The proper way
+        isConnected = await authDashboardAPI.checkAvailability(true);
+      } else {
+        // Fallback method
+        isConnected = await fetch('http://localhost:8000/health-check/', {
+          method: 'GET',
+          headers: {
+            'Accept': 'application/json'
+          }
+        }).then(response => response.ok).catch(() => false);
+      }
+    } catch (connectionError) {
+      console.error('Error during connection check:', connectionError);
+      if (!isTimedOut) {
+        clearTimeout(timeout);
+        updateStatus('Connection error', 'error', {
+          detail: connectionError.message || 'Error checking API connection',
+          showNotification: true,
+          showTroubleshooting: true,
+          error: connectionError
+        });
+        addRetryButton();
+        checkIfServerRunning();
+      }
+      return;
+    }
+    
+    // Clear the timeout if we got a response
+    clearTimeout(timeout);
+    
+    // If we're already timed out, don't update UI again
+    if (isTimedOut) return;
+    
+    console.log('Connection check result:', isConnected);
+    
+    if (isConnected) {
+      // Success - update status and enable UI
+      updateStatus('Connected', 'success', {
+        showNotification: true,
+        showTroubleshooting: false
+      });
+      
+      // Remove any troubleshooting tips
+      const troubleshootingTips = document.getElementById('troubleshooting-tips');
+      if (troubleshootingTips) {
+        troubleshootingTips.remove();
+      }
+      
+      // Make sure buttons are enabled
+      enableAllButtons();
+    } else {
+      // Failed - show error and troubleshooting
+      chrome.storage.local.get(['connectionError'], (result) => {
+        const errorMsg = result.connectionError || 'Unable to connect to server';
+        
+        updateStatus('Not connected', 'error', {
+          detail: errorMsg,
+          showNotification: true,
+          showTroubleshooting: true,
+          error: new Error(errorMsg)
+        });
+        
+        // Check if Django server is actually running
+        checkIfServerRunning();
+        
+        // Add a retry button
+        addRetryButton();
+      });
+    }
+  } catch (error) {
+    console.error('Unexpected error checking API connection:', error);
+    
+    updateStatus('Connection error', 'error', {
+      detail: error.message || 'Unexpected error checking connection',
+      showNotification: true,
+      showTroubleshooting: true,
+      error: error
+    });
+    
+    // Check server status
+    checkIfServerRunning();
+    
+    // Add a retry button
+    addRetryButton();
+  }
+}
+
+/**
+ * Add a retry button to the status container
+ */
+function addRetryButton() {
+  // Only add the button if it doesn't already exist
+  if (!document.querySelector('.retry-btn')) {
+    const retryButton = document.createElement('button');
+    retryButton.textContent = 'Retry';
+    retryButton.className = 'retry-btn';
+    retryButton.addEventListener('click', () => {
+      updateStatus('Retrying connection...', 'warning', {showNotification: true});
+      checkAPIConnection();
+    });
+    
+    const statusContainer = document.querySelector('.status-container');
+    if (statusContainer) {
+      statusContainer.appendChild(retryButton);
+    }
+  }
+}
+
+/**
+ * Try to check if the Django server is actually running
+ */
+function checkIfServerRunning() {
+  try {
+    // Try to fetch the Django server root page directly (no extension API)
+    fetch('http://localhost:8000/', {
+      method: 'GET',
+      mode: 'no-cors', // This allows us to at least detect if the server is responding
+      cache: 'no-cache',
+      signal: AbortSignal.timeout(5000)
+    })
+    .then(response => {
+      console.log('Server ping response:', response);
+      
+      // If we got any response, show a notification
+      updateStatus('Django server appears to be running, but API connection failed', 'warning', {
+        detail: 'The server is responding but the API endpoint may be misconfigured',
+        showNotification: true
+      });
+    })
+    .catch(error => {
+      console.error('Server ping failed:', error);
+      updateStatus('Django server may not be running', 'error', {
+        detail: 'Make sure your Django server is running on http://localhost:8000',
+        showNotification: true
+      });
+    });
+  } catch (error) {
+    console.error('Error checking server:', error);
+  }
+}
+
+/**
+ * Enable all buttons in the UI
+ */
+function enableAllButtons() {
+  // Enable collect buttons
+  collectButtons.forEach(button => {
+    button.disabled = false;
+    button.classList.remove('disabled');
+  });
+  
+  // Enable footer buttons
+  if (settingsBtn) {
+    settingsBtn.disabled = false;
+    settingsBtn.classList.remove('disabled');
+  }
+  
+  if (dashboardBtn) {
+    dashboardBtn.disabled = false;
+    dashboardBtn.classList.remove('disabled');
+  }
+  
+  // Enable tab buttons
+  if (insightsTabBtn) insightsTabBtn.disabled = false;
+  if (settingsTabBtn) settingsTabBtn.disabled = false;
+  if (transparencyTabBtn) transparencyTabBtn.disabled = false;
+  
+  // Remove any disabled classes
+  document.querySelectorAll('.tab-button').forEach(btn => {
+    btn.classList.remove('disabled');
+    btn.disabled = false;
+  });
+}
+
+/**
+ * Set up tab buttons functionality
+ */
+function setupTabButtons() {
+  const tabButtons = document.querySelectorAll('.tab-button');
+  const tabContents = document.querySelectorAll('.tab-content');
+  
+  tabButtons.forEach(button => {
+    button.addEventListener('click', () => {
+      // Remove active class from all buttons
+      tabButtons.forEach(btn => btn.classList.remove('active'));
+      
+      // Add active class to clicked button
+      button.classList.add('active');
+      
+      // Hide all tab contents
+      tabContents.forEach(content => content.classList.remove('active'));
+      
+      // Show content for active tab
+      const tabId = button.id.replace('Btn', '');
+      document.getElementById(tabId).classList.add('active');
+    });
+  });
+}
+
+/**
+ * Display server troubleshooting tips in the UI
+ */
+function showServerTroubleshootingTips() {
+  // Create or get the troubleshooting container
+  let troubleshootingContainer = document.getElementById('troubleshooting-tips');
+  
+  if (!troubleshootingContainer) {
+    troubleshootingContainer = document.createElement('div');
+    troubleshootingContainer.id = 'troubleshooting-tips';
+    troubleshootingContainer.className = 'troubleshooting-container';
+    
+    // Create the content
+    troubleshootingContainer.innerHTML = `
+      <h3>Connection Troubleshooting</h3>
+      <div class="troubleshooting-steps">
+        <div class="step">
+          <div class="step-number">1</div>
+          <div class="step-content">
+            <h4>Check Server Status</h4>
+            <p>Make sure the Django server is running:</p>
+            <code>python manage.py runserver</code>
+          </div>
+        </div>
+        <div class="step">
+          <div class="step-number">2</div>
+          <div class="step-content">
+            <h4>Verify API URL</h4>
+            <p>Current URL: <span id="current-api-url">Loading...</span></p>
+            <button id="edit-api-url" class="btn btn-sm">Edit URL</button>
+          </div>
+        </div>
+        <div class="step">
+          <div class="step-number">3</div>
+          <div class="step-content">
+            <h4>Check Health Endpoint</h4>
+            <p>Your server must have a working health-check endpoint.</p>
+            <button id="check-server-btn" class="btn btn-secondary">Open Server in Browser</button>
+          </div>
+        </div>
+        <div class="step">
+          <div class="step-number">4</div>
+          <div class="step-content">
+            <h4>Advanced Troubleshooting</h4>
+            <a href="#" id="open-test-connection">Open Connection Test Tool</a>
+          </div>
+        </div>
+      </div>
+    `;
+    
+    // Add it to the DOM
+    const contentArea = document.querySelector('.content-area');
+    if (contentArea) {
+      contentArea.prepend(troubleshootingContainer);
+      
+      // Show the current API URL
+      chrome.storage.sync.get(['settings'], (result) => {
+        const settings = result.settings || {};
+        const apiUrl = settings.apiUrl || 'http://localhost:8000';
+        document.getElementById('current-api-url').textContent = apiUrl;
+      });
+      
+      // Add event listener to the check server button
+      document.getElementById('check-server-btn').addEventListener('click', () => {
+        // Open a new tab to the server base URL to manually check
+        chrome.storage.sync.get(['settings'], (result) => {
+          const settings = result.settings || {};
+          const apiUrl = settings.apiUrl || 'http://localhost:8000';
+          chrome.tabs.create({ url: apiUrl });
+        });
+      });
+      
+      // Add event listener to edit URL button
+      document.getElementById('edit-api-url').addEventListener('click', () => {
+        openApiUrlEditor();
+      });
+      
+      // Add event listener to connection test tool link
+      document.getElementById('open-test-connection').addEventListener('click', (event) => {
+        event.preventDefault();
+        chrome.tabs.create({ url: chrome.runtime.getURL('test_connection.html') });
+      });
+    }
+  }
+}
+
+/**
+ * Open a modal to edit the API URL
+ */
+function openApiUrlEditor() {
+  // Create modal for editing API URL
+  const modal = document.createElement('div');
+  modal.className = 'modal';
+  modal.innerHTML = `
+    <div class="modal-content">
+      <h3>Edit API URL</h3>
+      <div class="form-group">
+        <label for="api-url-input">API URL:</label>
+        <input type="text" id="api-url-input" placeholder="http://localhost:8000">
+      </div>
+      <div class="button-group">
+        <button id="save-api-url" class="btn btn-primary">Save</button>
+        <button id="cancel-api-url" class="btn btn-secondary">Cancel</button>
+      </div>
+    </div>
+  `;
+  
+  // Add modal to the DOM
+  document.body.appendChild(modal);
+  
+  // Get the current API URL
+  chrome.storage.sync.get(['settings'], (result) => {
+    const settings = result.settings || {};
+    const apiUrl = settings.apiUrl || 'http://localhost:8000';
+    document.getElementById('api-url-input').value = apiUrl;
+  });
+  
+  // Add event listeners
+  document.getElementById('save-api-url').addEventListener('click', () => {
+    const newUrl = document.getElementById('api-url-input').value.trim();
+    if (newUrl) {
+      // Save to storage
+      chrome.storage.sync.get(['settings'], (result) => {
+        const settings = result.settings || {};
+        settings.apiUrl = newUrl;
+        
+        chrome.storage.sync.set({ settings }, () => {
+          // Update API client
+          if (authDashboardAPI) {
+            authDashboardAPI.setApiUrl(newUrl);
+          }
+          
+          // Update UI
+          document.getElementById('current-api-url').textContent = newUrl;
+          
+          // Close modal
+          modal.remove();
+          
+          // Check connection with new URL
+          checkAPIConnection();
+        });
+      });
+    }
+  });
+  
+  document.getElementById('cancel-api-url').addEventListener('click', () => {
+    modal.remove();
+  });
+}
+
+/**
+ * Update post counts for all platforms in the UI
  */
 async function updatePostCounts() {
   try {
-    // Get collection stats from storage
+    console.log('Updating post counts from storage and API');
+    
+    // Show loading state in the UI
+    if (facebookCount) facebookCount.innerHTML = '<small>Loading...</small>';
+    if (instagramCount) instagramCount.innerHTML = '<small>Loading...</small>';
+    if (linkedinCount) linkedinCount.innerHTML = '<small>Loading...</small>';
+    
+    // First try to get data from the API for most up-to-date counts
+    if (authDashboardAPI.isAvailable) {
+      try {
+        const response = await authDashboardAPI.callApi('dashboard-api/collection-stats/');
+        if (response && response.platforms) {
+          // Update local storage with fresh data from API
+          const stats = {
+            facebook: { total: response.platforms.facebook?.total || 0 },
+            instagram: { total: response.platforms.instagram?.total || 0 },
+            linkedin: { total: response.platforms.linkedin?.total || 0 }
+          };
+          
+          chrome.storage.local.set({ collectionStats: stats });
+          
+          // Update UI
+          if (facebookCount) facebookCount.textContent = stats.facebook.total;
+          if (instagramCount) instagramCount.textContent = stats.instagram.total;
+          if (linkedinCount) linkedinCount.textContent = stats.linkedin.total;
+          
+          console.log('Post counts updated from API:', stats);
+          return;
+        }
+      } catch (apiError) {
+        console.warn('Could not fetch post counts from API:', apiError);
+        // Continue to use local storage as fallback
+      }
+    }
+    
+    // Fallback to local storage if API request failed
     chrome.storage.local.get(['collectionStats'], (result) => {
       const stats = result.collectionStats || {
         facebook: { total: 0 },
@@ -67,47 +674,329 @@ async function updatePostCounts() {
         linkedin: { total: 0 }
       };
       
-      // Update UI
-      facebookCount.textContent = stats.facebook.total || 0;
-      instagramCount.textContent = stats.instagram.total || 0;
-      linkedinCount.textContent = stats.linkedin.total || 0;
+      // Update UI with local storage data
+      if (facebookCount) facebookCount.textContent = stats.facebook.total || 0;
+      if (instagramCount) instagramCount.textContent = stats.instagram.total || 0;
+      if (linkedinCount) linkedinCount.textContent = stats.linkedin.total || 0;
+      
+      console.log('Post counts updated from local storage:', stats);
     });
   } catch (error) {
     console.error('Error updating post counts:', error);
+    
+    // Reset UI to show error state
+    if (facebookCount) facebookCount.textContent = '?';
+    if (instagramCount) instagramCount.textContent = '?';
+    if (linkedinCount) linkedinCount.textContent = '?'; 
+    
     showNotification('Error loading statistics', 'error');
   }
 }
 
 /**
- * Set up event listeners for UI elements
+ * Set up event listeners for buttons and UI elements
  */
 function setupEventListeners() {
-  // Collection buttons
+  console.log('Setting up event listeners');
+  
+  // Setup collect buttons
   collectButtons.forEach(button => {
-    button.addEventListener('click', async () => {
-      const platform = button.dataset.platform;
-      await collectPosts(platform);
+    button.addEventListener('click', async (event) => {
+      const platform = event.target.dataset.platform;
+      console.log(`Collect button clicked for ${platform}`);
+      
+      // Visual feedback for button click
+      button.classList.add('collecting');
+      button.textContent = 'Collecting...';
+      
+      try {
+        // Call the collection function
+        await collectPosts(platform);
+        showNotification(`Successfully collected ${platform} posts!`, 'success');
+      } catch (error) {
+        console.error(`Error collecting ${platform} posts:`, error);
+        showNotification(`Failed to collect ${platform} posts: ${error.message}`, 'error');
+      } finally {
+        // Reset button state
+        resetButton(button, platform);
+      }
     });
   });
   
   // Settings button
-  settingsBtn.addEventListener('click', () => {
-    chrome.runtime.openOptionsPage();
-  });
+  if (settingsBtn) {
+    settingsBtn.addEventListener('click', (event) => {
+      console.log('Settings button clicked');
+      try {
+        openSettingsPage(event);
+      } catch (error) {
+        console.error('Error opening settings:', error);
+        showNotification('Failed to open settings page', 'error');
+      }
+    });
+  }
   
   // Dashboard button
-  dashboardBtn.addEventListener('click', () => {
-    chrome.tabs.create({ url: authDashboardAPI.getDashboardUrl() });
-  });
+  if (dashboardBtn) {
+    dashboardBtn.addEventListener('click', (event) => {
+      console.log('Dashboard button clicked');
+      try {
+        openDashboard(event);
+      } catch (error) {
+        console.error('Error opening dashboard:', error);
+        showNotification('Failed to open dashboard', 'error');
+      }
+    });
+  }
   
   // Notification close button
-  notificationClose.addEventListener('click', () => {
-    hideNotification();
+  if (notificationClose) {
+    notificationClose.addEventListener('click', hideNotification);
+  }
+  
+  // Set up tab navigation
+  setupTabButtons();
+  
+  console.log('Event listeners setup complete');
+}
+
+/**
+ * Handle opening the settings/options page with fallbacks
+ * @param {Event} event - The click event
+ */
+function openSettingsPage(event) {
+  if (event) {
+    event.preventDefault();
+    event.stopPropagation();
+  }
+  
+  console.log('Settings button clicked, opening options page');
+  showNotification('Opening settings page...');
+  
+  // Try primary method
+  try {
+    chrome.runtime.openOptionsPage(function() {
+      if (chrome.runtime.lastError) {
+        console.error('Error opening options page:', chrome.runtime.lastError);
+        fallbackToOptionsUrl();
+      } else {
+        console.log('Options page opened successfully');
+      }
+    });
+  } catch (error) {
+    console.error('Error opening options page:', error);
+    fallbackToOptionsUrl();
+  }
+  
+  // Fallback method 1: Open options.html directly
+  function fallbackToOptionsUrl() {
+    try {
+      const optionsUrl = chrome.runtime.getURL('options.html');
+      console.log('Trying fallback: Opening options page via URL:', optionsUrl);
+      
+      chrome.tabs.create({ url: optionsUrl }, function(tab) {
+        if (chrome.runtime.lastError) {
+          console.error('Fallback failed:', chrome.runtime.lastError);
+          fallbackToManualSettings();
+        } else {
+          console.log('Options page opened via fallback URL');
+        }
+      });
+    } catch (fallbackError) {
+      console.error('URL fallback also failed:', fallbackError);
+      fallbackToManualSettings();
+    }
+  }
+  
+  // Fallback method 2: Show manual settings form
+  function fallbackToManualSettings() {
+    console.log('All options page methods failed, showing manual settings form');
+    showSettingsFailureOptions();
+  }
+}
+
+/**
+ * Handle opening the dashboard
+ * @param {Event} event - The click event
+ */
+function openDashboard(event) {
+  if (event) {
+    event.preventDefault();
+    event.stopPropagation();
+  }
+  
+  console.log('Dashboard button clicked');
+  
+  // Get dashboard URL from storage or use default
+  chrome.storage.sync.get(['settings'], (result) => {
+    try {
+      const settings = result.settings || {};
+      let dashboardUrl = settings.apiUrl || 'http://localhost:8000';
+      
+      // Ensure trailing slash
+      if (!dashboardUrl.endsWith('/')) {
+        dashboardUrl += '/';
+      }
+      
+      dashboardUrl += 'dashboard/';
+      console.log('Opening dashboard URL:', dashboardUrl);
+      
+      // Open in new tab
+      chrome.tabs.create({ url: dashboardUrl }, function(tab) {
+        if (chrome.runtime.lastError) {
+          console.error('Error opening dashboard:', chrome.runtime.lastError);
+          updateStatus('Error opening dashboard: ' + chrome.runtime.lastError.message, 'error', {
+            showNotification: true
+          });
+        } else {
+          updateStatus('Opening dashboard...', 'success', {
+            showNotification: true
+          });
+        }
+      });
+    } catch (error) {
+      console.error('Error opening dashboard:', error);
+      updateStatus('Error opening dashboard: ' + error.message, 'error', {
+        showNotification: true
+      });
+    }
   });
 }
 
 /**
- * Collect posts from the specified platform
+ * Show fallback options for settings
+ */
+function showSettingsFailureOptions() {
+  try {
+    // Create a modal with options
+    const modal = document.createElement('div');
+    modal.className = 'settings-modal';
+    modal.style.position = 'fixed';
+    modal.style.top = '50%';
+    modal.style.left = '50%';
+    modal.style.transform = 'translate(-50%, -50%)';
+    modal.style.backgroundColor = 'white';
+    modal.style.padding = '20px';
+    modal.style.borderRadius = '8px';
+    modal.style.boxShadow = '0 4px 12px rgba(0,0,0,0.15)';
+    modal.style.zIndex = '1000';
+    modal.style.maxWidth = '80%';
+    
+    modal.innerHTML = `
+      <h3 style="margin-top:0">Settings Options</h3>
+      <p>Unable to open settings page automatically. Try one of these options:</p>
+      <div style="display:flex;flex-direction:column;gap:10px;margin-top:15px">
+        <button id="retry-settings-btn" style="padding:8px;cursor:pointer">Retry Opening Settings</button>
+        <button id="manual-settings-btn" style="padding:8px;cursor:pointer">Enter Settings Manually</button>
+        <button id="close-modal-btn" style="padding:8px;cursor:pointer;margin-top:5px">Close</button>
+      </div>
+    `;
+    
+    document.body.appendChild(modal);
+    
+    // Add event listeners
+    document.getElementById('retry-settings-btn').addEventListener('click', () => {
+      try {
+        chrome.runtime.openOptionsPage();
+        modal.remove();
+      } catch (error) {
+        console.error('Retry failed:', error);
+      }
+    });
+    
+    document.getElementById('manual-settings-btn').addEventListener('click', () => {
+      // Show manual settings form
+      showManualSettingsForm();
+      modal.remove();
+    });
+    
+    document.getElementById('close-modal-btn').addEventListener('click', () => {
+      modal.remove();
+    });
+  } catch (error) {
+    console.error('Error showing settings failure options:', error);
+  }
+}
+
+/**
+ * Show manual settings form
+ */
+function showManualSettingsForm() {
+  // Get current settings
+  chrome.storage.sync.get(['settings'], (result) => {
+    const settings = result.settings || {};
+    
+    // Create form
+    const form = document.createElement('div');
+    form.className = 'settings-form';
+    form.style.position = 'fixed';
+    form.style.top = '50%';
+    form.style.left = '50%';
+    form.style.transform = 'translate(-50%, -50%)';
+    form.style.backgroundColor = 'white';
+    form.style.padding = '20px';
+    form.style.borderRadius = '8px';
+    form.style.boxShadow = '0 4px 12px rgba(0,0,0,0.15)';
+    form.style.zIndex = '1000';
+    form.style.width = '300px';
+    
+    form.innerHTML = `
+      <h3 style="margin-top:0">Manual Settings</h3>
+      <div style="display:flex;flex-direction:column;gap:15px;margin-top:15px">
+        <div>
+          <label for="api-url" style="display:block;margin-bottom:5px">API URL:</label>
+          <input id="api-url" type="text" value="${settings.apiUrl || 'http://localhost:8000'}" style="width:100%;padding:8px">
+        </div>
+        <div>
+          <label for="api-key" style="display:block;margin-bottom:5px">API Key:</label>
+          <input id="api-key" type="text" value="${settings.apiKey || ''}" style="width:100%;padding:8px">
+        </div>
+        <div>
+          <label style="display:flex;align-items:center;gap:5px">
+            <input id="auto-scan" type="checkbox" ${settings.autoScan ? 'checked' : ''}>
+            Auto Scan
+          </label>
+        </div>
+        <div style="display:flex;justify-content:space-between;margin-top:10px">
+          <button id="save-settings-btn" style="padding:8px;cursor:pointer">Save</button>
+          <button id="close-form-btn" style="padding:8px;cursor:pointer">Cancel</button>
+        </div>
+      </div>
+    `;
+    
+    document.body.appendChild(form);
+    
+    // Add event listeners
+    document.getElementById('save-settings-btn').addEventListener('click', () => {
+      const apiUrl = document.getElementById('api-url').value;
+      const apiKey = document.getElementById('api-key').value;
+      const autoScan = document.getElementById('auto-scan').checked;
+      
+      // Save settings
+      chrome.storage.sync.set({
+        settings: {
+          ...settings,
+          apiUrl,
+          apiKey,
+          autoScan
+        }
+      }, () => {
+        showNotification('Settings saved successfully');
+        form.remove();
+        
+        // Immediately check connection with new settings
+        setTimeout(checkAPIConnection, 500);
+      });
+    });
+    
+    document.getElementById('close-form-btn').addEventListener('click', () => {
+      form.remove();
+    });
+  });
+}
+
+/**
+ * Collect posts from a social media platform
  * @param {string} platform - The platform to collect from (facebook, instagram, linkedin)
  */
 async function collectPosts(platform) {
@@ -116,22 +1005,42 @@ async function collectPosts(platform) {
     const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
     const activeTab = tabs[0];
     
+    // Platform URL validation map
+    const platformDomains = {
+      'facebook': ['facebook.com', 'fb.com'],
+      'instagram': ['instagram.com'],
+      'linkedin': ['linkedin.com']
+    };
+    
     // Check if we're on the right platform
-    if (!activeTab.url.includes(platform)) {
+    const isCorrectPlatform = platformDomains[platform] && 
+      platformDomains[platform].some(domain => activeTab.url.includes(domain));
+    
+    if (!isCorrectPlatform) {
       showNotification(`Please navigate to ${platform}.com first`, 'warning');
       return;
     }
     
     // Update button state
     const button = document.querySelector(`.collect-btn[data-platform="${platform}"]`);
+    if (!button) {
+      console.error(`Button for platform ${platform} not found`);
+      return;
+    }
+    
     button.textContent = 'Collecting...';
     button.disabled = true;
+    
+    // Generate a unique batch ID
+    const batchId = `${platform}-${Date.now()}`;
     
     // Send message to content script
     chrome.tabs.sendMessage(activeTab.id, {
       action: 'scrollAndCollect',
+      platform: platform,
+      batchId: batchId,
       maxScrollTime: 30000 // 30 seconds of scrolling
-    }, (response) => {
+    }, async (response) => {
       if (chrome.runtime.lastError) {
         console.error('Error sending message:', chrome.runtime.lastError);
         showNotification(`Error: ${chrome.runtime.lastError.message}`, 'error');
@@ -141,6 +1050,19 @@ async function collectPosts(platform) {
       
       if (response && response.success) {
         showNotification(`Found ${response.postCount} posts on ${platform}`);
+        
+        // If posts were found, send them to the API
+        if (response.posts && response.posts.length > 0) {
+          try {
+            await authDashboardAPI.sendPosts(response.posts, platform, batchId);
+            showNotification(`Successfully uploaded ${response.posts.length} posts from ${platform}`);
+          } catch (apiError) {
+            console.error('API error:', apiError);
+            showNotification(`Collection succeeded but upload failed: ${apiError.message}`, 'warning');
+          }
+        }
+        
+        // Update the post counts in the UI
         updatePostCounts();
       } else {
         showNotification(`Error collecting posts: ${response?.error || 'Unknown error'}`, 'error');
@@ -154,7 +1076,9 @@ async function collectPosts(platform) {
     
     // Reset button state
     const button = document.querySelector(`.collect-btn[data-platform="${platform}"]`);
-    resetButton(button, platform);
+    if (button) {
+      resetButton(button, platform);
+    }
   }
 }
 
@@ -177,22 +1101,17 @@ function resetButton(button, platform) {
  * @param {string} type - The notification type (success, error, warning)
  */
 function showNotification(message, type = 'success') {
-  notificationMessage.textContent = message;
-  notification.className = 'notification show';
-  
-  if (type) {
-    notification.classList.add(type);
-  }
-  
-  // Auto-hide after 5 seconds
-  setTimeout(hideNotification, 5000);
+  // Use updateStatus with showNotification option
+  updateStatus(message, type, { showNotification: true });
 }
 
 /**
  * Hide the notification
  */
 function hideNotification() {
-  notification.classList.remove('show');
+  if (notification) {
+    notification.classList.remove('show');
+  }
 }
 
 // Store extension settings in chrome.storage
@@ -220,14 +1139,10 @@ const DEFAULT_DATA_PREFERENCES = {
     collectLocalML: true
 };
 
-// Add a connection status variable
-let serverConnected = false;
-let connectionErrorMessage = '';
-
 // Load settings when popup opens
 document.addEventListener('DOMContentLoaded', function() {
     // First check server connection
-    checkBackendConnection();
+    checkAPIConnection();
     
     // Load saved settings or use defaults
     chrome.storage.local.get(['settings', 'dataPreferences'], function(result) {
@@ -279,7 +1194,7 @@ document.addEventListener('DOMContentLoaded', function() {
     document.getElementById('collectSponsored').addEventListener('change', updateSettings);
     document.getElementById('showNotifications').addEventListener('change', updateSettings);
 
-    // Add event listener for saving API key
+    // Add event listeners for saving API key
     document.getElementById('saveApiKey').addEventListener('click', function() {
         updateAPIKey();
     });
@@ -309,26 +1224,13 @@ document.addEventListener('DOMContentLoaded', function() {
     // Add retry connection button
     if (document.getElementById('retryConnectionBtn')) {
         document.getElementById('retryConnectionBtn').addEventListener('click', function() {
-            checkBackendConnection();
+            checkAPIConnection();
         });
     }
 
     // Add Pure Feed functionality
     document.getElementById('pureFeedTabBtn').addEventListener('click', function() {
-        // Hide all tabs and show Pure Feed tab
-        document.querySelectorAll('.tab-content').forEach(tab => {
-            tab.style.display = 'none';
-        });
-        document.getElementById('pureFeedTab').style.display = 'block';
-        
-        // Update active button styles
-        document.querySelectorAll('.tab-button').forEach(btn => {
-            btn.classList.remove('active');
-        });
-        this.classList.add('active');
-        
-        // Load Pure Feed posts
-        loadPureFeedPosts();
+        showTab('pureFeedTab');
     });
 
     // Refresh button for Pure Feed
@@ -365,965 +1267,197 @@ document.addEventListener('DOMContentLoaded', function() {
     }
 });
 
-// Function to check backend connection
-function checkBackendConnection() {
-    const statusElement = document.getElementById('status');
+/**
+ * Switch between tabs in the popup
+ * @param {string} tabName - Name of the tab to show
+ */
+function showTab(tabName) {
+    console.log(`Switching to tab: ${tabName}`);
     
-    // Check if element exists
-    if (statusElement) {
-        statusElement.textContent = 'Checking connection to dashboard...';
-        statusElement.className = 'status';
-    } else {
-        console.log('Status element not found in DOM');
-    }
-    
-    // Check if connection message container exists, create if not
-    let connectionMessageContainer = document.getElementById('connectionMessage');
-    if (!connectionMessageContainer) {
-        connectionMessageContainer = document.createElement('div');
-        connectionMessageContainer.id = 'connectionMessage';
-        connectionMessageContainer.className = 'connection-warning';
-        const headerElement = document.querySelector('.header');
-        if (headerElement) {
-            headerElement.appendChild(connectionMessageContainer);
-        } else {
-            console.log('Header element not found in DOM');
-        }
-    }
-    
-    // Get API key from storage for the health check
-    chrome.storage.local.get(['settings'], function(result) {
-        const settings = result.settings || DEFAULT_SETTINGS;
-        const apiKey = settings.apiKey || '8484e01c2e0b4d368eb9a0f9b89807ad'; // Use our default key
-        
-        // First try a direct API call to avoid Chrome message passing issues
-        fetch('http://localhost:8000/api/health-check/', {
-            method: 'GET',
-            headers: {
-                'Content-Type': 'application/json',
-                'X-API-Key': apiKey
-            }
-        })
-        .then(response => {
-            if (!response.ok) {
-                throw new Error(`HTTP error! Status: ${response.status}`);
-            }
-            return response.json();
-        })
-        .then(data => {
-            console.log('Server connection verified directly:', data);
-            serverConnected = true;
-            connectionErrorMessage = '';
-            statusElement.textContent = 'Connected to dashboard server';
-            statusElement.className = 'status success';
-            connectionMessageContainer.style.display = 'none';
-        })
-        .catch(error => {
-            console.error('Direct server connection failed:', error);
-            // Fall back to background script method
-            tryBackgroundScriptConnection();
-        });
-    });
-    
-    function tryBackgroundScriptConnection() {
-        // Send a message to background script to check connection
-        chrome.runtime.sendMessage({ action: 'checkConnection' }, function(response) {
-            if (chrome.runtime.lastError) {
-                console.error('Connection check error:', chrome.runtime.lastError);
-                serverConnected = false;
-                connectionErrorMessage = 'Could not connect to extension background service.';
-                displayConnectionStatus();
-                return;
-            }
-            
-            if (response && response.status === 'connected') {
-                console.log('Connection to server verified via background script');
-                serverConnected = true;
-                connectionErrorMessage = '';
-                statusElement.textContent = 'Connected to dashboard server';
-                statusElement.className = 'status success';
-                connectionMessageContainer.style.display = 'none';
-            } else {
-                console.error('Server connection failed:', response ? response.error : 'No response');
-                serverConnected = false;
-                connectionErrorMessage = response && response.error ? 
-                    `Server error: ${response.error}` : 
-                    'Could not connect to dashboard server. Make sure it\'s running.';
-                displayConnectionStatus();
-            }
-        });
-    }
-}
-
-// Function to display connection status
-function displayConnectionStatus() {
-    const statusElement = document.getElementById('status');
-    const connectionMessageContainer = document.getElementById('connectionMessage');
-    
-    if (!serverConnected) {
-        statusElement.textContent = 'Not connected to dashboard server';
-        statusElement.className = 'status error';
-        
-        // Show error message with retry button
-        connectionMessageContainer.innerHTML = `
-            <p>${connectionErrorMessage}</p>
-            <button id="retryConnectionBtn" class="retry-button">Retry Connection</button>
-        `;
-        connectionMessageContainer.style.display = 'block';
-        
-        // Add event listener to the newly created button
-        document.getElementById('retryConnectionBtn').addEventListener('click', function() {
-            checkBackendConnection();
-        });
-    } else {
-        connectionMessageContainer.style.display = 'none';
-    }
-}
-
-// Function to handle tab navigation
-function showTab(tabId) {
     // Hide all tab contents
-    const tabContents = document.getElementsByClassName('tab-content');
-    for (let i = 0; i < tabContents.length; i++) {
-        tabContents[i].classList.remove('active');
-    }
+    const tabContents = document.querySelectorAll('.tab-content');
+    tabContents.forEach(tab => {
+        tab.style.display = 'none';
+    });
     
     // Deactivate all tab buttons
-    const tabButtons = document.getElementsByClassName('tab-button');
-    for (let i = 0; i < tabButtons.length; i++) {
-        tabButtons[i].classList.remove('active');
-    }
+    const tabButtons = document.querySelectorAll('.tab-button');
+    tabButtons.forEach(button => {
+        button.classList.remove('active');
+    });
     
     // Show the selected tab content
-    document.getElementById(tabId).classList.add('active');
-    
-    // Activate the corresponding tab button
-    document.getElementById(tabId + 'Btn').classList.add('active');
-}
-
-// Function to save data preferences
-function saveDataPreferences() {
-    const dataPreferences = {
-        collectContent: document.getElementById('collectContent').checked,
-        collectEngagement: document.getElementById('collectEngagement').checked,
-        collectUsers: document.getElementById('collectUsers').checked,
-        collectHashtags: document.getElementById('collectHashtags').checked,
-        collectLocalML: document.getElementById('collectLocalML').checked
-    };
-    
-    // Save data preferences
-    chrome.storage.local.set({ dataPreferences: dataPreferences }, function() {
-        // Show brief confirmation
-        const statusElement = document.getElementById('status');
-        statusElement.textContent = 'Data preferences saved successfully!';
-        statusElement.className = 'status success';
-        
-        // Reset status after 2 seconds
-        setTimeout(function() {
-            statusElement.textContent = serverConnected ? 'Connected to dashboard server' : 'Not connected to dashboard server';
-            statusElement.className = serverConnected ? 'status success' : 'status error';
-        }, 2000);
-    });
-}
-
-// Function to perform scan on the current page
-function performScan() {
-    // If not connected to server, show warning
-    if (!serverConnected) {
-        const statusElement = document.getElementById('status');
-        statusElement.textContent = 'Cannot scan: Not connected to dashboard server';
-        statusElement.className = 'status error';
-        return;
-    }
-
-    const scanButton = document.getElementById('scanButton');
-    const statusElement = document.getElementById('status');
-    
-    // Disable button during scan
-    scanButton.disabled = true;
-    scanButton.textContent = 'Scanning...';
-    statusElement.textContent = 'Scanning current page...';
-    statusElement.className = 'status';
-    
-    // Get the active tab
-    chrome.tabs.query({active: true, currentWindow: true}, function(tabs) {
-        const activeTab = tabs[0];
-        
-        // Detect platform based on URL
-        let platform = 'unknown';
-        if (activeTab.url.includes('instagram.com')) {
-            platform = 'instagram';
-        } else if (activeTab.url.includes('facebook.com')) {
-            platform = 'facebook';
-        } else if (activeTab.url.includes('linkedin.com')) {
-            platform = 'linkedin';
-        }
-        
-        // Skip if we're not on a supported platform
-        if (platform === 'unknown') {
-            scanButton.disabled = false;
-            scanButton.textContent = 'Scan Current Page';
-            statusElement.textContent = 'This page is not supported for scanning.';
-            statusElement.className = 'status error';
-            return;
-        }
-        
-        // Load settings for the scan
-        chrome.storage.local.get(['settings', 'dataPreferences'], function(result) {
-            const settings = result.settings || DEFAULT_SETTINGS;
-            const dataPreferences = result.dataPreferences || DEFAULT_DATA_PREFERENCES;
-            
-            // Execute content script function to collect posts
-            chrome.tabs.sendMessage(activeTab.id, {
-                action: 'collectPosts',
-                platform: platform,
-                settings: {
-                    advancedML: settings.advancedML,
-                    collectSponsored: settings.collectSponsored,
-                    dataPreferences: dataPreferences
-                }
-            }, function(response) {
-                // Re-enable button and update status
-                scanButton.disabled = false;
-                scanButton.textContent = 'Scan Current Page';
-                
-                // Handle runtime errors
-                if (chrome.runtime.lastError) {
-                    statusElement.textContent = 'Error: Content script not responding. Try refreshing the page.';
-                    statusElement.className = 'status error';
-                    console.error('Runtime error:', chrome.runtime.lastError);
-                    return;
-                }
-                
-                // Handle missing response
-                if (!response) {
-                    statusElement.textContent = 'Error: No response from content script.';
-                    statusElement.className = 'status error';
-                    return;
-                }
-                
-                // Handle scan results
-                if (response.success) {
-                    const count = response.posts ? response.posts.length : 0;
-                    statusElement.textContent = `Successfully scanned ${count} posts!`;
-                    statusElement.className = 'status success';
-                    
-                    // Update stats if posts were collected
-                    if (count > 0) {
-                        updateStatsAfterScan(platform, count);
-                    }
-                } else {
-                    statusElement.textContent = response.message || 'Scan failed.';
-                    statusElement.className = 'status error';
-                }
-            });
-      });
-    });
-}
-
-// Function to update the insights tab with analysis results
-function updateInsightsTab(posts, platform) {
-    const insightsContainer = document.getElementById('currentPageInsights');
-    
-    if (!posts || posts.length === 0) {
-        insightsContainer.innerHTML = '<div style="text-align: center; color: #e74c3c; padding: 20px;">No posts found to analyze</div>';
-        return;
+    const selectedTab = document.getElementById(`${tabName}Tab`);
+    if (selectedTab) {
+        selectedTab.style.display = 'block';
     }
     
-    // Calculate summary statistics
-    let manipulativeCount = 0;
-    let totalPatterns = 0;
-    let patternTypes = {};
-    let sentimentTotal = 0;
-    let bizfluencerTotal = 0;
-    
-    posts.forEach(post => {
-        // Add to manipulative pattern counts
-        if (post.manipulative_patterns && post.manipulative_patterns.length > 0) {
-            manipulativeCount++;
-            totalPatterns += post.manipulative_patterns.length;
-            
-            post.manipulative_patterns.forEach(pattern => {
-                patternTypes[pattern.type] = (patternTypes[pattern.type] || 0) + 1;
-            });
-        }
-        
-        // Add to sentiment and bizfluencer totals
-        if (typeof post.sentiment_score === 'number') {
-            sentimentTotal += post.sentiment_score;
-        }
-        
-        if (typeof post.bizfluencer_score === 'number') {
-            bizfluencerTotal += post.bizfluencer_score;
-        }
-    });
-    
-    // Calculate averages
-    const avgSentiment = sentimentTotal / posts.length;
-    const avgBizfluencer = bizfluencerTotal / posts.length;
-    
-    // Prepare the most common pattern types
-    const sortedPatterns = Object.entries(patternTypes)
-        .sort((a, b) => b[1] - a[1])
-        .slice(0, 3);
-    
-    // Create the HTML
-    let html = `
-        <div class="insights-summary">
-            <h4>Feed Analysis Summary</h4>
-            <p>Analyzed ${posts.length} posts from ${platform}</p>
-            
-            <div class="insight-stat">
-                <span class="stat-label">Manipulative Content:</span>
-                <span class="stat-value">${manipulativeCount} posts (${Math.round(manipulativeCount/posts.length*100)}%)</span>
-            </div>
-            
-            <div class="insight-stat">
-                <span class="stat-label">Total Patterns Detected:</span>
-                <span class="stat-value">${totalPatterns}</span>
-            </div>
-            
-            <div class="insight-stat">
-                <span class="stat-label">Average Sentiment:</span>
-                <span class="stat-value">${avgSentiment.toFixed(2)} ${avgSentiment > 0 ? '😊' : avgSentiment < 0 ? '😔' : '😐'}</span>
-            </div>
-            
-            ${platform === 'linkedin' ? `
-            <div class="insight-stat">
-                <span class="stat-label">Bizfluencer Score:</span>
-                <span class="stat-value">${avgBizfluencer.toFixed(1)}/10</span>
-            </div>
-            ` : ''}
-            
-            ${sortedPatterns.length > 0 ? `
-            <div class="insight-stat">
-                <span class="stat-label">Most Common Patterns:</span>
-                <ol class="pattern-list">
-                    ${sortedPatterns.map(([type, count]) => 
-                        `<li>${type.replace('_', ' ')} (${count})</li>`
-                    ).join('')}
-                </ol>
-            </div>
-            ` : ''}
-        </div>
-    `;
-    
-    // Add educational component
-    html += `
-        <div class="educational-component">
-            <h4>Understanding Your Feed</h4>
-            <p>Your feed contains content designed to influence your behavior. 
-               Being aware of these patterns helps you make more conscious choices.</p>
-            
-            <div class="learn-more-section">
-                <p><a href="https://www.authentic-dashboard.com/learn" target="_blank">Learn more about manipulative patterns →</a></p>
-            </div>
-        </div>
-    `;
-    
-    // Update the insights container
-    insightsContainer.innerHTML = html;
-    
-    // Add CSS for the insights tab
-    const style = document.createElement('style');
-    style.textContent = `
-        .insights-summary {
-            background-color: #f8f9fa;
-            border-radius: 4px;
-            padding: 12px;
-            margin-bottom: 15px;
-        }
-        
-        .insight-stat {
-            margin: 8px 0;
-            display: flex;
-            justify-content: space-between;
-            font-size: 13px;
-        }
-        
-        .stat-label {
-            color: #555;
-        }
-        
-        .stat-value {
-            font-weight: bold;
-            color: #2c3e50;
-        }
-        
-        .pattern-list {
-            margin: 5px 0 0 20px;
-            padding: 0;
-            font-size: 12px;
-        }
-        
-        .educational-component {
-            border-top: 1px solid #ddd;
-            padding-top: 12px;
-            font-size: 12px;
-            color: #7f8c8d;
-        }
-        
-        .learn-more-section {
-            margin-top: 10px;
-            text-align: center;
-        }
-        
-        .learn-more-section a {
-            color: #3498db;
-            text-decoration: none;
-        }
-        
-        .learn-more-section a:hover {
-            text-decoration: underline;
-        }
-    `;
-    document.head.appendChild(style);
-}
-
-// Function to send posts to the API
-function sendPostsToAPI(posts, platform, callback) {
-    if (!posts || posts.length === 0) {
-        callback(false, 0);
-        return;
+    // Activate the selected tab button
+    const selectedButton = document.querySelector(`.tab-button[data-tab="${tabName}"]`);
+    if (selectedButton) {
+        selectedButton.classList.add('active');
     }
     
-    // Use the centralized API client if available
-    if (window.authDashboardAPI) {
-        window.authDashboardAPI.sendPosts(posts, platform)
-            .then(result => {
-                callback(result.success, result.successCount);
-            })
-            .catch(error => {
-                console.error('Error sending posts to API:', error);
-                callback(false, 0);
-            });
-        return;
-    }
-    
-    // Fallback to legacy method if API client isn't available
-    chrome.storage.local.get(['settings'], function(result) {
-        const settings = result.settings || DEFAULT_SETTINGS;
-        const apiKey = settings.apiKey || '8484e01c2e0b4d368eb9a0f9b89807ad'; // Use our default key if none set
-        
-        // Send each post to the API
-        let successCount = 0;
-        let failureCount = 0;
-        
-        posts.forEach(post => {
-            fetch('http://localhost:8000/api/process-ml/', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'X-API-Key': apiKey
-                },
-                body: JSON.stringify(post)
-            })
-            .then(response => {
-                if (!response.ok) {
-                    throw new Error(`HTTP error! Status: ${response.status}`);
-                }
-                return response.json();
-            })
-            .then(data => {
-                if (data.status && (data.status === 'success' || data.status === 'duplicate post, skipped')) {
-                    successCount++;
-                } else {
-                    failureCount++;
-                }
-                
-                // Check if all posts have been processed
-                if (successCount + failureCount === posts.length) {
-                    callback(true, successCount);
-                }
-            })
-            .catch(error => {
-                console.error('Error:', error);
-                failureCount++;
-                
-                // Check if all posts have been processed
-                if (successCount + failureCount === posts.length) {
-                    callback(successCount > 0, successCount);
-                }
-            });
+    // Special case for certain tabs
+    if (tabName === 'pureFeed') {
+        // If we have the function to load pure feed posts, call it
+        if (typeof loadPureFeedPosts === 'function') {
+            loadPureFeedPosts();
+        }
+    } else if (tabName === 'insights') {
+        // Check if we need to load or refresh insights
+        chrome.storage.local.get(['lastAnalyzedPosts'], function(result) {
+            if (result.lastAnalyzedPosts && result.lastAnalyzedPosts.posts) {
+                updateInsightsTab(
+                    result.lastAnalyzedPosts.posts, 
+                    result.lastAnalyzedPosts.platform
+                );
+            }
         });
-    });
-}
-
-// Function to update settings when toggles change
-function updateSettings() {
-    chrome.storage.local.get(['settings'], function(result) {
-        let settings = result.settings || DEFAULT_SETTINGS;
-        
-        // Update settings based on toggle states
-        settings.autoScan = document.getElementById('autoScan').checked;
-        settings.advancedML = document.getElementById('advancedML').checked;
-        settings.collectSponsored = document.getElementById('collectSponsored').checked;
-        settings.showNotifications = document.getElementById('showNotifications').checked;
-        
-        // Save updated settings
-        chrome.storage.local.set({ settings: settings });
-    });
-}
-
-// Function to update stats after a successful scan
-function updateStats(platform, count) {
-    chrome.storage.local.get(['settings'], function(result) {
-        let settings = result.settings || DEFAULT_SETTINGS;
-        
-        // Update total post count
-        settings.stats.totalPosts += count;
-        
-        // Update today's post count
-        const today = new Date().toDateString();
-        const lastScanDate = settings.stats.lastScanDate;
-        
-        if (lastScanDate === today) {
-            settings.stats.todayPosts += count;
-        } else {
-            settings.stats.todayPosts = count;
-            settings.stats.lastScanDate = today;
-        }
-        
-        // Update ML processed count (estimate)
-        settings.stats.mlProcessed += Math.round(count * 0.9); // Assume ~90% of posts get ML processed
-        
-        // Add to scan history
-        const scanEntry = {
-            platform: platform,
-            count: count,
-            timestamp: new Date().toISOString()
-        };
-        
-        settings.scanHistory.unshift(scanEntry);
-        
-        // Keep only the last 10 scans
-        if (settings.scanHistory.length > 10) {
-            settings.scanHistory.pop();
-        }
-        
-        // Save updated settings
-        chrome.storage.local.set({ settings: settings });
-        
-        // Update the displayed stats
-        updateStatsDisplay(settings.stats);
-        
-        // Update recent scans display
-        updateRecentScansDisplay(settings.scanHistory);
-    });
-}
-
-// Function to update stats display
-function updateStatsDisplay(stats) {
-    document.getElementById('postsToday').textContent = stats.todayPosts;
-    document.getElementById('postsTotal').textContent = stats.totalPosts;
-    document.getElementById('mlProcessed').textContent = stats.mlProcessed;
+    }
 }
 
 /**
- * Update recent scans display
+ * Save data preferences and update status
  */
-function updateRecentScansDisplay(scanHistory) {
-    const container = document.getElementById('recentScans');
+function saveDataPreferences() {
+  const dataPreferences = {
+    collectContent: document.getElementById('collectContent').checked,
+    collectEngagement: document.getElementById('collectEngagement').checked,
+    collectUsers: document.getElementById('collectUsers').checked,
+    collectHashtags: document.getElementById('collectHashtags').checked,
+    collectLocalML: document.getElementById('collectLocalML').checked
+  };
+  
+  // Save data preferences
+  chrome.storage.local.set({ dataPreferences: dataPreferences }, function() {
+    // Show brief confirmation
+    updateStatus('Data preferences saved successfully!', 'success', { showNotification: true });
     
-    // Clear container
-    container.innerHTML = '';
-    
-    // Create recent scan items
-    if (scanHistory && scanHistory.length > 0) {
-        // Only show the most recent 5 scans
-        const recentScans = scanHistory.slice(0, 5);
-        
-        recentScans.forEach(scan => {
-            const scanDate = new Date(scan.timestamp);
-            const formattedTime = scanDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-            const formattedDate = scanDate.toLocaleDateString([], { month: 'short', day: 'numeric' });
-            
-            // Create scan item with improved design
-            const scanItem = document.createElement('div');
-            scanItem.className = 'scan-item';
-            
-            // Format platform name with proper capitalization
-            const platformName = scan.platform.charAt(0).toUpperCase() + scan.platform.slice(1);
-            
-            // Get platform icon
-            const platformIcon = getPlatformIcon(scan.platform);
-            
-            // Create scan item content
-            scanItem.innerHTML = `
-                <div class="scan-content">
-                    <div class="scan-info">
-                        <span class="scan-platform">${platformName}</span>: 
-                        <span class="scan-count">${scan.count}</span> posts collected
-                    </div>
-                    <div class="scan-time">${formattedTime} · ${formattedDate}</div>
-                </div>
-            `;
-            
-            container.appendChild(scanItem);
-        });
-    } else {
-        // Show empty state
-        container.innerHTML = `
-            <div class="empty-state">
-                <p>No recent scans. Click "Scan Current Page" to collect posts.</p>
-            </div>
-        `;
-    }
+    // Reset status after 2 seconds
+    setTimeout(function() {
+      const isConnected = serverConnected;
+      updateStatus(
+        isConnected ? 'Connected to dashboard server' : 'Not connected to dashboard server', 
+        isConnected ? 'success' : 'error'
+      );
+    }, 2000);
+  });
 }
 
-// Function to update API key
+/**
+ * Update API key and show status
+ */
 function updateAPIKey() {
-    const apiKeyInput = document.getElementById('apiKey');
-    const apiKey = apiKeyInput.value.trim();
-    
-    chrome.storage.local.get(['settings'], function(result) {
-        let settings = result.settings || DEFAULT_SETTINGS;
-        
-        // Update API key
-        settings.apiKey = apiKey;
-        
-        // Save updated settings
-        chrome.storage.local.set({ settings: settings }, function() {
-            // Show brief confirmation
-            const statusElement = document.getElementById('status');
-            statusElement.textContent = 'API key saved successfully!';
-            statusElement.className = 'status success';
-            
-            // Reset status after 2 seconds
-            setTimeout(function() {
-                statusElement.textContent = 'Ready to scan.';
-                statusElement.className = 'status';
-            }, 2000);
-        });
-    });
-}
-
-// Function to open dashboard with proper auth handling
-function openDashboard() {
-    chrome.storage.local.get(['apiEndpoint'], function(result) {
-        let dashboardUrl = `${result.apiEndpoint || 'http://localhost:8000'}/dashboard/`;
-        chrome.tabs.create({ url: dashboardUrl });
-    });
-}
-
-// Function to open ML dashboard with proper auth handling
-function openMLDashboard() {
-    chrome.storage.local.get(['apiEndpoint'], function(result) {
-        let mlDashboardUrl = `${result.apiEndpoint || 'http://localhost:8000'}/ml-dashboard/`;
-        chrome.tabs.create({ url: mlDashboardUrl });
-    });
-}
-
-// Function to troubleshoot dashboard access issues
-function troubleshootDashboardAccess() {
-    // Get API key before checking
-    chrome.storage.local.get(['settings'], function(result) {
-        const settings = result.settings || DEFAULT_SETTINGS;
-        const apiKey = settings.apiKey || '8484e01c2e0b4d368eb9a0f9b89807ad'; // Use our default key
-        
-        // Check if the Django server is running
-        fetch('http://localhost:8000/api/health-check/', { 
-            method: 'GET',
-            headers: {
-                'Content-Type': 'application/json',
-                'X-API-Key': apiKey
-            }
-        })
-        .then(response => {
-            if (response.ok) {
-                return response.json();
-            }
-            throw new Error('Server not responding');
-        })
-        .then(data => {
-            // Server is running, check authentication
-            if (!apiKey) {
-                document.getElementById('status').textContent = 'API key is missing. Please add a valid API key.';
-                document.getElementById('status').className = 'status error';
-                return;
-            }
-            
-            // Check if API key is valid
-            fetch('http://localhost:8000/api/health-check/', {
-                method: 'GET',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'X-API-Key': apiKey
-                }
-            })
-            .then(response => {
-                if (response.ok) {
-                    document.getElementById('status').textContent = 'Authentication is working correctly.';
-                    document.getElementById('status').className = 'status success';
-                } else {
-                    document.getElementById('status').textContent = 'API key is invalid. Please update your API key.';
-                    document.getElementById('status').className = 'status error';
-                }
-            })
-            .catch(error => {
-                document.getElementById('status').textContent = 'Error verifying API key: ' + error.message;
-                document.getElementById('status').className = 'status error';
-            });
-        })
-        .catch(error => {
-            document.getElementById('status').textContent = 'Django server is not running at localhost:8000.';
-            document.getElementById('status').className = 'status error';
-        });
-    });
+  const apiKeyInput = document.getElementById('apiKey');
+  if (!apiKeyInput) {
+    updateStatus('API key input not found', 'error', { showNotification: true });
+    return;
   }
 
-// Add auto-scanning settings section to the settings page
-function addAutoScanSettings() {
-  const settingsContainer = document.getElementById('settings-container');
-  if (!settingsContainer) return;
-  
-  // Create auto-scan settings section
-  const autoScanSection = document.createElement('div');
-  autoScanSection.classList.add('settings-section');
-  
-  const sectionHeader = document.createElement('h3');
-  sectionHeader.textContent = 'Auto-Scanning Settings';
-  
-  const description = document.createElement('p');
-  description.textContent = 'Auto-scanning collects posts from social media sites at regular intervals to keep your dashboard up-to-date without manual browsing.';
-  description.style.fontSize = '14px';
-  description.style.color = '#666';
-  description.style.marginBottom = '15px';
-  
-  autoScanSection.appendChild(sectionHeader);
-  autoScanSection.appendChild(description);
-  
-  // Create enable/disable toggle
-  const enableToggleContainer = document.createElement('div');
-  enableToggleContainer.classList.add('setting-item');
-  
-  const enableLabel = document.createElement('label');
-  enableLabel.textContent = 'Enable Auto-Scanning';
-  enableLabel.style.display = 'flex';
-  enableLabel.style.justifyContent = 'space-between';
-  enableLabel.style.alignItems = 'center';
-  enableLabel.style.fontWeight = 'bold';
-  
-  const enableToggle = document.createElement('input');
-  enableToggle.type = 'checkbox';
-  enableToggle.id = 'autoScanEnabled';
-  
-  // Load current setting
-  chrome.storage.local.get(['autoScanEnabled'], function(result) {
-    enableToggle.checked = result.autoScanEnabled !== false;
-  });
-  
-  // Save setting when changed
-  enableToggle.addEventListener('change', function() {
-    chrome.storage.local.set({ autoScanEnabled: enableToggle.checked });
+  const apiKey = apiKeyInput.value.trim();
+  if (!apiKey) {
+    updateStatus('Please enter a valid API key', 'warning', { showNotification: true });
+    return;
+  }
+
+  // Load current settings
+  chrome.storage.sync.get(['settings'], function(result) {
+    const settings = result.settings || DEFAULT_SETTINGS;
     
-    // Send message to content script to update auto-scanning
-    chrome.tabs.query({ active: true, currentWindow: true }, function(tabs) {
-      if (tabs[0]) {
-        chrome.tabs.sendMessage(tabs[0].id, {
-          action: enableToggle.checked ? 'startAutoScanning' : 'stopAutoScanning'
-        });
-      }
+    // Update API key
+    settings.apiKey = apiKey;
+    
+    // Save updated settings
+    chrome.storage.sync.set({ settings: settings }, function() {
+      // Update API client
+      authDashboardAPI.setApiKey(apiKey);
+      
+      // Show success message
+      updateStatus('API key saved successfully!', 'success', { showNotification: true });
+      
+      // Check connection with new API key
+      setTimeout(() => {
+        checkAPIConnection();
+      }, 500);
     });
-    
-    // Update UI based on auto-scanning state
-    intervalSelect.disabled = !enableToggle.checked;
   });
-  
-  enableLabel.appendChild(enableToggle);
-  enableToggleContainer.appendChild(enableLabel);
-  autoScanSection.appendChild(enableToggleContainer);
-  
-  // Add interval selection
-  const intervalContainer = document.createElement('div');
-  intervalContainer.classList.add('setting-item');
-  intervalContainer.style.marginTop = '15px';
-  
-  const intervalLabel = document.createElement('label');
-  intervalLabel.textContent = 'Scanning Interval';
-  intervalLabel.style.display = 'block';
-  intervalLabel.style.marginBottom = '5px';
-  intervalLabel.style.fontWeight = 'bold';
-  
-  const intervalDescription = document.createElement('p');
-  intervalDescription.textContent = 'How often should auto-scanning collect new posts?';
-  intervalDescription.style.fontSize = '14px';
-  intervalDescription.style.color = '#666';
-  intervalDescription.style.margin = '0 0 10px 0';
-  
-  const intervalSelect = document.createElement('select');
-  intervalSelect.id = 'autoScanInterval';
-  intervalSelect.style.width = '100%';
-  intervalSelect.style.padding = '8px';
-  intervalSelect.style.borderRadius = '4px';
-  intervalSelect.style.border = '1px solid #ccc';
-  
-  // Add interval options
-  const intervals = [
-    { value: 2, label: '2 minutes (more frequent updates, higher resource usage)' },
-    { value: 5, label: '5 minutes (recommended)' },
-    { value: 10, label: '10 minutes' },
-    { value: 15, label: '15 minutes' },
-    { value: 30, label: '30 minutes (less frequent updates, lower resource usage)' }
-  ];
-  
-  intervals.forEach(interval => {
-    const option = document.createElement('option');
-    option.value = interval.value;
-    option.textContent = interval.label;
-    intervalSelect.appendChild(option);
-  });
-  
-  // Load current interval setting
-  chrome.storage.local.get(['autoScanInterval'], function(result) {
-    // Default to 5 minutes if not set
-    const defaultInterval = 5;
-    const interval = result.autoScanInterval || defaultInterval;
+}
+
+/**
+ * Update extension settings and show status
+ */
+function updateSettings() {
+  // Get current settings
+  chrome.storage.sync.get(['settings'], function(result) {
+    const settings = result.settings || DEFAULT_SETTINGS;
     
-    // Find and select the matching option
-    for (let i = 0; i < intervalSelect.options.length; i++) {
-      if (parseInt(intervalSelect.options[i].value) === interval) {
-        intervalSelect.selectedIndex = i;
-        break;
-      }
+    // Update settings from UI
+    settings.autoScan = document.getElementById('autoScan').checked;
+    settings.advancedML = document.getElementById('advancedML').checked;
+    settings.collectSponsored = document.getElementById('collectSponsored').checked;
+    settings.showNotifications = document.getElementById('showNotifications').checked;
+    
+    // Save updated settings
+    chrome.storage.sync.set({ settings: settings }, function() {
+      // Show success message
+      updateStatus('Settings updated successfully!', 'success', { showNotification: true });
+    });
+  });
+}
+
+/**
+ * Update stats after a scan and show status
+ * @param {string} platform - The platform that was scanned
+ * @param {number} count - Number of posts scanned
+ */
+function updateStatsAfterScan(platform, count) {
+  // Load current stats
+  chrome.storage.sync.get(['settings'], function(result) {
+    const settings = result.settings || DEFAULT_SETTINGS;
+    
+    // Update stats
+    const stats = settings.stats || {
+      totalPosts: 0,
+      todayPosts: 0,
+      mlProcessed: 0,
+      lastScanDate: null
+    };
+    
+    // Update totals
+    stats.totalPosts += count;
+    stats.todayPosts += count;
+    stats.mlProcessed += count;
+    stats.lastScanDate = new Date().toISOString();
+    
+    // Add to scan history
+    const scanEntry = {
+      platform,
+      count,
+      timestamp: new Date().toISOString()
+    };
+    
+    settings.scanHistory = settings.scanHistory || [];
+    settings.scanHistory.unshift(scanEntry);
+    
+    // Limit history to 10 entries
+    if (settings.scanHistory.length > 10) {
+      settings.scanHistory = settings.scanHistory.slice(0, 10);
     }
-  });
-  
-  // Update interval when changed
-  intervalSelect.addEventListener('change', function() {
-    const interval = parseInt(intervalSelect.value);
-    chrome.storage.local.set({ autoScanInterval: interval });
     
-    // Send message to content script to update interval
-    chrome.tabs.query({ active: true, currentWindow: true }, function(tabs) {
-      if (tabs[0]) {
-        chrome.tabs.sendMessage(tabs[0].id, {
-          action: 'updateAutoScanInterval',
-          interval: interval
-        });
-      }
-    });
-  });
-  
-  intervalContainer.appendChild(intervalLabel);
-  intervalContainer.appendChild(intervalDescription);
-  intervalContainer.appendChild(intervalSelect);
-  
-  // Disable interval selector if auto-scanning is disabled
-  chrome.storage.local.get(['autoScanEnabled'], function(result) {
-    intervalSelect.disabled = result.autoScanEnabled === false;
-  });
-  
-  autoScanSection.appendChild(intervalContainer);
-  
-  // Add status information
-  const statusContainer = document.createElement('div');
-  statusContainer.classList.add('setting-item');
-  statusContainer.style.marginTop = '20px';
-  statusContainer.style.backgroundColor = '#f5f5f5';
-  statusContainer.style.padding = '10px';
-  statusContainer.style.borderRadius = '4px';
-  
-  const statusTitle = document.createElement('div');
-  statusTitle.textContent = 'Auto-Scanning Status';
-  statusTitle.style.fontWeight = 'bold';
-  statusTitle.style.marginBottom = '5px';
-  
-  const statusContent = document.createElement('div');
-  statusContent.id = 'autoScanStatus';
-  statusContent.textContent = 'Checking status...';
-  
-  // Get current status from active tab
-  chrome.tabs.query({ active: true, currentWindow: true }, function(tabs) {
-    if (tabs[0]) {
-      chrome.tabs.sendMessage(tabs[0].id, { action: 'getAutoScanStatus' }, function(response) {
-        if (chrome.runtime.lastError) {
-          // Communication error
-          statusContent.textContent = 'Status unavailable on this page';
-          return;
-        }
-        
-        if (response && response.status) {
-          statusContent.textContent = response.status;
-        } else {
-          statusContent.textContent = 'Not running on this page';
-        }
+    // Save updated settings
+    chrome.storage.sync.set({ settings: settings }, function() {
+      // Update UI
+      updateStatsDisplay(stats);
+      updateRecentScansDisplay(settings.scanHistory);
+      
+      // Show success message
+      updateStatus(`Added ${count} posts to your dashboard`, 'success', { 
+        showNotification: true
       });
-    } else {
-      statusContent.textContent = 'No active tab detected';
-    }
-  });
-  
-  const refreshStatus = document.createElement('button');
-  refreshStatus.textContent = 'Refresh Status';
-  refreshStatus.style.marginTop = '5px';
-  refreshStatus.style.padding = '5px 10px';
-  refreshStatus.style.border = 'none';
-  refreshStatus.style.borderRadius = '4px';
-  refreshStatus.style.backgroundColor = '#4CAF50';
-  refreshStatus.style.color = 'white';
-  refreshStatus.style.cursor = 'pointer';
-  
-  refreshStatus.addEventListener('click', function() {
-    // Get updated status from active tab
-    statusContent.textContent = 'Refreshing...';
-    
-    chrome.tabs.query({ active: true, currentWindow: true }, function(tabs) {
-      if (tabs[0]) {
-        chrome.tabs.sendMessage(tabs[0].id, { action: 'getAutoScanStatus' }, function(response) {
-          if (chrome.runtime.lastError) {
-            statusContent.textContent = 'Status unavailable on this page';
-            return;
-          }
-          
-          if (response && response.status) {
-            statusContent.textContent = response.status;
-          } else {
-            statusContent.textContent = 'Not running on this page';
-          }
-        });
-      } else {
-        statusContent.textContent = 'No active tab detected';
-      }
     });
   });
-  
-  statusContainer.appendChild(statusTitle);
-  statusContainer.appendChild(statusContent);
-  statusContainer.appendChild(refreshStatus);
-  
-  autoScanSection.appendChild(statusContainer);
-  
-  // Add a separator
-  const separator = document.createElement('hr');
-  separator.style.margin = '20px 0';
-  separator.style.border = '0';
-  separator.style.height = '1px';
-  separator.style.backgroundColor = '#ddd';
-  
-  // Add section to settings
-  settingsContainer.appendChild(separator);
-  settingsContainer.appendChild(autoScanSection);
 }
-
-// Extend the existing setupSettingsPage function
-const originalSetupSettingsPage = window.setupSettingsPage || function() {};
-window.setupSettingsPage = function() {
-  originalSetupSettingsPage();
-  addAutoScanSettings();
-};
-
-// Add message handling for auto-scan status updates
-chrome.runtime.onMessage.addListener(function(message, sender, sendResponse) {
-  if (message.action === 'updateAutoScanStatus') {
-    const statusElement = document.getElementById('autoScanStatus');
-    if (statusElement) {
-      statusElement.textContent = message.status;
-    }
-  }
-  
-  return true;
-});
 
 /**
  * Load and render ranked posts for the Pure Feed
@@ -1647,5 +1781,379 @@ function checkForInsights() {
             });
         });
     });
+}
+
+/**
+ * Function to perform scan on the current page
+ */
+function performScan() {
+    // If not connected to server, show warning
+    if (!serverConnected) {
+        updateStatus('Cannot scan: Not connected to dashboard server', 'error');
+        return;
+    }
+
+    const scanButton = document.getElementById('scanButton');
+    
+    // Disable button during scan
+    scanButton.disabled = true;
+    scanButton.textContent = 'Scanning...';
+    updateStatus('Scanning current page...', 'checking');
+    
+    // Get the active tab
+    chrome.tabs.query({active: true, currentWindow: true}, function(tabs) {
+        const activeTab = tabs[0];
+        
+        // Detect platform based on URL
+        let platform = 'unknown';
+        if (activeTab.url.includes('instagram.com')) {
+            platform = 'instagram';
+        } else if (activeTab.url.includes('facebook.com')) {
+            platform = 'facebook';
+        } else if (activeTab.url.includes('linkedin.com')) {
+            platform = 'linkedin';
+        }
+        
+        // Skip if we're not on a supported platform
+        if (platform === 'unknown') {
+            scanButton.disabled = false;
+            scanButton.textContent = 'Scan Current Page';
+            updateStatus('This page is not supported for scanning.', 'error');
+            return;
+        }
+        
+        // Load settings for the scan
+        chrome.storage.local.get(['settings', 'dataPreferences'], function(result) {
+            const settings = result.settings || DEFAULT_SETTINGS;
+            const dataPreferences = result.dataPreferences || DEFAULT_DATA_PREFERENCES;
+            
+            // Execute content script function to collect posts
+            chrome.tabs.sendMessage(activeTab.id, {
+                action: 'collectPosts',
+                platform: platform,
+                settings: {
+                    advancedML: settings.advancedML,
+                    collectSponsored: settings.collectSponsored,
+                    dataPreferences: dataPreferences
+                }
+            }, function(response) {
+                // Re-enable button and update status
+                scanButton.disabled = false;
+                scanButton.textContent = 'Scan Current Page';
+                
+                // Handle runtime errors
+                if (chrome.runtime.lastError) {
+                    updateStatus('Error: Content script not responding. Try refreshing the page.', 'error');
+                    console.error('Runtime error:', chrome.runtime.lastError);
+                    return;
+                }
+                
+                // Handle missing response
+                if (!response) {
+                    updateStatus('Error: No response from content script.', 'error');
+                    return;
+                }
+                
+                // Handle scan results
+                if (response.success) {
+                    const count = response.posts ? response.posts.length : 0;
+                    updateStatus(`Successfully scanned ${count} posts!`, 'success');
+                    
+                    // Update stats if posts were collected
+                    if (count > 0) {
+                        updateStatsAfterScan(platform, count);
+                    }
+                } else {
+                    updateStatus(response.message || 'Scan failed.', 'error');
+                }
+            });
+        });
+    });
+}
+
+/**
+ * Update insights tab with real post analysis
+ * @param {Array} posts - The posts to analyze
+ * @param {string} platform - The social media platform
+ */
+function updateInsightsTab(posts, platform) {
+    console.log(`Updating insights tab with ${posts.length} ${platform} posts`);
+    
+    const insightsContainer = document.getElementById('currentPageInsights');
+    if (!insightsContainer) {
+        console.error('Insights container not found');
+        return;
+    }
+    
+    // Show loading during analysis
+    insightsContainer.innerHTML = `
+        <div class="loading-area">
+            <p>Analyzing ${posts.length} posts from ${platform}...</p>
+            <div class="loader"></div>
+        </div>
+    `;
+    
+    // If no posts to analyze
+    if (!posts || posts.length === 0) {
+        insightsContainer.innerHTML = `
+            <div class="no-insights-state">
+                <div class="empty-state-icon">📊</div>
+                <h3 class="empty-state-title">No Posts to Analyze</h3>
+                <p class="empty-state-message">We couldn't find any posts to analyze. Try collecting posts first.</p>
+            </div>
+        `;
+        return;
+    }
+    
+    // Perform actual analysis on the posts
+    try {
+        // Extract key metrics from posts
+        const metrics = {
+            totalPosts: posts.length,
+            sentimentScores: [],
+            patternTypes: {},
+            manipulativeCount: 0,
+            sponsoredCount: 0,
+            verifiedCount: 0,
+            engagementTotal: 0,
+            authenticityCounts: {
+                excellent: 0,
+                good: 0,
+                neutral: 0,
+                poor: 0,
+                bad: 0
+            }
+        };
+        
+        // Analyze each post
+        posts.forEach(post => {
+            // Count sentiment scores (normalize if needed)
+            const sentiment = post.sentiment_score || 0;
+            metrics.sentimentScores.push(sentiment);
+            
+            // Count patterns by type
+            if (post.patterns && Array.isArray(post.patterns)) {
+                post.patterns.forEach(pattern => {
+                    if (pattern.type) {
+                        metrics.patternTypes[pattern.type] = (metrics.patternTypes[pattern.type] || 0) + 1;
+                    }
+                });
+            }
+            
+            // Count manipulative posts
+            if (post.is_manipulative || 
+                (post.authenticity_score && post.authenticity_score < 40)) {
+                metrics.manipulativeCount++;
+            }
+            
+            // Count sponsored posts
+            if (post.is_sponsored) {
+                metrics.sponsoredCount++;
+            }
+            
+            // Count verified authors
+            if (post.author_verified) {
+                metrics.verifiedCount++;
+            }
+            
+            // Sum engagement
+            metrics.engagementTotal += (post.likes || 0) + (post.comments || 0) + (post.shares || 0);
+            
+            // Count by authenticity category
+            const score = post.authenticity_score || 50;
+            if (score >= 80) metrics.authenticityCounts.excellent++;
+            else if (score >= 60) metrics.authenticityCounts.good++;
+            else if (score >= 40) metrics.authenticityCounts.neutral++;
+            else if (score >= 20) metrics.authenticityCounts.poor++;
+            else metrics.authenticityCounts.bad++;
+        });
+        
+        // Calculate averages
+        const avgSentiment = metrics.sentimentScores.length > 0 
+            ? metrics.sentimentScores.reduce((sum, score) => sum + score, 0) / metrics.sentimentScores.length
+            : 0;
+            
+        // Get top patterns
+        const sortedPatterns = Object.entries(metrics.patternTypes)
+            .sort((a, b) => b[1] - a[1])
+            .slice(0, 3)
+            .map(([type, count]) => {
+                // Make pattern names more readable
+                const readableName = type
+                    .replace(/_/g, ' ')
+                    .replace(/\b\w/g, c => c.toUpperCase());
+                return [readableName, count];
+            });
+        
+        // Calculate overall risk score (0-100)
+        let riskScore = 0;
+        if (metrics.totalPosts > 0) {
+            riskScore = Math.round(
+                (metrics.manipulativeCount / metrics.totalPosts * 60) + 
+                (Object.keys(metrics.patternTypes).length * 5) +
+                (metrics.sponsoredCount / metrics.totalPosts * 20)
+            );
+            riskScore = Math.min(100, Math.max(0, riskScore));
+        }
+        
+        // Create the summary HTML
+        let html = `
+            <div class="insights-summary">
+                <h4>Feed Analysis Results</h4>
+                <p>Analyzed ${metrics.totalPosts} posts from ${platform}</p>
+                
+                <div class="authenticity-meter">
+                    <div class="authenticity-fill ${getScoreColorClass(100 - riskScore)}" 
+                         style="width: ${100 - riskScore}%"></div>
+                </div>
+                
+                <div class="insight-stat">
+                    <span class="stat-label">Feed Health Score:</span>
+                    <span class="stat-value">${100 - riskScore}/100 
+                        ${riskScore < 30 ? '✅' : riskScore < 60 ? '⚠️' : '❌'}</span>
+                </div>
+                
+                <div class="insight-stat">
+                    <span class="stat-label">Manipulative Content:</span>
+                    <span class="stat-value">${metrics.manipulativeCount} posts 
+                        (${Math.round(metrics.manipulativeCount/metrics.totalPosts*100)}%)</span>
+                </div>
+                
+                <div class="insight-stat">
+                    <span class="stat-label">Sponsored Content:</span>
+                    <span class="stat-value">${metrics.sponsoredCount} posts
+                        (${Math.round(metrics.sponsoredCount/metrics.totalPosts*100)}%)</span>
+                </div>
+                
+                <div class="insight-stat">
+                    <span class="stat-label">Average Sentiment:</span>
+                    <span class="stat-value">${avgSentiment.toFixed(2)} 
+                        ${avgSentiment > 0.3 ? '😊' : avgSentiment < -0.3 ? '😔' : '😐'}</span>
+                </div>
+        `;
+        
+        // Add platform-specific metrics
+        if (platform === 'linkedin') {
+            html += `
+                <div class="insight-stat">
+                    <span class="stat-label">Professional Content:</span>
+                    <span class="stat-value">${metrics.authenticityCounts.excellent + metrics.authenticityCounts.good} posts 
+                        (${Math.round((metrics.authenticityCounts.excellent + metrics.authenticityCounts.good)/metrics.totalPosts*100)}%)</span>
+                </div>
+            `;
+        }
+        
+        // Add pattern breakdown if available
+        if (sortedPatterns.length > 0) {
+            html += `
+                <div class="insight-stat">
+                    <span class="stat-label">Top Influence Patterns:</span>
+                    <ol class="pattern-list">
+                        ${sortedPatterns.map(([type, count]) => 
+                            `<li>${type} (${count})</li>`
+                        ).join('')}
+                    </ol>
+                </div>
+            `;
+        }
+        
+        html += `</div>`;
+        
+        // Add educational component
+        html += `
+            <div class="educational-component">
+                <h4>Understanding Your Feed</h4>
+                <p>The content you see is designed to influence your behavior and keep you engaged.
+                   Being aware of these patterns helps you make more conscious choices.</p>
+                
+                <div class="learn-more-section">
+                    <a href="#" id="viewFullReportBtn" class="btn btn-primary btn-sm">View Full Report</a>
+                    <a href="https://authentic-dashboard.com/learn" target="_blank" class="btn-link ml-sm">Learn more</a>
+                </div>
+            </div>
+        `;
+        
+        // Update the insights container
+        insightsContainer.innerHTML = html;
+        
+        // Add event listener for the full report button
+        const reportBtn = document.getElementById('viewFullReportBtn');
+        if (reportBtn) {
+            reportBtn.addEventListener('click', (e) => {
+                e.preventDefault();
+                // Save the current analysis to storage
+                chrome.storage.local.set({
+                    lastAnalysis: {
+                        platform,
+                        timestamp: Date.now(),
+                        metrics,
+                        posts: posts.slice(0, 10) // Store a subset of posts for the report
+                    }
+                }, () => {
+                    // Open the full report page
+                    chrome.tabs.create({ url: chrome.runtime.getURL('report.html') });
+                });
+            });
+        }
+    } catch (error) {
+        console.error('Error analyzing posts:', error);
+        insightsContainer.innerHTML = `
+            <div class="error-state">
+                <p>Error analyzing posts: ${error.message}</p>
+                <button id="retryAnalysisBtn" class="btn btn-primary">Retry Analysis</button>
+            </div>
+        `;
+        
+        // Add event listener for retry button
+        const retryBtn = document.getElementById('retryAnalysisBtn');
+        if (retryBtn) {
+            retryBtn.addEventListener('click', () => {
+                updateInsightsTab(posts, platform);
+            });
+        }
+    }
+}
+
+// Extend the existing setupSettingsPage function
+const originalSetupSettingsPage = window.setupSettingsPage || function() {};
+window.setupSettingsPage = function() {
+  originalSetupSettingsPage();
+  addAutoScanSettings();
+};
+
+// Add message handling for auto-scan status updates
+chrome.runtime.onMessage.addListener(function(message, sender, sendResponse) {
+  if (message.action === 'updateAutoScanStatus') {
+    // Use updateStatus instead of directly setting element text
+    updateStatus(message.status, message.status.includes('Error') ? 'error' : 'default');
+  }
+  
+  return true;
+});
+
+// Function to check if file exists
+function fileExists(url) {
+  return new Promise((resolve) => {
+    fetch(url, { method: 'HEAD' })
+      .then(response => resolve(response.ok))
+      .catch(() => resolve(false));
+  });
+}
+
+// Function to load icons safely
+async function loadIconsSafely() {
+  const iconElements = document.querySelectorAll('.platform-icon img');
+  
+  iconElements.forEach(async (img) => {
+    const src = img.getAttribute('src');
+    const exists = await fileExists(src);
+    
+    if (!exists) {
+      // If icon file doesn't exist or is empty, use CSS background instead
+      const platform = img.closest('.platform-card').classList[1];
+      img.style.display = 'none';
+      img.parentElement.classList.add(`${platform}-icon-fallback`);
+    }
+  });
 }
   

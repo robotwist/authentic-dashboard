@@ -1,214 +1,278 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-    <title>API Connection Test</title>
-    <style>
-        body {
-            font-family: Arial, sans-serif;
-            max-width: 800px;
-            margin: 0 auto;
-            padding: 20px;
-        }
-        .test-card {
-            border: 1px solid #ddd;
-            border-radius: 4px;
-            padding: 15px;
-            margin-bottom: 15px;
-            background-color: #f9f9f9;
-        }
-        .result {
-            margin-top: 10px;
-            padding: 10px;
-            border-radius: 4px;
-            white-space: pre-wrap;
-            font-family: monospace;
-            min-height: 20px;
-        }
-        .success {
-            background-color: #dff0d8;
-            border: 1px solid #d6e9c6;
-            color: #3c763d;
-        }
-        .error {
-            background-color: #f2dede;
-            border: 1px solid #ebccd1;
-            color: #a94442;
-        }
-        .pending {
-            background-color: #fcf8e3;
-            border: 1px solid #faebcc;
-            color: #8a6d3b;
-        }
-        button {
-            padding: 8px 12px;
-            background-color: #4285f4;
-            color: white;
-            border: none;
-            border-radius: 4px;
-            cursor: pointer;
-        }
-        button:hover {
-            background-color: #357ae8;
-        }
-        input[type="text"] {
-            padding: 8px;
-            width: 300px;
-        }
-    </style>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Authentic Dashboard - Connection Test</title>
+  <style>
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, 'Open Sans', 'Helvetica Neue', sans-serif;
+      margin: 0;
+      padding: 0;
+      background-color: #f5f5f5;
+      color: #333;
+    }
+    
+    .container {
+      max-width: 800px;
+      margin: 0 auto;
+      padding: 20px;
+    }
+    
+    .header {
+      background-color: #2c3e50;
+      color: white;
+      padding: 15px 20px;
+      border-radius: 8px 8px 0 0;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+    
+    .header h1 {
+      margin: 0;
+      font-size: 20px;
+      display: flex;
+      align-items: center;
+    }
+    
+    .header h1 img {
+      width: 24px;
+      height: 24px;
+      margin-right: 10px;
+    }
+    
+    .version {
+      font-size: 12px;
+      opacity: 0.8;
+    }
+    
+    .card {
+      background-color: white;
+      border-radius: 0 0 8px 8px;
+      box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+      margin-bottom: 20px;
+      overflow: hidden;
+    }
+    
+    .card-body {
+      padding: 20px;
+    }
+    
+    .tests {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+      gap: 15px;
+      margin-bottom: 20px;
+    }
+    
+    .test-item {
+      background-color: #f8f9fa;
+      border-radius: 6px;
+      padding: 15px;
+      box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      text-align: center;
+    }
+    
+    .test-name {
+      font-weight: 500;
+      margin-bottom: 10px;
+    }
+    
+    .status {
+      padding: 4px 10px;
+      border-radius: 12px;
+      font-size: 14px;
+      font-weight: 500;
+      min-width: 100px;
+      text-align: center;
+      background-color: #e9ecef;
+    }
+    
+    .status.success {
+      background-color: #d4edda;
+      color: #155724;
+    }
+    
+    .status.error {
+      background-color: #f8d7da;
+      color: #721c24;
+    }
+    
+    .status.warning {
+      background-color: #fff3cd;
+      color: #856404;
+    }
+    
+    .status.testing {
+      background-color: #d1ecf1;
+      color: #0c5460;
+    }
+    
+    .buttons {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      margin-bottom: 20px;
+    }
+    
+    .btn {
+      padding: 8px 16px;
+      border: none;
+      border-radius: 4px;
+      background-color: #e9ecef;
+      color: #333;
+      cursor: pointer;
+      font-size: 14px;
+      transition: background-color 0.2s;
+    }
+    
+    .btn:hover {
+      background-color: #dee2e6;
+    }
+    
+    .btn-primary {
+      background-color: #2c3e50;
+      color: white;
+    }
+    
+    .btn-primary:hover {
+      background-color: #3c506a;
+    }
+    
+    .btn-danger {
+      background-color: #dc3545;
+      color: white;
+    }
+    
+    .btn-danger:hover {
+      background-color: #bd2130;
+    }
+    
+    .log {
+      border: 1px solid #ddd;
+      border-radius: 6px;
+      height: 300px;
+      overflow: auto;
+      background-color: #f8f9fa;
+      padding: 10px;
+      font-family: monospace;
+      font-size: 13px;
+      line-height: 1.4;
+    }
+    
+    .log-entry {
+      margin-bottom: 6px;
+      padding: 4px 0;
+      border-bottom: 1px solid #eee;
+    }
+    
+    .log-entry.success {
+      color: #155724;
+    }
+    
+    .log-entry.error {
+      color: #721c24;
+    }
+    
+    .log-entry.warning {
+      color: #856404;
+    }
+    
+    .timestamp {
+      color: #6c757d;
+      margin-right: 6px;
+    }
+    
+    .message {
+      font-weight: 500;
+    }
+    
+    pre {
+      margin: 5px 0 5px 20px;
+      white-space: pre-wrap;
+      font-size: 12px;
+      background-color: #e9ecef;
+      padding: 8px;
+      border-radius: 4px;
+      overflow: auto;
+    }
+    
+    .section-title {
+      font-size: 18px;
+      margin: 0 0 15px 0;
+      font-weight: 500;
+      color: #2c3e50;
+      border-bottom: 1px solid #eee;
+      padding-bottom: 10px;
+    }
+  </style>
 </head>
 <body>
-    <h1>API Connection Test</h1>
-    <p>This page allows you to test the connection between your Chrome extension and the backend API.</p>
-    
-    <div class="test-card">
-        <h3>Test 1: Background Script Connection</h3>
-        <p>Checks if the background script is responsive.</p>
-        <button id="testBackgroundScript">Run Test</button>
-        <div id="backgroundResult" class="result pending">Waiting for test to run...</div>
+  <div class="container">
+    <div class="header">
+      <h1>
+        <img src="icons/icon48.png" alt="Authentic Dashboard">
+        Connection Test
+      </h1>
+      <span class="version">v1.0.1</span>
     </div>
     
-    <div class="test-card">
-        <h3>Test 2: API Health Check</h3>
-        <p>Tests connection to the API health check endpoint.</p>
-        <button id="testHealthCheck">Run Test</button>
-        <div id="healthResult" class="result pending">Waiting for test to run...</div>
-    </div>
-    
-    <div class="test-card">
-        <h3>Test 3: API Key Verification</h3>
-        <p>Verifies if your API key is valid.</p>
-        <input type="text" id="apiKey" placeholder="Enter your API key" value="42ad72779a934c2d8005992bbecb6772">
-        <button id="testApiKey">Verify Key</button>
-        <div id="apiKeyResult" class="result pending">Waiting for test to run...</div>
-    </div>
-    
-    <div class="test-card">
-        <h3>Test 4: Send Test Post</h3>
-        <p>Attempts to send a test post via the background script relay.</p>
-        <button id="sendTestPost">Send Test Post</button>
-        <div id="postResult" class="result pending">Waiting for test to run...</div>
-    </div>
-
-    <script>
-        document.getElementById('testBackgroundScript').addEventListener('click', function() {
-            const resultDiv = document.getElementById('backgroundResult');
-            resultDiv.className = 'result pending';
-            resultDiv.textContent = 'Checking background script connection...';
-            
-            chrome.runtime.sendMessage({
-                action: 'checkConnection'
-            }, function(response) {
-                if (chrome.runtime.lastError) {
-                    resultDiv.className = 'result error';
-                    resultDiv.textContent = 'Error: ' + chrome.runtime.lastError.message;
-                    return;
-                }
-                
-                if (response && response.backgroundScriptWorking) {
-                    resultDiv.className = 'result success';
-                    resultDiv.textContent = 'Success! Background script is responsive.';
-                } else {
-                    resultDiv.className = 'result error';
-                    resultDiv.textContent = 'Error: Background script did not respond correctly.';
-                }
-            });
-        });
+    <div class="card">
+      <div class="card-body">
+        <h2 class="section-title">Component Status</h2>
         
-        document.getElementById('testHealthCheck').addEventListener('click', function() {
-            const resultDiv = document.getElementById('healthResult');
-            resultDiv.className = 'result pending';
-            resultDiv.textContent = 'Testing API health check...';
-            
-            chrome.runtime.sendMessage({
-                action: 'performHealthCheck',
-                endpoint: 'http://localhost:8000'
-            }, function(response) {
-                if (chrome.runtime.lastError) {
-                    resultDiv.className = 'result error';
-                    resultDiv.textContent = 'Error: ' + chrome.runtime.lastError.message;
-                    return;
-                }
-                
-                resultDiv.textContent = JSON.stringify(response, null, 2);
-                
-                if (response && response.success && response.available) {
-                    resultDiv.className = 'result success';
-                } else {
-                    resultDiv.className = 'result error';
-                }
-            });
-        });
+        <div class="tests">
+          <div class="test-item">
+            <div class="test-name">Content Script</div>
+            <div id="content-script-status" class="status">Unknown</div>
+          </div>
+          
+          <div class="test-item">
+            <div class="test-name">Background Script</div>
+            <div id="background-script-status" class="status">Unknown</div>
+          </div>
+          
+          <div class="test-item">
+            <div class="test-name">API Connection</div>
+            <div id="api-status" class="status">Unknown</div>
+          </div>
+          
+          <div class="test-item">
+            <div class="test-name">Storage</div>
+            <div id="storage-status" class="status">Unknown</div>
+          </div>
+          
+          <div class="test-item">
+            <div class="test-name">Permissions</div>
+            <div id="permissions-status" class="status">Unknown</div>
+          </div>
+        </div>
         
-        document.getElementById('testApiKey').addEventListener('click', function() {
-            const resultDiv = document.getElementById('apiKeyResult');
-            const apiKey = document.getElementById('apiKey').value;
-            
-            if (!apiKey) {
-                resultDiv.className = 'result error';
-                resultDiv.textContent = 'Error: Please enter an API key.';
-                return;
-            }
-            
-            resultDiv.className = 'result pending';
-            resultDiv.textContent = 'Verifying API key...';
-            
-            chrome.runtime.sendMessage({
-                action: 'verifyApiKey',
-                endpoint: 'http://localhost:8000',
-                apiKey: apiKey
-            }, function(response) {
-                if (chrome.runtime.lastError) {
-                    resultDiv.className = 'result error';
-                    resultDiv.textContent = 'Error: ' + chrome.runtime.lastError.message;
-                    return;
-                }
-                
-                resultDiv.textContent = JSON.stringify(response, null, 2);
-                
-                if (response && response.success && response.valid) {
-                    resultDiv.className = 'result success';
-                } else {
-                    resultDiv.className = 'result error';
-                }
-            });
-        });
+        <h2 class="section-title">Test Controls</h2>
         
-        document.getElementById('sendTestPost').addEventListener('click', function() {
-            const resultDiv = document.getElementById('postResult');
-            resultDiv.className = 'result pending';
-            resultDiv.textContent = 'Sending test post...';
-            
-            const testPost = {
-                content: "This is a test post from the connection test page",
-                platform: "test",
-                original_user: "test_user",
-                is_friend: true,
-                is_family: false,
-                verified: false,
-                is_sponsored: false,
-                collected_at: new Date().toISOString()
-            };
-            
-            chrome.runtime.sendMessage({
-                action: 'sendPosts',
-                platform: 'test',
-                posts: [testPost]
-            }, function(response) {
-                if (chrome.runtime.lastError) {
-                    resultDiv.className = 'result error';
-                    resultDiv.textContent = 'Error: ' + chrome.runtime.lastError.message;
-                    return;
-                }
-                
-                resultDiv.textContent = JSON.stringify(response, null, 2);
-                
-                if (response && response.success) {
-                    resultDiv.className = 'result success';
-                } else {
-                    resultDiv.className = 'result error';
-                }
-            });
-        });
-    </script>
+        <div class="buttons">
+          <button id="test-all" class="btn btn-primary">Run All Tests</button>
+          <button id="test-content" class="btn">Test Content Script</button>
+          <button id="test-background" class="btn">Test Background Script</button>
+          <button id="test-api" class="btn">Test API Connection</button>
+          <button id="test-storage" class="btn">Test Storage</button>
+          <button id="test-permissions" class="btn">Test Permissions</button>
+          <button id="clear-results" class="btn btn-danger">Clear Results</button>
+        </div>
+        
+        <h2 class="section-title">Test Results</h2>
+        
+        <div id="results" class="log">
+          <!-- Log entries will be added here -->
+        </div>
+      </div>
+    </div>
+  </div>
+  
+  <script src="test_connection.js"></script>
 </body>
 </html> 

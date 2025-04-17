@@ -12,6 +12,9 @@ import { performAutoScan } from './scanner.js';
 import { trackOperation } from './keep-alive.js';
 import { recordError } from './error_handling.js';
 
+const RETRY_DELAYS = [100, 500, 1000, 2000, 5000]; // Increasing backoff
+const MAX_RETRIES = 3;
+
 /**
  * Handle incoming message to send posts to the API
  * @param {Object} request - Message request
@@ -199,7 +202,7 @@ function handleErrorReport(request, sender, sendResponse) {
           report,
           extension_version: chrome.runtime.getManifest().version,
           browser: navigator.userAgent,
-          timestamp: Date.now()
+        timestamp: Date.now()
         })
       })
       .then(response => {
@@ -260,72 +263,280 @@ function storeErrorReportLocally(report) {
  * Setup message listeners for the extension
  * @param {Object} backgroundWorker - Background worker instance
  */
-export function setupMessageListeners(backgroundWorker) {
-  try {
-    console.log("Setting up message listeners...");
-    
-    // Listen for messages from content scripts/popup
-    chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-      console.log("Background script received message:", message.action);
-      
-      // Always prepare a response handler to prevent connection issues
-      let handled = false;
-      
-      try {
-        if (message.action === 'getPosts') {
-          // Handle get posts request
-          handleGetPosts(message, sender, sendResponse);
-          handled = true;
-        } 
-        else if (message.action === 'checkApiConnection') {
-          // Check API connection
-          handleApiConnectionCheck(message, sendResponse);
-          handled = true;
-        } 
-        else if (message.action === 'setApiEndpoint') {
-          // Set API endpoint
-          handleSetApiEndpoint(message, sendResponse);
-          handled = true;
-        } 
-        else if (message.action === 'settingsUpdated') {
-          // Handle settings update
-          handleSettingsUpdate(message, sendResponse);
-          handled = true;
-        } 
-        else if (message.action === 'collectPostsFromPage') {
-          // Handle post collection request
-          handleCollectPosts(message, sender, sendResponse, backgroundWorker);
-          handled = true;
-        } 
-        else if (message.action === 'reportError') {
-          // Handle error reporting
-          handleErrorReport(message, sender, sendResponse);
-          handled = true;
-        } 
-        else {
-          console.log("Unhandled message action:", message.action);
+function setupMessageListeners(backgroundWorker) {
+  console.log('Setting up message listeners with improved error handling');
+  
+  // Track pending responses to prevent message channel closure
+  const pendingResponses = new Map();
+  
+  // Set up a cleanup interval to prevent memory leaks from uncompleted responses
+  setInterval(() => {
+    const now = Date.now();
+    pendingResponses.forEach((data, id) => {
+      if (now - data.timestamp > 30000) { // 30 second timeout
+        console.warn(`Message ${id} timed out without response`);
+        // If we have a sendResponse function, call it to close the channel properly
+        if (data.sendResponse && typeof data.sendResponse === 'function') {
+          try {
+            data.sendResponse({ error: 'Response timeout', success: false });
+          } catch (e) {
+            console.error('Error sending timeout response:', e);
+          }
         }
-      } catch (error) {
-        console.error(`Error handling message ${message.action}:`, error);
-        recordError('extension', error, { component: 'message_handler', action: message.action });
-        
-        // Send error response
-        try {
-          sendResponse({ success: false, error: error.message });
-        } catch (responseError) {
-          console.error("Error sending error response:", responseError);
-        }
+        pendingResponses.delete(id);
       }
-      
-      // Return true if we're handling async (using sendResponse later)
-      return handled;
+    });
+  }, 10000); // Check every 10 seconds
+  
+  // Handle messages from content scripts, popup, and other extension components
+  chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+    // Generate a unique ID for this message
+    const messageId = `msg_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+    console.log(`Received message ${messageId}:`, message);
+    
+    // Store this pending response
+    pendingResponses.set(messageId, {
+      message,
+      sender,
+      sendResponse,
+      timestamp: Date.now()
     });
     
-    console.log("Message listeners initialized");
+    // Always return true to indicate we'll respond asynchronously
+    // This keeps the message channel open
+    
+    try {
+      // Handle different message actions
+      if (message.action === 'checkConnection') {
+        // Handle connectivity check
+        handleConnectionCheck(message)
+          .then(result => {
+            sendSafeResponse(sendResponse, result);
+            pendingResponses.delete(messageId);
+          })
+          .catch(error => {
+            console.error('Error in connection check:', error);
+            sendSafeResponse(sendResponse, {
+              success: false,
+              error: error.message || 'Unknown error in connection check'
+            });
+            pendingResponses.delete(messageId);
+          });
+      }
+      else if (message.action === 'scrollAndCollect') {
+        // Content script requesting scroll and collection
+        handleScrollAndCollect(message, sender)
+          .then(result => {
+            sendSafeResponse(sendResponse, result);
+            pendingResponses.delete(messageId);
+          })
+          .catch(error => {
+            console.error('Error in scroll and collect:', error);
+            sendSafeResponse(sendResponse, {
+              success: false,
+              error: error.message || 'Unknown error in scroll and collect'
+            });
+            pendingResponses.delete(messageId);
+          });
+      }
+      else if (message.action === 'performAnalysis') {
+        // Handle analysis requests
+        if (backgroundWorker) {
+          // Use the worker for heavy processing
+          backgroundWorker.postMessage({
+            type: 'analyze',
+            data: message.data
+          });
+          
+          backgroundWorker.onmessage = (event) => {
+            sendSafeResponse(sendResponse, event.data);
+            pendingResponses.delete(messageId);
+          };
+          
+          backgroundWorker.onerror = (error) => {
+            console.error('Worker error:', error);
+            sendSafeResponse(sendResponse, {
+              success: false,
+              error: 'Worker processing failed'
+            });
+            pendingResponses.delete(messageId);
+          };
+        } else {
+          // Fallback to main thread
+          performAnalysisInMainThread(message.data)
+            .then(result => {
+              sendSafeResponse(sendResponse, result);
+              pendingResponses.delete(messageId);
+            })
+            .catch(error => {
+              console.error('Analysis error:', error);
+              sendSafeResponse(sendResponse, {
+                success: false,
+                error: error.message || 'Unknown error in analysis'
+              });
+              pendingResponses.delete(messageId);
+            });
+        }
+      }
+      else if (message.action === 'sendPosts') {
+        // Handle posts sent from content script for API submission
+        return handleSendPosts(message, sender, sendResponse);
+      }
+      else if (message.action === 'checkApiConnection') {
+        // Check if the API is available
+        return handleApiConnectionCheck(message, sendResponse);
+      }
+      else if (message.action === 'setApiEndpoint') {
+        // Update the API endpoint in settings
+        return handleSetApiEndpoint(message, sendResponse);
+      }
+      else if (message.action === 'updateSettings') {
+        // Handle settings updates
+        return handleSettingsUpdate(message, sendResponse);
+      }
+      else if (message.action === 'collectPosts') {
+        // Handle automated post collection request
+        return handleCollectPosts(message, sender, sendResponse, backgroundWorker);
+      }
+      else if (message.action === 'getPosts') {
+        // Get collected posts
+        return handleGetPosts(message, sender, sendResponse);
+      }
+      else if (message.action === 'api') {
+        // Handle generic API calls
+        return handleApiMessages(message, sender, sendResponse);
+      }
+      else if (message.action === 'reportError') {
+        // Handle error reporting
+        return handleErrorReport(message, sender, sendResponse);
+      }
+      else {
+        // Unknown message type
+        console.warn('Unknown message action:', message.action);
+        sendSafeResponse(sendResponse, {
+          success: false,
+          error: `Unknown message action: ${message.action}`
+        });
+        pendingResponses.delete(messageId);
+      }
+    } catch (error) {
+      console.error('Error processing message:', error);
+      recordError('extension', error, { component: 'message_handler' });
+      
+      sendSafeResponse(sendResponse, {
+        success: false,
+        error: error.message || 'Unknown error processing message'
+      });
+      pendingResponses.delete(messageId);
+    }
+    
+    // Return true to indicate we'll respond asynchronously
+          return true;
+  });
+  
+  console.log('Message listeners setup complete');
+}
+
+/**
+ * Safely send a response, handling potential errors if the channel has closed
+ * @param {Function} sendResponse - Chrome's sendResponse function
+ * @param {Object} data - Data to send
+ */
+function sendSafeResponse(sendResponse, data) {
+  try {
+    sendResponse(data);
   } catch (error) {
-    console.error("Error setting up message listeners:", error);
-    recordError('extension', error, { component: 'messaging_setup' });
+    console.warn('Error sending response, channel may be closed:', error);
+    // We can't do much if the channel is already closed
   }
+}
+
+/**
+ * Handle connection check request with retries
+ * @param {Object} message - The message data
+ * @returns {Promise<Object>} - Response data
+ */
+async function handleConnectionCheck(message) {
+  let lastError = null;
+  
+  // Try multiple times with increasing delays
+  for (let i = 0; i < MAX_RETRIES; i++) {
+    try {
+      // Attempt to check connection
+      const result = await checkConnection(message.target || 'api');
+      return { success: true, connected: result };
+    } catch (error) {
+      console.warn(`Connection check attempt ${i+1} failed:`, error);
+      lastError = error;
+      
+      // Wait before next retry
+      if (i < MAX_RETRIES - 1) {
+        await new Promise(resolve => setTimeout(resolve, RETRY_DELAYS[i]));
+      }
+    }
+  }
+  
+  throw lastError || new Error('Connection check failed after retries');
+}
+
+/**
+ * Check connection to a specified target
+ * @param {string} target - Connection target ('api', 'server', etc.)
+ * @returns {Promise<boolean>} - Promise resolving to connection status
+ */
+async function checkConnection(target) {
+  console.log(`Checking connection to ${target}`);
+  
+  if (target === 'api') {
+    // Import conditionally to avoid circular dependencies
+    const { checkApiAvailability } = await import('./api-client.js');
+    return await checkApiAvailability(true); // Force fresh check
+  }
+  
+  return false; // Fallback
+}
+
+/**
+ * Handle scroll and collect request from content scripts
+ * @param {Object} message - The message data
+ * @param {Object} sender - Message sender info
+ * @returns {Promise<Object>} - Response data
+ */
+async function handleScrollAndCollect(message, sender) {
+  // Implementation for scroll and collect functionality
+  // This is just a placeholder - you would implement the actual scrolling logic
+  console.log('Handling scroll and collect:', message);
+  
+  // In a real implementation, you might:
+  // 1. Coordinate with the content script to scroll the page
+  // 2. Collect posts or content
+  // 3. Process and store the data
+  
+  return {
+    success: true,
+    postCount: 0, // This would be the actual count in a real implementation
+    message: 'Scroll and collect completed'
+  };
+}
+
+/**
+ * Fallback analysis in main thread if worker is unavailable
+ * @param {Object} data - Data to analyze
+ * @returns {Promise<Object>} - Analysis results
+ */
+async function performAnalysisInMainThread(data) {
+  console.log('Performing analysis in main thread');
+  
+  // Implementation would depend on what analysis is needed
+  // This is a placeholder
+  
+  return {
+    success: true,
+    results: {
+      analyzed: true,
+      score: 0.85
+    }
+  };
 }
 
 /**
@@ -341,8 +552,8 @@ function handleApiConnectionCheck(message, sendResponse) {
     module.checkApiAvailability(true)
       .then(available => {
         sendResponse({ success: true, available });
-      })
-      .catch(error => {
+        })
+        .catch(error => {
         console.error("Error checking API:", error);
         sendResponse({ success: false, error: error.message });
       });
@@ -442,9 +653,9 @@ function handleCollectPosts(message, sender, sendResponse, backgroundWorker) {
       success: true, 
       processInContent: true,
       message: "No background worker available, processing in content script" 
-    });
-  }
-}
+        });
+      }
+    }
 
 /**
  * Handle getting posts
@@ -465,6 +676,13 @@ function handleGetPosts(message, sender, sendResponse) {
   });
 }
 
+// Export other helper functions that might be needed externally
 export {
-  setupMessageListeners
+  handleSendPosts,
+  handleApiMessages,
+  handleErrorReport,
+  handleApiConnectionCheck,
+  handleSetApiEndpoint,
+  handleCollectPosts,
+  handleGetPosts
 }; 

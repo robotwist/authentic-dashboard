@@ -23,8 +23,10 @@ urlpatterns = [
     path('admin/', admin.site.urls),
     # Include all brandsensor URLs
     path('', include('brandsensor.urls')),
-    # Include dashboard URLs
+    # Include dashboard URLs with API prefix
     path('dashboard-api/', include('dashboard.urls')),
+    # Also include dashboard URLs at root level for health checks
+    path('', include('dashboard.urls')),
 ]
 
 if settings.DEBUG:

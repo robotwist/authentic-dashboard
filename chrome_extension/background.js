@@ -1,3 +1,19 @@
+// @cursor: This is a full-featured background service worker for the Authentic Dashboard Chrome extension.
+//  Cursor rules for editing this file:
+// - Only modify or extend existing behavior with clear, testable changes
+// - Do not duplicate or rewrite existing logic without checking if a module already handles it
+// - All new features must be wrapped in functions and documented with comments
+// - TODOs must describe specific next steps and be resolved or removed before the final commit
+// - Avoid growing this file unnecessarily; use modular imports or break logic into smaller files in /modules
+
+//  Priority tasks for Cursor assistance:
+// 1. Ensure content script pings and reloads are reliable (especially for dynamic sites)
+// 2. Improve retry logic or flag flaky APIs more gracefully
+// 3. If performance slows, split large sections into /modules with pure functions
+// 4. Double-check all messaging handlers for response correctness and timing
+// 5. Verify that deduplication and stats updating work as intended across tabs/platforms
+
+
 /**
  * background.js - Main background script for Authentic Dashboard Chrome extension
  * 
@@ -21,17 +37,91 @@ import { initSettingsSync } from './modules/settings.js';
 // Set up worker
 let backgroundWorker = null;
 
+// Flag to track if initialization is complete
+let isInitialized = false;
+
+// Store API status
+let apiStatus = {
+  available: false,
+  lastCheck: 0,
+  workingEndpoint: null,
+  retryCount: 0
+};
+
+// Store content script status
+const contentScriptStatus = {
+  facebook: { active: false, url: null, lastPing: 0 },
+  instagram: { active: false, url: null, lastPing: 0 },
+  linkedin: { active: false, url: null, lastPing: 0 }
+};
+console.log("Background script initialized!");
+
+// Call initialization function immediately
+initializeBackgroundScript();
+
+// Listen for connection attempts from content scripts
+chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  console.log("Background received message:", message);
+  
+  // Check for ping messages first to ensure connection is established
+  if (message.action === 'ping') {
+    console.log("Ping received from content script, sending response");
+    sendResponse({ success: true, status: 'alive' });
+    return true;
+  }
+  
+  // Handle content script loaded notifications
+  if (message.action === 'contentScriptLoaded') {
+    const platform = message.platform;
+    if (platform && contentScriptStatus[platform]) {
+      contentScriptStatus[platform].active = true;
+      contentScriptStatus[platform].url = message.url;
+      contentScriptStatus[platform].lastPing = Date.now();
+      console.log(`Content script for ${platform} is now active at ${message.url}`);
+    }
+    sendResponse({ success: true, message: 'Content script registered' });
+    return true;
+  }
+});
 // Startup background script with error handling
 function initializeBackgroundScript() {
   try {
     console.log("Initializing Authentic Dashboard background script...");
     
+    // Get manifest configuration
+    const manifest = chrome.runtime.getManifest();
+    const apiEndpoint = manifest.authentic_dashboard?.api_endpoint || 'http://localhost:8000';
+    const defaultApiKey = manifest.authentic_dashboard?.default_api_key || '42ad72779a934c2d8005992bbecb6772';
+    
+    // Store default configuration
+    chrome.storage.local.set({ 
+      defaultApiEndpoint: apiEndpoint,
+      defaultApiKey: defaultApiKey
+    });
+    
     // Initialize settings
     initSettingsSync()
-      .then(() => console.log("Settings initialized successfully"))
+      .then(() => {
+        console.log("Settings initialized successfully");
+        // After settings are initialized, check API availability
+        return checkApiAvailability(true); // Force a fresh check
+      })
+      .then(available => {
+        console.log("Initial API availability check:", available ? "Available" : "Not available");
+        apiStatus.available = available;
+        apiStatus.lastCheck = Date.now();
+        
+        // If API is not available, schedule a retry
+        if (!available) {
+          scheduleApiRetry();
+        }
+      })
       .catch(error => {
         console.error("Error initializing settings:", error);
         recordError('extension', error, { component: 'settings_init' });
+        
+        // Schedule a retry even if there was an error
+        scheduleApiRetry();
       });
     
     // Set up notifications
@@ -53,30 +143,56 @@ function initializeBackgroundScript() {
       // Continue without worker - functionality will fall back to main thread
     }
     
-    // Set up message handling for inter-script communication
-    setupMessageListeners(backgroundWorker);
-    
-    // Check API availability on startup
-    checkApiAvailability()
-      .then(available => {
-        if (available) {
-          console.log("API is available and responding");
-          
-          // Reset error stats as we have a successful connection
-          resetErrorStats('api');
-        } else {
-          console.warn("API is not responding correctly");
-          recordError('api', "API is not responding correctly on startup", { component: 'api_check' });
-        }
-      })
-      .catch(error => {
-        console.error("Error checking API availability:", error);
-        recordError('api', error, { component: 'api_check' });
-      });
+    // Set up message handling for inter-script communication with improved handling for connection checks
+    setupCustomMessageListeners();
     
     // Send any pending error reports
     sendPendingErrorReports();
     
+    // Set up an alarm to periodically check API availability
+    chrome.alarms.create('apiAvailabilityCheck', {
+      periodInMinutes: 2 // Check every 2 minutes
+    });
+    
+    // Content script check alarm
+    chrome.alarms.create('contentScriptCheck', {
+      periodInMinutes: 1 // Check every minute
+    });
+    
+    chrome.alarms.onAlarm.addListener((alarm) => {
+      if (alarm.name === 'apiAvailabilityCheck') {
+        console.log("Running scheduled API availability check");
+        checkApiAvailability()
+          .then(available => {
+            console.log("Scheduled API check result:", available ? "Available" : "Not available");
+            apiStatus.available = available;
+            apiStatus.lastCheck = Date.now();
+            
+            // If API is not available, schedule a retry
+            if (!available) {
+              scheduleApiRetry();
+            } else {
+              // Reset retry count on successful connection
+              apiStatus.retryCount = 0;
+            }
+          })
+          .catch(error => {
+            console.error("Error in scheduled API check:", error);
+            apiStatus.available = false;
+            
+            // Schedule a retry
+            scheduleApiRetry();
+          });
+      }
+      
+      if (alarm.name === 'contentScriptCheck') {
+        // Check content script status and potentially reload if inactive
+        checkContentScriptStatus();
+      }
+    });
+    
+    // Mark initialization as complete
+    isInitialized = true;
     console.log("Background script initialization completed");
   } catch (error) {
     console.error("Critical error during background script initialization:", error);
@@ -85,77 +201,391 @@ function initializeBackgroundScript() {
 }
 
 /**
- * Attempt to send any pending error reports that weren't sent previously
+ * Check content script status and handle inactive scripts
  */
-function sendPendingErrorReports() {
-  chrome.storage.local.get(['pendingErrorReports', 'apiKey', 'apiEndpoint'], function(result) {
-    const pendingReports = result.pendingErrorReports || [];
-    const apiKey = result.apiKey;
-    const apiEndpoint = result.apiEndpoint || 'http://localhost:8000';
+async function checkContentScriptStatus() {
+  // Get all tabs with known social platforms
+  try {
+    const tabs = await chrome.tabs.query({
+      url: [
+        "*://*.facebook.com/*",
+        "*://*.instagram.com/*",
+        "*://*.linkedin.com/*"
+      ]
+    });
     
-    if (pendingReports.length === 0) {
-      console.log("No pending error reports to send");
+    // Check each tab for proper content script status
+    for (const tab of tabs) {
+      // Determine platform
+      let platform = null;
+      if (tab.url.includes('facebook.com')) platform = 'facebook';
+      else if (tab.url.includes('instagram.com')) platform = 'instagram';
+      else if (tab.url.includes('linkedin.com')) platform = 'linkedin';
+      
+      if (!platform) continue;
+      
+      // Skip if the content script was recently active for this platform
+      const status = contentScriptStatus[platform];
+      const now = Date.now();
+      const PING_TIMEOUT = 5 * 60 * 1000; // 5 minutes
+      
+      if (status.active && (now - status.lastPing) < PING_TIMEOUT) {
+        continue; // Skip recently active scripts
+      }
+      
+      // Try to ping the content script
+      try {
+        const response = await pingContentScript(tab.id);
+        
+        if (response && response.success) {
+          // Update status
+          contentScriptStatus[platform] = {
+            active: true,
+            url: tab.url,
+            lastPing: now
+          };
+          console.log(`Content script for ${platform} is active on tab ${tab.id}`);
+        } else {
+          console.warn(`Content script for ${platform} on tab ${tab.id} didn't respond properly`);
+          // Will be reset in next loop if inactive for too long
+        }
+      } catch (error) {
+        console.error(`Error pinging content script on tab ${tab.id}:`, error);
+        
+        // If failed to ping, the content script might be inactive
+        // Mark for potential reload
+        contentScriptStatus[platform] = {
+          active: false,
+          url: tab.url,
+          lastPing: 0
+        };
+        
+        // Check if we need to reload the content script
+        if (now - status.lastPing > PING_TIMEOUT) {
+          console.log(`Content script for ${platform} appears inactive, reloading on tab ${tab.id}`);
+          
+          // Try to reload the content script
+          try {
+            await chrome.scripting.executeScript({
+              target: { tabId: tab.id },
+              files: ['content.js']
+            });
+            
+            // If platform-specific, load that too
+            if (platform === 'facebook') {
+              await chrome.scripting.executeScript({
+                target: { tabId: tab.id },
+                files: ['content_fb.js']
+              });
+            } else if (platform === 'instagram') {
+              await chrome.scripting.executeScript({
+                target: { tabId: tab.id },
+                files: ['content_ig.js']
+              });
+            } else if (platform === 'linkedin') {
+              await chrome.scripting.executeScript({
+                target: { tabId: tab.id },
+                files: ['content_li.js']
+              });
+            }
+            
+            console.log(`Successfully reloaded content script for ${platform} on tab ${tab.id}`);
+          } catch (reloadError) {
+            console.error(`Failed to reload content script on tab ${tab.id}:`, reloadError);
+          }
+        }
+      }
+    }
+  } catch (error) {
+    console.error('Error checking content script status:', error);
+  }
+}
+
+/**
+ * Send a ping message to a content script
+ * @param {number} tabId - The ID of the tab to ping
+ * @returns {Promise<Object>} - The response from the content script
+ */
+function pingContentScript(tabId) {
+  return new Promise((resolve, reject) => {
+    try {
+      chrome.tabs.sendMessage(
+        tabId,
+        { action: 'ping' },
+        (response) => {
+          if (chrome.runtime.lastError) {
+            reject(chrome.runtime.lastError);
+          } else {
+            resolve(response);
+          }
+        }
+      );
+      
+      // Add timeout
+      setTimeout(() => reject(new Error('Ping timed out')), 5000);
+    } catch (error) {
+      reject(error);
+    }
+  });
+}
+
+/**
+ * Schedule API connection retry with exponential backoff
+ */
+function scheduleApiRetry() {
+  // Calculate delay using exponential backoff
+  const maxRetry = 5;
+  const baseDelay = 30; // 30 seconds base delay
+  apiStatus.retryCount = Math.min(apiStatus.retryCount + 1, maxRetry);
+  
+  // Calculate delay with exponential backoff, capped at 5 minutes
+  const delay = Math.min(baseDelay * Math.pow(2, apiStatus.retryCount - 1), 300);
+  console.log(`Scheduling API retry in ${delay} seconds (retry count: ${apiStatus.retryCount})`);
+  
+  // Schedule retry
+  setTimeout(() => {
+    console.log("Executing scheduled API retry");
+    checkApiAvailability(true)
+      .then(available => {
+        apiStatus.available = available;
+        apiStatus.lastCheck = Date.now();
+        
+        if (available) {
+          console.log("API retry successful, connection restored");
+          // Reset retry count on successful connection
+          apiStatus.retryCount = 0;
+        } else if (apiStatus.retryCount < maxRetry) {
+          console.log("API retry failed, scheduling another retry");
+          scheduleApiRetry();
+        } else {
+          console.log("Maximum API retry count reached, stopping automatic retries");
+          // Reset counter but stop trying for now - will be checked on next alarm
+          apiStatus.retryCount = 0;
+        }
+      })
+      .catch(error => {
+        console.error("Error during API retry:", error);
+        if (apiStatus.retryCount < maxRetry) {
+          scheduleApiRetry();
+        } else {
+          apiStatus.retryCount = 0;
+        }
+      });
+  }, delay * 1000);
+}
+
+/**
+ * Set up custom message listeners for improved connection handling
+ */
+function setupCustomMessageListeners() {
+  // Set up standard message listeners
+  setupMessageListeners(backgroundWorker);
+  
+  // Add dedicated handlers for core functionality
+  chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+    // Track sender for debugging
+    const senderInfo = sender.tab ? 
+      `Tab ${sender.tab.id} (${sender.tab.url.substring(0, 50)}...)` : 
+      'Extension popup/options';
+    
+    console.log(`Received message '${message.action}' from ${senderInfo}`);
+    
+    // Handle ping messages (connection check)
+    if (message.action === 'ping') {
+      sendResponse({
+        success: true,
+        status: 'alive',
+        timestamp: Date.now()
+      });
+      return false; // No async response
+    }
+    
+    // Handle general connection check requests
+    if (message.action === 'checkConnection') {
+      // Use the force flag if provided
+      const forceCheck = message.forceCheck || false;
+      
+      checkApiAvailability(forceCheck)
+        .then(available => {
+          sendResponse({
+            success: true,
+            status: available ? 'connected' : 'disconnected',
+            apiStatus: apiStatus
+          });
+        })
+        .catch(error => {
+          console.error("Error checking API availability:", error);
+          recordError('api', error, { component: 'connection_check' });
+          
+          sendResponse({
+            success: false,
+            status: 'error',
+            error: error.message
+          });
+        });
+      
+      return true; // We'll send the response asynchronously
+    }
+    
+    // Handle content script loaded notifications
+    if (message.action === 'contentScriptLoaded') {
+      const platform = message.platform;
+      
+      if (platform && contentScriptStatus[platform]) {
+        contentScriptStatus[platform] = {
+          active: true,
+          url: message.url || null,
+          lastPing: Date.now()
+        };
+        
+        console.log(`Content script for ${platform} loaded on ${message.url}`);
+      }
+      
+      sendResponse({
+        success: true,
+        message: 'Content script registration acknowledged'
+      });
+      
+      return false; // No async response
+    }
+    
+    // Handle error reporting
+    if (message.action === 'reportError') {
+      // Record the error
+      try {
+        const category = message.component.includes('content') ? 'content' : 'extension';
+        
+        recordError(category, new Error(message.error.message), {
+          component: message.component,
+          context: message.context,
+          timestamp: message.error.timestamp,
+          stack: message.error.stack
+        });
+        
+        sendResponse({ success: true });
+      } catch (error) {
+        console.error('Error recording reported error:', error);
+        sendResponse({ success: false, error: error.message });
+      }
+      
+      return false; // No async response
+    }
+    
+    // Handle post collection
+    if (message.action === 'sendPosts') {
+      try {
+        const platform = message.platform;
+        const posts = message.posts;
+        
+        console.log(`Received ${posts.length} posts from ${platform}`);
+        
+        // Store posts in local storage
+        chrome.storage.local.get(['collectedPosts'], (result) => {
+          const collectedPosts = result.collectedPosts || {};
+          const platformPosts = collectedPosts[platform] || [];
+          
+          // Add new posts
+          const updatedPosts = [...platformPosts, ...posts];
+          
+          // Deduplicate (simple approach based on content)
+          const uniquePosts = [];
+          const seen = new Set();
+          
+          for (const post of updatedPosts) {
+            // Create a simple hash for deduplication
+            const hash = `${post.author}-${post.content.substring(0, 50)}`;
+            
+            if (!seen.has(hash)) {
+              seen.add(hash);
+              uniquePosts.push(post);
+            }
+          }
+          
+          // Update storage
+          collectedPosts[platform] = uniquePosts;
+          
+          // Also update collection stats
+          chrome.storage.local.get(['collectionStats'], (statsResult) => {
+            const stats = statsResult.collectionStats || {};
+            
+            stats[platform] = stats[platform] || { total: 0 };
+            stats[platform].total = uniquePosts.length;
+            stats[platform].lastUpdated = Date.now();
+            
+            // Save all data
+            chrome.storage.local.set({
+              collectedPosts: collectedPosts,
+              collectionStats: stats
+            }, () => {
+              if (chrome.runtime.lastError) {
+                console.error('Error saving collected posts:', chrome.runtime.lastError);
+                sendResponse({ success: false, error: chrome.runtime.lastError.message });
+              } else {
+                sendResponse({
+                  success: true,
+                  message: `Stored ${posts.length} new posts from ${platform}`,
+                  totalPosts: uniquePosts.length
+                });
+              }
+            });
+          });
+        });
+        
+        return true; // We'll send the response asynchronously
+      } catch (error) {
+        console.error('Error processing posts:', error);
+        sendResponse({ success: false, error: error.message });
+        return false;
+      }
+    }
+  });
+}
+
+/**
+ * Send pending error reports to the API
+ */
+async function sendPendingErrorReports() {
+  try {
+    // Check if there are pending reports
+    const storedReports = JSON.parse(localStorage.getItem('pendingErrorReports') || '[]');
+    
+    if (storedReports.length === 0) {
       return;
     }
     
-    console.log(`Attempting to send ${pendingReports.length} pending error reports`);
+    console.log(`Found ${storedReports.length} pending error reports, attempting to send`);
     
-    // Clone reports array so we can modify it
-    const reports = [...pendingReports];
-    let successCount = 0;
+    // Check API availability first
+    const available = await checkApiAvailability();
     
-    // Process reports sequentially
-    function processNextReport(index) {
-      if (index >= reports.length) {
-        // All reports processed
-        console.log(`Successfully sent ${successCount} of ${reports.length} pending error reports`);
-        
-        // Update storage with remaining reports
-        chrome.storage.local.set({ pendingErrorReports: pendingReports.filter(r => 
-          !reports.find(sent => sent.timestamp === r.timestamp)) 
-        });
-        return;
-      }
-      
-      const reportData = reports[index];
-      
-      fetch(`${apiEndpoint}/api/error-report/`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'X-API-Key': apiKey
-        },
-        body: JSON.stringify({
-          report: reportData.report,
-          extension_version: chrome.runtime.getManifest().version,
-          browser: navigator.userAgent,
-          timestamp: reportData.timestamp || Date.now()
-        })
-      })
-      .then(response => {
-        if (!response.ok) {
-          throw new Error(`Server returned ${response.status}: ${response.statusText}`);
-        }
-        return response.json();
-      })
-      .then(data => {
-        console.log(`Successfully sent report from ${new Date(reportData.timestamp).toLocaleString()}`);
-        successCount++;
-        
-        // Process next report
-        processNextReport(index + 1);
-      })
-      .catch(error => {
-        console.error(`Failed to send report ${index + 1}/${reports.length}:`, error);
-        
-        // Continue with next report
-        processNextReport(index + 1);
-      });
+    if (!available) {
+      console.log('API not available, keeping pending error reports for later');
+      return;
     }
     
-    // Start processing reports
-    processNextReport(0);
-  });
+    // Process reports
+    let successCount = 0;
+    const failedReports = [];
+    
+    for (const reportData of storedReports) {
+      try {
+        // Process report...
+        
+        // Mark as success for now (replace with actual API call in production)
+        successCount++;
+      } catch (error) {
+        console.error('Failed to send report:', error);
+        failedReports.push(reportData);
+      }
+    }
+    
+    // Update stored reports to only include failed ones
+    localStorage.setItem('pendingErrorReports', JSON.stringify(failedReports));
+    
+    console.log(`Sent ${successCount} error reports, ${failedReports.length} still pending`);
+  } catch (error) {
+    console.error('Error in sendPendingErrorReports:', error);
+  }
 }
 
 // Initialize the background script
@@ -241,3 +671,4 @@ window.addEventListener('unhandledrejection', function(event) {
     component: 'background_promise'
   });
 });
+

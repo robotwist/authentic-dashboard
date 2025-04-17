@@ -2,18 +2,34 @@
  * api-client.js - API client utilities for background processing
  */
 
-import { recordError } from './error_handling.js';
+// Define recordError if not imported
+function recordError(context, error) {
+  console.error(`API Error (${context}):`, error);
+}
 
 class AuthenticDashboardAPI {
   constructor() {
-    this.apiBaseUrl = 'https://api.authenticdashboard.com/v1';
+    this.apiBaseUrl = 'http://localhost:8000';
     this.apiKey = '';
     this.isAvailable = false;
     this.lastCheck = 0;
     this.dashboardUrl = 'http://localhost:8000/dashboard/';
     
+    // Define multiple possible endpoints to try
+    this.endpoints = [
+      'health-check/',  // Default endpoint
+      'api/health/',    // Alternative endpoint
+      'api/status/',    // Another alternative
+      'status/',        // Simple alternative
+      ''                // Try root as last resort
+    ];
+    
+    this.workingEndpoint = this.endpoints[0];  // Start with the first endpoint
+    
     // Load API key and URL from storage
     this.loadConfig();
+    
+    console.log('API client initialized with base URL:', this.apiBaseUrl);
   }
   
   /**
@@ -21,18 +37,33 @@ class AuthenticDashboardAPI {
    */
   async loadConfig() {
     return new Promise((resolve) => {
+      console.log('Loading API configuration from storage');
       chrome.storage.sync.get(['settings'], (result) => {
         if (result.settings) {
           if (result.settings.apiKey) {
             this.apiKey = result.settings.apiKey;
+            console.log('API key loaded from storage');
           }
           
           if (result.settings.apiUrl) {
             this.apiBaseUrl = result.settings.apiUrl;
+            if (!this.apiBaseUrl.endsWith('/')) {
+              this.apiBaseUrl += '/';
+            }
+            
             // Update dashboard URL to match the same base domain
-            this.dashboardUrl = `${this.apiBaseUrl}/dashboard/`;
+            this.dashboardUrl = `${this.apiBaseUrl}dashboard/`;
+            console.log('API URL configured:', this.apiBaseUrl);
+            console.log('Dashboard URL set to:', this.dashboardUrl);
           }
         }
+        
+        // Store the working endpoint
+        chrome.storage.local.set({ 
+          workingEndpoint: this.workingEndpoint 
+        });
+        
+        console.log('Using working endpoint:', this.workingEndpoint);
         resolve();
       });
     });
@@ -44,6 +75,7 @@ class AuthenticDashboardAPI {
    */
   setApiKey(apiKey) {
     this.apiKey = apiKey;
+    console.log('API key updated');
   }
   
   /**
@@ -53,8 +85,14 @@ class AuthenticDashboardAPI {
   setApiUrl(apiUrl) {
     if (apiUrl) {
       this.apiBaseUrl = apiUrl;
+      if (!this.apiBaseUrl.endsWith('/')) {
+        this.apiBaseUrl += '/';
+      }
+      
       // Update dashboard URL to match
-      this.dashboardUrl = `${this.apiBaseUrl}/dashboard/`;
+      this.dashboardUrl = `${this.apiBaseUrl}dashboard/`;
+      console.log('API URL updated:', this.apiBaseUrl);
+      console.log('Dashboard URL updated:', this.dashboardUrl);
     }
   }
   
@@ -63,60 +101,114 @@ class AuthenticDashboardAPI {
    * @returns {string} - Dashboard URL
    */
   getDashboardUrl() {
-    return this.dashboardUrl || 'http://localhost:8000/dashboard/';
+    // Ensure the URL is properly formed
+    if (!this.dashboardUrl || !this.dashboardUrl.startsWith('http')) {
+      console.warn('Invalid dashboard URL, using fallback');
+      return 'http://localhost:8000/dashboard/';
+    }
+    
+    console.log('Returning dashboard URL:', this.dashboardUrl);
+    return this.dashboardUrl;
   }
   
   /**
-   * Check if the API is available
+   * Try all available API endpoints until one works
+   * @returns {Promise<boolean>} - Promise resolving to true if any endpoint works
+   */
+  async tryEndpoints() {
+    // List of endpoints to try (health endpoint should be first)
+    const endpointsToTry = ['health', 'status', 'ping', 'api/health', 'api/status'];
+    
+    console.log('Trying all endpoints:', endpointsToTry);
+    
+    // Try each endpoint with a short timeout
+    for (const endpoint of endpointsToTry) {
+      try {
+        const url = `${this.apiBaseUrl}/${endpoint}`;
+        console.log(`Trying endpoint: ${url}`);
+        
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 5000); // 5 second timeout
+        
+        const response = await fetch(url, {
+          method: 'GET',
+          headers: {
+            'X-API-Key': this.apiKey,
+            'Accept': 'application/json',
+            'Cache-Control': 'no-cache' // Prevent caching
+          },
+          signal: controller.signal
+        });
+        
+        clearTimeout(timeoutId);
+        
+        if (response.ok) {
+          console.log(`Found working endpoint: ${endpoint}`);
+          this.workingEndpoint = endpoint; // Remember working endpoint
+          return true;
+        }
+        
+        console.log(`Endpoint ${endpoint} failed with status: ${response.status}`);
+      } catch (error) {
+        if (error.name === 'AbortError') {
+          console.log(`Endpoint ${endpoint} timed out after 5 seconds`);
+        } else {
+          console.log(`Error trying endpoint ${endpoint}:`, error.message);
+        }
+        // Continue trying other endpoints
+      }
+    }
+    
+    // If we reach here, all endpoints failed
+    console.warn('All API endpoints failed to respond');
+    return false;
+  }
+  
+  /**
+   * Check API connection status
    * @param {boolean} force - Force check even if recently checked
    * @returns {Promise<boolean>} - Promise resolving to API availability
    */
   async checkAvailability(force = false) {
     const now = Date.now();
-    const CACHE_TIME = 5 * 60 * 1000; // 5 minutes
+    const CACHE_TIME = 30 * 1000; // 30 seconds (reduced from 60)
+    
+    console.log('Checking API availability. Last check:', new Date(this.lastCheck).toLocaleTimeString());
     
     // Don't check too frequently unless forced
-    if (!force && now - this.lastCheck < CACHE_TIME) {
+    if (!force && now - this.lastCheck < CACHE_TIME && this.lastCheck > 0) {
+      console.log('Using cached availability:', this.isAvailable);
       return this.isAvailable;
     }
     
     try {
       this.lastCheck = now;
       
-      // Try multiple potential endpoints that might exist on the server
-      let response;
-      const endpoints = ['/ping', '/api/ping', '/health', '/api/health', '/'];
-      
-      for (const endpoint of endpoints) {
-        try {
-          response = await fetch(`${this.apiBaseUrl}${endpoint}`, {
-            method: 'GET',
-            headers: {
-              'X-API-Key': this.apiKey
-            }
-          });
-          
-          if (response.ok) {
-            break; // Found a working endpoint
-          }
-        } catch (err) {
-          // Continue trying other endpoints
-          console.log(`Endpoint ${endpoint} not available, trying next...`);
-        }
-      }
-      
-      this.isAvailable = response && response.ok;
+      // Try all endpoints one by one until one works
+      console.log('Testing all endpoints for availability');
+      const isAvailable = await this.tryEndpoints();
       
       // Store availability status
-      chrome.storage.local.set({ apiAvailable: this.isAvailable });
+      this.isAvailable = isAvailable;
+      chrome.storage.local.set({ 
+        apiAvailable: isAvailable,
+        lastCheck: now,
+        connectionError: isAvailable ? null : 'All endpoints failed'
+      });
       
-      return this.isAvailable;
+      console.log('API availability check result:', isAvailable);
+      return isAvailable;
     } catch (error) {
-      console.error('API availability check failed:', error);
+      console.error('Error in API availability check:', error);
+      
       this.isAvailable = false;
       
-      // Store availability status
-      chrome.storage.local.set({ apiAvailable: false });
+      // Store error information
+      chrome.storage.local.set({ 
+        apiAvailable: false,
+        lastCheck: now,
+        connectionError: error.message || 'Unknown error'
+      });
       
       return false;
     }
@@ -138,7 +230,9 @@ class AuthenticDashboardAPI {
     }
     
     try {
-      const url = `${this.apiBaseUrl}/posts`;
+      // Use the proper API endpoint structure that matches our health-check endpoint pattern
+      const url = `${this.apiBaseUrl}dashboard-api/posts/`;
+      console.log(`Sending ${posts.length} ${platform} posts to ${url}`);
       
       const response = await fetch(url, {
         method: 'POST',
@@ -157,13 +251,22 @@ class AuthenticDashboardAPI {
       }
       
       const data = await response.json();
+      console.log(`Successfully sent posts. Response:`, data);
       
       // Update collection stats
-      this.updateCollectionStats(platform, posts.length, data.newPosts || 0);
+      this.updateCollectionStats(platform, posts.length, data.newPosts || posts.length);
       
       return data;
     } catch (error) {
       console.error('Error sending posts to API:', error);
+      // Store the error for later reporting
+      chrome.storage.local.set({
+        lastPostError: {
+          message: error.message,
+          timestamp: Date.now(),
+          platform: platform
+        }
+      });
       throw error;
     }
   }
@@ -241,13 +344,15 @@ class AuthenticDashboardAPI {
 
 // Create and export a singleton instance
 const authDashboardAPI = new AuthenticDashboardAPI();
-export default authDashboardAPI;
+
+// Export to window for global availability
+window.authDashboardAPI = authDashboardAPI;
 
 /**
  * Check if the API is available
  * @returns {Promise<boolean>} - Promise resolving to API availability
  */
-export async function checkApiAvailability() {
+async function checkApiAvailability() {
   return new Promise((resolve) => {
     chrome.storage.sync.get(['settings'], async (result) => {
       const settings = result.settings || {};
@@ -302,7 +407,9 @@ export async function checkApiAvailability() {
         resolve(isAvailable);
       } catch (error) {
         console.error('API availability check failed:', error);
-        recordError('api', error, { component: 'api_check' });
+        if (typeof recordError === 'function') {
+          recordError('api', error, { component: 'api_check' });
+        }
         
         // Store availability status
         chrome.storage.local.set({ apiAvailable: false });
@@ -311,4 +418,7 @@ export async function checkApiAvailability() {
       }
     });
   });
-} 
+}
+
+// Export to window for global availability
+window.checkApiAvailability = checkApiAvailability; 
