@@ -1,8 +1,8 @@
 {
     "manifest_version": 3,
-    "name": "Authentic Dashboard Test",
+    "name": "Authentic Dashboard Module Test",
     "version": "1.0.1",
-    "description": "Test version without module imports",
+    "description": "Test version with simple module import",
     "action": {
       "default_popup": "popup.html",
       "default_icon": {
@@ -30,26 +30,27 @@
     "content_scripts": [
       {
         "matches": ["*://*.facebook.com/*"],
-        "js": ["extension_helper.js", "content.js", "content_fb.js"],
+        "js": ["content.js", "content_fb.js"],
         "run_at": "document_idle"
       },
       {
         "matches": ["*://*.instagram.com/*"],
-        "js": ["extension_helper.js", "content.js", "content_ig.js"],
+        "js": ["content.js", "content_ig.js"],
         "run_at": "document_idle"
       },
       {
         "matches": ["*://*.linkedin.com/*"],
-        "js": ["extension_helper.js", "content.js", "content_li.js"],
+        "js": ["content.js", "content_li.js"],
         "run_at": "document_idle"
       }
     ],
     "background": {
-      "service_worker": "test_background.js"
+      "service_worker": "module_background.js",
+      "type": "module"
     },
     "web_accessible_resources": [
       {
-        "resources": ["modules/*", "icons/*", "content.js", "extension_helper.js"],
+        "resources": ["modules/*", "icons/*", "content.js"],
         "matches": ["<all_urls>"]
       }
     ],

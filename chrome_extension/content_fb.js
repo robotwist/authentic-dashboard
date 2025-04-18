@@ -8,7 +8,7 @@
 // The functions we need are exposed through window.authenticDashboard
 
 // Get references to shared functionality from authenticDashboard global object
-const { reportError } = window.authenticDashboard || {};
+// Note: reportError is already defined in content.js and attached to window.authenticDashboard
 
 // Define utility functions or load them from global context
 function extractPostData(element) {
@@ -68,6 +68,11 @@ const MAX_POSTS_PER_BATCH = 25;
 const MAX_RETRIES = 3;
 const RETRY_DELAYS = [1000, 3000, 5000];
 let connectionErrors = 0;
+
+// Facebook selectors and extraction logic
+const FB_SELECTORS = {
+  // ... existing code ...
+};
 
 /**
  * Initialize the Facebook content script

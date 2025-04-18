@@ -1,0 +1,73 @@
+{
+    "manifest_version": 3,
+    "name": "Authentic Dashboard",
+    "version": "1.0.1",
+    "description": "Collect and analyze social media content from Facebook, Instagram, and LinkedIn",
+    "action": {
+      "default_popup": "popup.html",
+      "default_icon": {
+        "16": "icons/icon16.png",
+        "48": "icons/icon48.png",
+        "128": "icons/icon128.png"
+      }
+    },
+    "permissions": [
+      "storage",
+      "tabs",
+      "alarms",
+      "notifications",
+      "scripting"
+    ],
+    "host_permissions": [
+      "*://*.facebook.com/*",
+      "*://*.instagram.com/*",
+      "*://*.linkedin.com/*",
+      "http://localhost:8000/*",
+      "https://localhost:8000/*",
+      "http://127.0.0.1:8000/*",
+      "https://127.0.0.1:8000/*",
+      "https://api.authentic-dashboard.com/*"
+    ],
+    "content_scripts": [
+      {
+        "matches": ["*://*.facebook.com/*"],
+        "js": ["content.js", "content_fb.js"],
+        "run_at": "document_idle"
+      },
+      {
+        "matches": ["*://*.instagram.com/*"],
+        "js": ["content.js", "content_ig.js"],
+        "run_at": "document_idle"
+      },
+      {
+        "matches": ["*://*.linkedin.com/*"],
+        "js": ["content.js", "content_li.js"],
+        "run_at": "document_idle"
+      }
+    ],
+    "background": {
+      "service_worker": "background.js",
+      "type": "module"
+    },
+    "web_accessible_resources": [
+      {
+        "resources": ["modules/*", "icons/*", "content.js"],
+        "matches": ["<all_urls>"]
+      }
+    ],
+    "icons": {
+      "16": "icons/icon16.png",
+      "48": "icons/icon48.png",
+      "128": "icons/icon128.png"
+    },
+    "content_security_policy": {
+      "extension_pages": "script-src 'self'; object-src 'self'; connect-src 'self' http://localhost:8000 https://localhost:8000 http://127.0.0.1:8000 https://127.0.0.1:8000 https://api.authentic-dashboard.com;"
+    },
+    "externally_connectable": {
+      "matches": ["https://authentic-dashboard.com/*"]
+    },
+    "options_page": "options.html",
+    "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA4T7JHj0PdMvifKIAGh+hzW0MF5RaJ3qXEsL7AIzcO4KfOQR0CA1R8IrDHkwSfDNcJP04lZDLQkDvoTi3Dz5qYnwl+tBkPAQBYYLi0xL52p+F4VPrJH86Ms2eD9qJ53A9LfRkwI+MaB7zPMCQ5X0J6NKQs3JwHPLxB55L82o+q8wDDFB/YYiIV8TQqRXVRJyo1lILrGVzJWSyxMRBFbTANdudBRri6H8sk0CG00n2ZXfC2aK2WbXvD0FHJC+QkXy7XZTKrxNJKDLkSU7EHv8S7RA/mxvYUmQQd37F2f+Sro4JOtIEGfwyopnNELSXBaUxDY32X8IuiKr+01C9xF/XnQIDAQAB"
+}
+  
+  

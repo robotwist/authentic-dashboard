@@ -23,6 +23,9 @@ console.log('🔍 Authentic Dashboard content script loaded!', window.location.h
 const currentPlatform = detectCurrentPlatform();
 console.log('📱 Detected platform:', currentPlatform);
 
+// Try to fix any invalid extension URLs periodically
+setupInvalidUrlFixer();
+
 // Initialize the content script
 initialize();
 
@@ -439,6 +442,33 @@ window.authenticDashboard = {
 
 // Make sure content scripts can find this information
 console.log("Content script functions exposed to window.authenticDashboard");
+
+/**
+ * Set up periodic fixing of invalid extension URLs
+ */
+function setupInvalidUrlFixer() {
+  // Check if the helper is available
+  if (window.authenticDashboardHelper) {
+    // Run immediately
+    try {
+      window.authenticDashboardHelper.fixInvalidExtensionUrls();
+    } catch (error) {
+      console.error('Error fixing invalid URLs:', error);
+    }
+    
+    // Then set up a periodic check
+    setInterval(() => {
+      try {
+        window.authenticDashboardHelper.fixInvalidExtensionUrls();
+      } catch (error) {
+        console.error('Error in periodic URL fixing:', error);
+      }
+    }, 30000); // Check every 30 seconds
+  } else {
+    console.warn('Extension helper not available for fixing invalid URLs');
+  }
+}
+
 // End of content.js
 
 
