@@ -1,0 +1,208 @@
+{% extends 'dashboard/base.html' %}
+{% load static %}
+
+{% block title %}Threads Dashboard{% endblock %}
+
+{% block dashboard_content %}
+<div class="container mt-4">
+    <div class="row">
+        <div class="col-lg-12">
+            <div class="card mb-4">
+                <div class="card-header d-flex justify-content-between align-items-center">
+                    <h4><i class="fas fa-at me-2"></i> Threads API Dashboard</h4>
+                    {% if not has_threads_account %}
+                    <a href="{% url 'dashboard:connect_threads' %}" class="btn btn-primary">
+                        <i class="fas fa-plug me-1"></i> Connect Threads Account
+                    </a>
+                    {% endif %}
+                </div>
+                <div class="card-body">
+                    {% if not threads_enabled %}
+                        <div class="alert alert-warning">
+                            <i class="fas fa-exclamation-triangle me-2"></i> Threads API integration is not currently enabled.
+                        </div>
+                    {% else %}
+                        {% if has_threads_account %}
+                            {% if threads_api_status == 'connected' %}
+                                <!-- Profile Summary -->
+                                <div class="row mb-4">
+                                    <div class="col-md-3 text-center">
+                                        {% if profile_data.profile_pic_url %}
+                                            <img src="{{ profile_data.profile_pic_url }}" alt="Profile Picture" class="img-thumbnail rounded-circle mb-3" style="width: 150px; height: 150px; object-fit: cover;">
+                                        {% else %}
+                                            <div class="bg-light rounded-circle d-flex align-items-center justify-content-center mx-auto mb-3" style="width: 150px; height: 150px;">
+                                                <i class="fas fa-user fa-4x text-secondary"></i>
+                                            </div>
+                                        {% endif %}
+                                    </div>
+                                    <div class="col-md-9">
+                                        <h3>
+                                            {{ profile_data.name }}
+                                            {% if profile_data.is_verified %}
+                                                <i class="fas fa-check-circle text-primary" title="Verified"></i>
+                                            {% endif %}
+                                        </h3>
+                                        <h5 class="text-muted">@{{ profile_data.username }}</h5>
+                                        <p>{{ profile_data.biography }}</p>
+                                        <div class="d-flex mb-3">
+                                            <div class="me-4">
+                                                <strong>{{ profile_data.follower_count|default:"0" }}</strong> Followers
+                                            </div>
+                                            <div>
+                                                <strong>{{ profile_data.following_count|default:"0" }}</strong> Following
+                                            </div>
+                                        </div>
+                                        <a href="{% url 'dashboard:disconnect_threads' %}" class="btn btn-sm btn-outline-danger">
+                                            <i class="fas fa-unlink me-1"></i> Disconnect Account
+                                        </a>
+                                    </div>
+                                </div>
+
+                                <!-- Post New Thread -->
+                                <div class="card mb-4">
+                                    <div class="card-header">
+                                        <h5><i class="fas fa-pen me-2"></i> Create a New Thread</h5>
+                                    </div>
+                                    <div class="card-body">
+                                        <form id="thread-form" method="post" action="{% url 'dashboard:threads_post' %}">
+                                            {% csrf_token %}
+                                            <div class="mb-3">
+                                                <textarea id="thread-text" name="text" class="form-control" rows="3" placeholder="What's happening?" maxlength="500"></textarea>
+                                                <small class="text-muted" id="char-count">0/500</small>
+                                            </div>
+                                            <div class="mb-3">
+                                                <input type="url" id="thread-link" name="link" class="form-control" placeholder="Optional link" />
+                                            </div>
+                                            <div class="d-flex justify-content-end">
+                                                <button type="submit" class="btn btn-primary">
+                                                    <i class="fas fa-paper-plane me-1"></i> Post Thread
+                                                </button>
+                                            </div>
+                                        </form>
+                                    </div>
+                                </div>
+
+                                <!-- Recent Threads -->
+                                <div class="card">
+                                    <div class="card-header">
+                                        <h5><i class="fas fa-list me-2"></i> Recent Threads</h5>
+                                    </div>
+                                    <div class="card-body">
+                                        {% if recent_threads %}
+                                            <div class="list-group">
+                                                {% for thread in recent_threads %}
+                                                    <div class="list-group-item list-group-item-action">
+                                                        <div class="d-flex w-100 justify-content-between mb-1">
+                                                            <a href="{% url 'dashboard:thread_detail' thread_id=thread.id %}" class="h5 mb-1 link-dark text-decoration-none">Thread #{{ forloop.counter }}</a>
+                                                            <small>{{ thread.created_time|date:"M d, Y P" }}</small>
+                                                        </div>
+                                                        <p class="mb-1">{{ thread.text }}</p>
+                                                        <div class="d-flex justify-content-between align-items-center mt-2">
+                                                            <div>
+                                                                <small class="me-3"><i class="far fa-heart me-1"></i> {{ thread.like_count|default:"0" }}</small>
+                                                                <small class="me-3"><i class="far fa-comment me-1"></i> {{ thread.reply_count|default:"0" }}</small>
+                                                                <small class="me-3"><i class="fas fa-retweet me-1"></i> {{ thread.repost_count|default:"0" }}</small>
+                                                                <small><i class="fas fa-quote-right me-1"></i> {{ thread.quote_count|default:"0" }}</small>
+                                                            </div>
+                                                            <a href="{{ thread.permalink }}" target="_blank" class="btn btn-sm btn-outline-secondary">
+                                                                <i class="fas fa-external-link-alt me-1"></i> View on Threads
+                                                            </a>
+                                                        </div>
+                                                    </div>
+                                                {% endfor %}
+                                            </div>
+                                        {% else %}
+                                            <div class="text-center py-4">
+                                                <i class="fas fa-comment-slash fa-3x mb-3 text-muted"></i>
+                                                <p>No threads found. Create your first thread!</p>
+                                            </div>
+                                        {% endif %}
+                                    </div>
+                                </div>
+
+                            {% else %}
+                                <div class="alert alert-danger">
+                                    <i class="fas fa-exclamation-circle me-2"></i> Error connecting to Threads API: {{ threads_api_error }}
+                                </div>
+                                <div class="text-center mt-4">
+                                    <a href="{% url 'dashboard:connect_threads' %}" class="btn btn-primary">
+                                        <i class="fas fa-sync me-1"></i> Reconnect Threads Account
+                                    </a>
+                                </div>
+                            {% endif %}
+                        {% else %}
+                            <div class="text-center py-5">
+                                <i class="fas fa-at fa-5x mb-4 text-secondary"></i>
+                                <h4 class="mb-3">Connect your Threads account to get started</h4>
+                                <p class="mb-4">Connect your Threads account to create posts, view analytics, and manage your content.</p>
+                                <a href="{% url 'dashboard:connect_threads' %}" class="btn btn-lg btn-primary">
+                                    <i class="fas fa-plug me-2"></i> Connect Threads Account
+                                </a>
+                            </div>
+                        {% endif %}
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+    document.addEventListener('DOMContentLoaded', function() {
+        const threadForm = document.getElementById('thread-form');
+        const threadText = document.getElementById('thread-text');
+        const charCount = document.getElementById('char-count');
+        
+        if (threadText && charCount) {
+            threadText.addEventListener('input', function() {
+                const count = this.value.length;
+                charCount.textContent = `${count}/500`;
+                
+                if (count > 500) {
+                    charCount.classList.add('text-danger');
+                } else {
+                    charCount.classList.remove('text-danger');
+                }
+            });
+        }
+        
+        if (threadForm) {
+            threadForm.addEventListener('submit', function(e) {
+                e.preventDefault();
+                
+                const formData = new FormData(threadForm);
+                
+                fetch(threadForm.action, {
+                    method: 'POST',
+                    body: formData,
+                    headers: {
+                        'X-Requested-With': 'XMLHttpRequest'
+                    }
+                })
+                .then(response => response.json())
+                .then(data => {
+                    if (data.success) {
+                        // Show success message
+                        alert('Thread posted successfully!');
+                        
+                        // Clear the form
+                        threadForm.reset();
+                        if (charCount) charCount.textContent = '0/500';
+                        
+                        // Reload the page to show the new thread
+                        window.location.reload();
+                    } else {
+                        alert('Error: ' + data.error);
+                    }
+                })
+                .catch(error => {
+                    alert('An error occurred while posting the thread.');
+                    console.error('Error:', error);
+                });
+            });
+        }
+    });
+</script>
+{% endblock %} 

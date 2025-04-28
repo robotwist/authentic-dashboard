@@ -1,0 +1,143 @@
+{% extends 'dashboard/base.html' %}
+{% load static %}
+
+{% block title %}Thread Detail{% endblock %}
+
+{% block dashboard_content %}
+<div class="container mt-4">
+    <div class="row">
+        <div class="col-lg-12">
+            <div class="card mb-4">
+                <div class="card-header d-flex justify-content-between align-items-center">
+                    <h4><i class="fas fa-at me-2"></i> Thread Details</h4>
+                    <a href="{% url 'dashboard:threads_dashboard' %}" class="btn btn-outline-secondary">
+                        <i class="fas fa-arrow-left me-1"></i> Back to Dashboard
+                    </a>
+                </div>
+                <div class="card-body">
+                    {% if api_status == 'success' %}
+                        <!-- Thread Content -->
+                        <div class="card mb-4">
+                            <div class="card-body">
+                                <div class="d-flex mb-3">
+                                    {% if thread_data.user.profile_pic_url %}
+                                        <img src="{{ thread_data.user.profile_pic_url }}" alt="User Profile" class="rounded-circle me-3" style="width: 50px; height: 50px; object-fit: cover;">
+                                    {% else %}
+                                        <div class="bg-light rounded-circle d-flex align-items-center justify-content-center me-3" style="width: 50px; height: 50px;">
+                                            <i class="fas fa-user text-secondary"></i>
+                                        </div>
+                                    {% endif %}
+                                    <div>
+                                        <h5 class="mb-0">
+                                            {{ thread_data.user.username }}
+                                        </h5>
+                                        <small class="text-muted">{{ thread_data.created_time|date:"M d, Y P" }}</small>
+                                    </div>
+                                </div>
+                                <p class="lead mb-3">{{ thread_data.text }}</p>
+                                
+                                {% if thread_data.media %}
+                                    <div class="mb-3">
+                                        {% for media_item in thread_data.media %}
+                                            {% if media_item.media_type == 'IMAGE' %}
+                                                <img src="{{ media_item.media_url }}" alt="Thread image" class="img-fluid rounded mb-2">
+                                            {% elif media_item.media_type == 'VIDEO' %}
+                                                <video controls class="img-fluid rounded mb-2">
+                                                    <source src="{{ media_item.media_url }}" type="video/mp4">
+                                                    Your browser does not support the video tag.
+                                                </video>
+                                            {% endif %}
+                                        {% endfor %}
+                                    </div>
+                                {% endif %}
+                                
+                                <div class="d-flex justify-content-between align-items-center mt-3">
+                                    <div>
+                                        <span class="me-3"><i class="far fa-heart me-1"></i> {{ thread_data.like_count|default:"0" }} likes</span>
+                                        <span class="me-3"><i class="far fa-comment me-1"></i> {{ thread_data.reply_count|default:"0" }} replies</span>
+                                        <span class="me-3"><i class="fas fa-retweet me-1"></i> {{ thread_data.repost_count|default:"0" }} reposts</span>
+                                        <span><i class="fas fa-quote-right me-1"></i> {{ thread_data.quote_count|default:"0" }} quotes</span>
+                                    </div>
+                                    <a href="{{ thread_data.permalink }}" target="_blank" class="btn btn-sm btn-outline-primary">
+                                        <i class="fas fa-external-link-alt me-1"></i> View on Threads
+                                    </a>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <!-- Insights -->
+                        <div class="row mb-4">
+                            <div class="col-12">
+                                <h5 class="mb-3"><i class="fas fa-chart-line me-2"></i> Thread Insights</h5>
+                            </div>
+                            
+                            {% for metric in thread_insights.data %}
+                                <div class="col-md-3 col-sm-6 mb-3">
+                                    <div class="card h-100">
+                                        <div class="card-body">
+                                            <h6 class="text-muted text-uppercase small">{{ metric.name }}</h6>
+                                            <h3 class="mt-2 mb-0">{{ metric.values.0.value }}</h3>
+                                        </div>
+                                    </div>
+                                </div>
+                            {% empty %}
+                                <div class="col-12">
+                                    <div class="alert alert-info">
+                                        <i class="fas fa-info-circle me-2"></i> No insights available for this thread.
+                                    </div>
+                                </div>
+                            {% endfor %}
+                        </div>
+                        
+                        <!-- Replies -->
+                        <div class="card">
+                            <div class="card-header">
+                                <h5><i class="far fa-comment me-2"></i> Replies</h5>
+                            </div>
+                            <div class="card-body">
+                                {% if thread_replies %}
+                                    <div class="list-group">
+                                        {% for reply in thread_replies %}
+                                            <div class="list-group-item">
+                                                <div class="d-flex mb-2">
+                                                    {% if reply.user.profile_pic_url %}
+                                                        <img src="{{ reply.user.profile_pic_url }}" alt="User Profile" class="rounded-circle me-3" style="width: 40px; height: 40px; object-fit: cover;">
+                                                    {% else %}
+                                                        <div class="bg-light rounded-circle d-flex align-items-center justify-content-center me-3" style="width: 40px; height: 40px;">
+                                                            <i class="fas fa-user text-secondary"></i>
+                                                        </div>
+                                                    {% endif %}
+                                                    <div>
+                                                        <h6 class="mb-0">{{ reply.user.username }}</h6>
+                                                        <small class="text-muted">{{ reply.created_time|date:"M d, Y P" }}</small>
+                                                    </div>
+                                                </div>
+                                                <p class="mb-2">{{ reply.text }}</p>
+                                                <small><i class="far fa-heart me-1"></i> {{ reply.like_count|default:"0" }} likes</small>
+                                            </div>
+                                        {% endfor %}
+                                    </div>
+                                {% else %}
+                                    <div class="text-center py-4">
+                                        <i class="far fa-comment-dots fa-3x mb-3 text-muted"></i>
+                                        <p>No replies to this thread yet.</p>
+                                    </div>
+                                {% endif %}
+                            </div>
+                        </div>
+                    {% else %}
+                        <div class="alert alert-danger">
+                            <i class="fas fa-exclamation-circle me-2"></i> Error retrieving thread details: {{ api_error }}
+                        </div>
+                        <div class="text-center mt-4">
+                            <a href="{% url 'dashboard:threads_dashboard' %}" class="btn btn-primary">
+                                <i class="fas fa-arrow-left me-1"></i> Back to Dashboard
+                            </a>
+                        </div>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %} 

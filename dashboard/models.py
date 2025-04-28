@@ -107,15 +107,20 @@ class SocialMediaAccount(models.Model):
         ('facebook', 'Facebook'),
         ('instagram', 'Instagram'),
         ('linkedin', 'LinkedIn'),
+        ('threads', 'Threads'),
     ]
 
     user = models.ForeignKey(User, on_delete=models.CASCADE)
     platform = models.CharField(max_length=20, choices=PLATFORM_CHOICES)
     account_id = models.CharField(max_length=255)
+    username = models.CharField(max_length=255, blank=True, null=True)
+    display_name = models.CharField(max_length=255, blank=True, null=True)
+    profile_picture = models.URLField(max_length=1024, blank=True, null=True)
     access_token = models.CharField(max_length=512)
     refresh_token = models.CharField(max_length=512, blank=True, null=True)
     token_expires_at = models.DateTimeField(null=True, blank=True)
     is_active = models.BooleanField(default=True)
+    metadata = models.JSONField(default=dict, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -123,7 +128,31 @@ class SocialMediaAccount(models.Model):
         unique_together = ['user', 'platform', 'account_id']
 
     def __str__(self):
-        return f"{self.user.username}'s {self.platform} account"
+        display = self.username or self.display_name or self.account_id
+        return f"{self.user.username}'s {self.platform} account ({display})"
+    
+    def is_token_valid(self):
+        """Check if the access token is still valid"""
+        if not self.token_expires_at:
+            return False
+        
+        # Add a small buffer (5 minutes) to ensure we don't use tokens that are about to expire
+        buffer = timezone.timedelta(minutes=5)
+        return self.token_expires_at > (timezone.now() + buffer)
+    
+    def get_metadata_value(self, key, default=None):
+        """Safely retrieve metadata value"""
+        if not self.metadata:
+            return default
+        
+        if isinstance(self.metadata, str):
+            try:
+                parsed = json.loads(self.metadata)
+                return parsed.get(key, default)
+            except json.JSONDecodeError:
+                return default
+        
+        return self.metadata.get(key, default)
 
 class ContentFilter(models.Model):
     FILTER_TYPES = [

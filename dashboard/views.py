@@ -2,8 +2,8 @@ from rest_framework import viewsets, status
 from rest_framework.response import Response
 from rest_framework.decorators import action, api_view, permission_classes
 from rest_framework.permissions import AllowAny
-from django.shortcuts import render
-from .models import ErrorReport
+from django.shortcuts import render, redirect
+from .models import ErrorReport, SocialMediaAccount
 from .serializers import ErrorReportSerializer
 from django.db.models import Count
 from django.utils import timezone
@@ -17,6 +17,9 @@ from django.core.cache import cache
 from redis.exceptions import RedisError
 import psutil
 import os
+from django.contrib.auth.decorators import login_required
+from django.conf import settings
+from .utils.social_api import ThreadsAPI
 
 # Set up logger
 logger = logging.getLogger(__name__)
@@ -163,4 +166,146 @@ def error_analytics_view(request, days=30):
             'error': str(e),
             'title': 'Analytics Error',
             'days': days
-        }) 
+        })
+
+@login_required
+def threads_dashboard(request):
+    """
+    Display threads dashboard with API integration features
+    """
+    # Check if Threads is enabled
+    if not settings.THREADS_ENABLED:
+        return redirect('dashboard:profile')
+        
+    # Get user's Threads account
+    threads_account = SocialMediaAccount.objects.filter(
+        user=request.user,
+        platform='threads',
+        is_active=True
+    ).first()
+    
+    context = {
+        'threads_account': threads_account,
+        'threads_enabled': settings.THREADS_ENABLED,
+        'has_threads_account': bool(threads_account),
+    }
+    
+    # If the user has a Threads account, fetch some data
+    if threads_account and threads_account.is_token_valid():
+        try:
+            threads_api = ThreadsAPI(threads_account.access_token)
+            
+            # Fetch profile data
+            profile_data = threads_api.get_user_profile()
+            
+            # Fetch recent threads
+            recent_threads = threads_api.get_user_threads(limit=10)
+            
+            # Add to context
+            context.update({
+                'profile_data': profile_data,
+                'recent_threads': recent_threads.get('data', []),
+                'threads_api_status': 'connected'
+            })
+        except Exception as e:
+            context.update({
+                'threads_api_status': 'error',
+                'threads_api_error': str(e)
+            })
+    
+    return render(request, 'dashboard/threads_dashboard.html', context)
+
+@login_required
+def threads_post(request):
+    """
+    Post a new thread
+    """
+    if request.method != 'POST':
+        return JsonResponse({'success': False, 'error': 'Method not allowed'}, status=405)
+        
+    # Get the thread text from the form
+    text = request.POST.get('text', '').strip()
+    if not text:
+        return JsonResponse({'success': False, 'error': 'Thread text is required'}, status=400)
+        
+    # Check if there's a link
+    link = request.POST.get('link', '').strip() or None
+    
+    # Get user's Threads account
+    threads_account = SocialMediaAccount.objects.filter(
+        user=request.user,
+        platform='threads',
+        is_active=True
+    ).first()
+    
+    if not threads_account or not threads_account.is_token_valid():
+        return JsonResponse({
+            'success': False, 
+            'error': 'No valid Threads account connected'
+        }, status=400)
+    
+    try:
+        # Initialize API client
+        threads_api = ThreadsAPI(threads_account.access_token)
+        
+        # Create the thread
+        response = threads_api.create_thread(text=text, link=link)
+        
+        return JsonResponse({
+            'success': True,
+            'thread_id': response.get('id'),
+            'message': 'Thread posted successfully'
+        })
+    except Exception as e:
+        return JsonResponse({
+            'success': False,
+            'error': f'Error posting thread: {str(e)}'
+        }, status=500)
+
+@login_required
+def threads_thread_detail(request, thread_id):
+    """
+    Display details of a specific thread
+    """
+    # Get user's Threads account
+    threads_account = SocialMediaAccount.objects.filter(
+        user=request.user,
+        platform='threads',
+        is_active=True
+    ).first()
+    
+    if not threads_account or not threads_account.is_token_valid():
+        return redirect('dashboard:threads_dashboard')
+    
+    context = {
+        'threads_account': threads_account,
+        'thread_id': thread_id
+    }
+    
+    try:
+        # Initialize API client
+        threads_api = ThreadsAPI(threads_account.access_token)
+        
+        # Get thread details
+        thread_data = threads_api.get_thread(thread_id)
+        
+        # Get thread replies
+        thread_replies = threads_api.get_thread_replies(thread_id)
+        
+        # Get thread insights
+        thread_insights = threads_api.get_thread_insights(thread_id)
+        
+        # Add to context
+        context.update({
+            'thread_data': thread_data,
+            'thread_replies': thread_replies.get('data', []),
+            'thread_insights': thread_insights,
+            'api_status': 'success'
+        })
+    except Exception as e:
+        context.update({
+            'api_status': 'error',
+            'api_error': str(e)
+        })
+    
+    return render(request, 'dashboard/thread_detail.html', context) 

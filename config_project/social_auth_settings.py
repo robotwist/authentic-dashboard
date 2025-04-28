@@ -52,19 +52,46 @@ LINKEDIN_CONFIG = {
     'API_BASE_URL': 'https://api.linkedin.com/v2/',
 }
 
-# Threads Settings (if available)
+# Threads Settings
 THREADS_CONFIG = {
-    'APP_ID': settings.FACEBOOK_APP_ID,  # Uses same app as Facebook
-    'APP_SECRET': settings.FACEBOOK_APP_SECRET,
+    'APP_ID': settings.THREADS_APP_ID if hasattr(settings, 'THREADS_APP_ID') else settings.FACEBOOK_APP_ID,
+    'APP_SECRET': settings.THREADS_APP_SECRET if hasattr(settings, 'THREADS_APP_SECRET') else settings.FACEBOOK_APP_SECRET,
+    'API_VERSION': settings.FACEBOOK_API_VERSION,  # Uses same API version as Facebook
     'SCOPE': [
-        'threads_basic',
-        'threads_content_publish',
-        'threads_manage_insights',
-        'threads_read_replies'
+        'threads_basic',             # Basic account information and profile data
+        'threads_content_publish',   # Create and publish posts on Threads
+        'threads_manage_insights',   # Access analytics and insights for posts
+        'threads_read_replies',      # Read replies to posts
+        'threads_manage_replies'     # Manage replies to posts
     ],
+    'FIELDS': 'id,username,name,biography,profile_pic_url,follower_count,following_count,is_private,is_verified',
     'AUTH_ENDPOINT': f'https://www.facebook.com/{settings.FACEBOOK_API_VERSION}/dialog/oauth',
     'TOKEN_ENDPOINT': f'https://graph.facebook.com/{settings.FACEBOOK_API_VERSION}/oauth/access_token',
-    'API_BASE_URL': 'https://graph.threads.meta.com/',
+    'API_BASE_URL': settings.THREADS_API_BASE_URL if hasattr(settings, 'THREADS_API_BASE_URL') else 'https://graph.threads.meta.com/',
+    'MEDIA_CONSTRAINTS': {
+        'IMAGE': {
+            'MAX_SIZE': 30 * 1024 * 1024,  # 30MB
+            'SUPPORTED_FORMATS': ['jpg', 'jpeg', 'png', 'gif'],
+            'MAX_WIDTH': 5120,
+            'MAX_HEIGHT': 5120
+        },
+        'VIDEO': {
+            'MAX_SIZE': 100 * 1024 * 1024,  # 100MB
+            'MAX_DURATION': 5 * 60,  # 5 minutes
+            'SUPPORTED_FORMATS': ['mp4', 'mov']
+        }
+    },
+    'RATE_LIMITS': {
+        'POSTS_PER_DAY': 250,
+        'REPLIES_PER_DAY': 1000,
+        'MAX_TEXT_LENGTH': 500,  # Characters
+        'API_CALLS_PER_HOUR': 200
+    },
+    'WEBHOOK_SETTINGS': {
+        'ENABLED': getattr(settings, 'THREADS_WEBHOOKS_ENABLED', False),
+        'VERIFY_TOKEN': getattr(settings, 'THREADS_WEBHOOK_VERIFY_TOKEN', ''),
+        'CALLBACK_URL': getattr(settings, 'THREADS_WEBHOOK_CALLBACK_URL', '')
+    }
 }
 
 # OAuth Settings
@@ -81,6 +108,7 @@ TOKEN_CONFIG = {
     'FACEBOOK_TOKEN_EXPIRY': 60 * 60 * 2,  # 2 hours
     'INSTAGRAM_TOKEN_EXPIRY': 60 * 60 * 24,  # 24 hours
     'LINKEDIN_TOKEN_EXPIRY': 60 * 60 * 24 * 60,  # 60 days
+    'THREADS_TOKEN_EXPIRY': 60 * 60 * 24 * 60,  # 60 days (same as FB long-lived tokens)
     'REFRESH_THRESHOLD': 60 * 5,  # 5 minutes before expiry
 }
 
@@ -96,5 +124,11 @@ RATE_LIMITS = {
     },
     'LINKEDIN': {
         'CALLS_PER_DAY': 100000,
+    },
+    'THREADS': {
+        'CALLS_PER_HOUR': 200,
+        'CALLS_PER_DAY': 4800,
+        'POSTS_PER_DAY': 250,
+        'REPLIES_PER_DAY': 1000,
     }
 } 

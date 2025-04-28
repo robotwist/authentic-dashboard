@@ -256,6 +256,12 @@ INSTAGRAM_API_VERSION = os.getenv('INSTAGRAM_API_VERSION', 'v18.0')
 LINKEDIN_CLIENT_ID = os.getenv('LINKEDIN_CLIENT_ID')
 LINKEDIN_CLIENT_SECRET = os.getenv('LINKEDIN_CLIENT_SECRET')
 
+# Threads API Settings
+THREADS_ENABLED = os.getenv('THREADS_ENABLED', 'True').lower() in ('true', 'yes', '1')
+THREADS_APP_ID = os.getenv('THREADS_APP_ID', FACEBOOK_APP_ID)  # Default to Facebook App ID if not specified
+THREADS_APP_SECRET = os.getenv('THREADS_APP_SECRET', FACEBOOK_APP_SECRET)  # Default to Facebook App Secret if not specified
+THREADS_API_BASE_URL = os.getenv('THREADS_API_BASE_URL', 'https://graph.threads.meta.com/')
+
 # OAuth Settings
 OAUTH_REDIRECT_DOMAIN = os.getenv('OAUTH_REDIRECT_DOMAIN', 'http://localhost:8000')
 

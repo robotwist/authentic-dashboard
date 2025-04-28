@@ -1,0 +1,19 @@
+<div class="container my-4">
+    <div class="row">
+        <div class="col-md-6">
+            <p class="mb-0">&copy; {% now "Y" %} Authentic Dashboard. All rights reserved.</p>
+        </div>
+        <div class="col-md-6 text-md-end">
+            <small class="text-muted">
+                {% if threads_enabled %}
+                    <span class="badge bg-success">Threads API Connected</span>
+                {% endif %}
+                {% if is_production %}
+                    <span class="badge bg-danger">Production</span>
+                {% else %}
+                    <span class="badge bg-warning">Development</span>
+                {% endif %}
+            </small>
+        </div>
+    </div>
+</div> 

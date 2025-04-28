@@ -18,21 +18,29 @@ urlpatterns = [
     path('connect/facebook/', auth_views.connect_facebook, name='connect_facebook'),
     path('connect/instagram/', auth_views.connect_instagram, name='connect_instagram'),
     path('connect/linkedin/', auth_views.connect_linkedin, name='connect_linkedin'),
+    path('connect/threads/', auth_views.connect_threads, name='connect_threads'),
     
     # OAuth Callbacks
     path('auth/facebook/callback/', auth_views.facebook_callback, name='facebook_callback'),
     path('auth/instagram/callback/', auth_views.instagram_callback, name='instagram_callback'),
     path('auth/linkedin/callback/', auth_views.linkedin_callback, name='linkedin_callback'),
+    path('auth/threads/callback/', auth_views.threads_callback, name='threads_callback'),
     
     # Platform Disconnection
     path('auth/facebook/disconnect/', auth_views.disconnect_platform, {'platform': 'facebook'}, name='disconnect_facebook'),
     path('auth/instagram/disconnect/', auth_views.disconnect_platform, {'platform': 'instagram'}, name='disconnect_instagram'),
     path('auth/linkedin/disconnect/', auth_views.disconnect_platform, {'platform': 'linkedin'}, name='disconnect_linkedin'),
+    path('auth/threads/disconnect/', auth_views.disconnect_platform, {'platform': 'threads'}, name='disconnect_threads'),
+    
+    # Threads API Integration
+    path('threads/', views.threads_dashboard, name='threads_dashboard'),
+    path('threads/post/', views.threads_post, name='threads_post'),
+    path('threads/<str:thread_id>/', views.threads_thread_detail, name='thread_detail'),
     
     # Existing Dashboard URLs
-    path('', views.dashboard, name='index'),
-    path('analytics/', views.analytics, name='analytics'),
-    path('settings/', views.settings, name='settings'),
+    path('', error_analytics_view, name='index'),
+    path('analytics/', views.error_analytics_view, name='analytics'),
+    path('settings/', views.error_analytics_view, name='settings'),
     
     # Include the router URLs
     path('', include(router.urls)),
