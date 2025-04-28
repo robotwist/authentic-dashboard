@@ -1,6 +1,11 @@
 from django.urls import path, include
 from rest_framework import routers
 from . import auth_views, dashboard_views, post_views, ml_views, api_views
+from .auth_views import (
+    facebook_auth, facebook_callback, facebook_token_auth,
+    instagram_auth, linkedin_auth, threads_auth
+)
+from django.views.generic import TemplateView
 
 # Set up REST Framework router
 router = routers.DefaultRouter()
@@ -51,4 +56,21 @@ urlpatterns = [
     # Include REST Framework URLs
     path('api/', include(router.urls)),
     path('api-auth/', include('rest_framework.urls', namespace='rest_framework')),
+
+    # Facebook OAuth
+    path('auth/facebook/', facebook_auth, name='facebook_auth'),
+    path('auth/facebook/callback/', facebook_callback, name='facebook_callback'),
+    path('auth/facebook/token/', facebook_token_auth, name='facebook_token_auth'),
+    
+    # Instagram OAuth
+    path('auth/instagram/', instagram_auth, name='instagram_auth'),
+    
+    # LinkedIn OAuth
+    path('auth/linkedin/', linkedin_auth, name='linkedin_auth'),
+    
+    # Threads OAuth (if available)
+    path('auth/threads/', threads_auth, name='threads_auth'),
+
+    # Facebook specific views
+    path('auth/facebook/login/', TemplateView.as_view(template_name='auth/facebook_login.html'), name='facebook_login_page'),
 ]

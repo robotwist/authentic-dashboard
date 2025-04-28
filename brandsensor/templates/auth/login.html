@@ -1,0 +1,207 @@
+{% extends 'base.html' %}
+
+{% block title %}Login - Authentic Dashboard{% endblock %}
+
+{% block extra_head %}
+<style>
+    .auth-container {
+        max-width: 500px;
+        margin: 2rem auto;
+        padding: 2rem;
+        border-radius: 8px;
+        box-shadow: 0 4px 10px rgba(0, 0, 0, 0.1);
+        background-color: #fff;
+    }
+    
+    .auth-title {
+        text-align: center;
+        margin-bottom: 2rem;
+        color: #333;
+    }
+    
+    .auth-divider {
+        display: flex;
+        align-items: center;
+        margin: 1.5rem 0;
+    }
+    
+    .auth-divider-line {
+        flex: 1;
+        height: 1px;
+        background-color: #e0e0e0;
+    }
+    
+    .auth-divider-text {
+        padding: 0 1rem;
+        color: #666;
+    }
+    
+    .social-login-btn {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        width: 100%;
+        padding: 10px;
+        margin-bottom: 1rem;
+        border: none;
+        border-radius: 4px;
+        font-weight: 500;
+        cursor: pointer;
+        transition: background-color 0.3s;
+    }
+    
+    .facebook-btn {
+        background-color: #1877F2;
+        color: white;
+    }
+    
+    .facebook-btn:hover {
+        background-color: #166FE5;
+    }
+    
+    .instagram-btn {
+        background: linear-gradient(45deg, #f09433 0%, #e6683c 25%, #dc2743 50%, #cc2366 75%, #bc1888 100%);
+        color: white;
+    }
+    
+    .instagram-btn:hover {
+        opacity: 0.9;
+    }
+    
+    .linkedin-btn {
+        background-color: #0077B5;
+        color: white;
+    }
+    
+    .linkedin-btn:hover {
+        background-color: #006699;
+    }
+    
+    .social-icon {
+        margin-right: 10px;
+        font-size: 1.2rem;
+    }
+    
+    .form-group {
+        margin-bottom: 1rem;
+    }
+    
+    .form-control {
+        width: 100%;
+        padding: 10px;
+        border: 1px solid #ddd;
+        border-radius: 4px;
+    }
+    
+    .btn-primary {
+        background-color: #4285F4;
+        color: white;
+        border: none;
+        padding: 10px 15px;
+        border-radius: 4px;
+        cursor: pointer;
+    }
+    
+    .btn-primary:hover {
+        background-color: #3367D6;
+    }
+    
+    .auth-footer {
+        text-align: center;
+        margin-top: 1rem;
+        font-size: 0.9rem;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="auth-container">
+    <h2 class="auth-title">Login to Authentic Dashboard</h2>
+    
+    <div class="social-login-section">
+        <button id="facebook-login-btn" class="social-login-btn facebook-btn">
+            <i class="social-icon fab fa-facebook-f"></i> Continue with Facebook
+        </button>
+        
+        <button id="instagram-login-btn" class="social-login-btn instagram-btn">
+            <i class="social-icon fab fa-instagram"></i> Continue with Instagram
+        </button>
+        
+        <button id="linkedin-login-btn" class="social-login-btn linkedin-btn">
+            <i class="social-icon fab fa-linkedin-in"></i> Continue with LinkedIn
+        </button>
+        
+        {% if threads_enabled %}
+        <button id="threads-login-btn" class="social-login-btn threads-btn">
+            <i class="social-icon fab fa-at"></i> Continue with Threads
+        </button>
+        {% endif %}
+    </div>
+    
+    <div class="auth-divider">
+        <div class="auth-divider-line"></div>
+        <div class="auth-divider-text">or</div>
+        <div class="auth-divider-line"></div>
+    </div>
+    
+    <form method="post" action="{% url 'login' %}">
+        {% csrf_token %}
+        
+        <div class="form-group">
+            <label for="username">Username</label>
+            <input type="text" id="username" name="username" class="form-control" required>
+        </div>
+        
+        <div class="form-group">
+            <label for="password">Password</label>
+            <input type="password" id="password" name="password" class="form-control" required>
+        </div>
+        
+        <div class="form-group">
+            <button type="submit" class="btn-primary">Login</button>
+        </div>
+    </form>
+    
+    <div class="auth-footer">
+        <p>Don't have an account? <a href="{% url 'register' %}">Sign up</a></p>
+        <p><a href="{% url 'password_reset' %}">Forgot your password?</a></p>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script src="https://kit.fontawesome.com/a076d05399.js" crossorigin="anonymous"></script>
+<script src="{% static 'js/facebook-integration.js' %}"></script>
+<script>
+    document.addEventListener('DOMContentLoaded', function() {
+        // Instagram login button handler
+        const igLoginBtn = document.getElementById('instagram-login-btn');
+        if (igLoginBtn) {
+            igLoginBtn.addEventListener('click', function(e) {
+                e.preventDefault();
+                window.location.href = "{% url 'instagram_auth' %}";
+            });
+        }
+        
+        // LinkedIn login button handler
+        const liLoginBtn = document.getElementById('linkedin-login-btn');
+        if (liLoginBtn) {
+            liLoginBtn.addEventListener('click', function(e) {
+                e.preventDefault();
+                window.location.href = "{% url 'linkedin_auth' %}";
+            });
+        }
+        
+        {% if threads_enabled %}
+        // Threads login button handler
+        const threadsLoginBtn = document.getElementById('threads-login-btn');
+        if (threadsLoginBtn) {
+            threadsLoginBtn.addEventListener('click', function(e) {
+                e.preventDefault();
+                window.location.href = "{% url 'threads_auth' %}";
+            });
+        }
+        {% endif %}
+    });
+</script>
+{% endblock %} 

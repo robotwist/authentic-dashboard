@@ -30,7 +30,8 @@ SECRET_KEY = os.getenv('DJANGO_SECRET_KEY', 'django-insecure-+lbcqx)%o0hj)5n5!9@
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = os.getenv('DJANGO_DEBUG', 'False').lower() == 'true'
 
-ALLOWED_HOSTS = os.getenv('ALLOWED_HOSTS', 'localhost,127.0.0.1,0.0.0.0,[::1]').split(',')
+# ALLOWED_HOSTS should include production domain
+ALLOWED_HOSTS = os.getenv('ALLOWED_HOSTS', 'localhost,127.0.0.1,authenticdashboard.com').split(',')
 
 
 # Application definition
@@ -62,7 +63,7 @@ MIDDLEWARE = [
 ]
 
 # CORS settings
-CORS_ALLOWED_ORIGINS = os.getenv('CORS_ALLOWED_ORIGINS', 'http://localhost:8000,http://127.0.0.1:8000').split(',')
+CORS_ALLOWED_ORIGINS = os.getenv('CORS_ALLOWED_ORIGINS', 'http://localhost:8000,http://127.0.0.1:8000,https://authenticdashboard.com').split(',')
 
 # Allow Chrome extension ID(s)
 CHROME_EXTENSION_IDS = os.getenv('CHROME_EXTENSION_IDS', '').split(',')
@@ -108,6 +109,7 @@ TEMPLATES = [
                 'django.template.context_processors.request',
                 'django.contrib.auth.context_processors.auth',
                 'django.contrib.messages.context_processors.messages',
+                'brandsensor.context_processors.social_media_settings',  # Added our social media context processor
             ],
             'builtins': [
                 'django.templatetags.static',
@@ -241,3 +243,21 @@ REST_FRAMEWORK = {
     'DEFAULT_PAGINATION_CLASS': 'rest_framework.pagination.PageNumberPagination',
     'PAGE_SIZE': 20,
 }
+
+# Social Media Settings
+FACEBOOK_APP_ID = os.getenv('FACEBOOK_APP_ID')
+FACEBOOK_APP_SECRET = os.getenv('FACEBOOK_APP_SECRET')
+FACEBOOK_API_VERSION = os.getenv('FACEBOOK_API_VERSION', 'v18.0')
+
+INSTAGRAM_APP_ID = os.getenv('INSTAGRAM_APP_ID')
+INSTAGRAM_APP_SECRET = os.getenv('INSTAGRAM_APP_SECRET')
+INSTAGRAM_API_VERSION = os.getenv('INSTAGRAM_API_VERSION', 'v18.0')
+
+LINKEDIN_CLIENT_ID = os.getenv('LINKEDIN_CLIENT_ID')
+LINKEDIN_CLIENT_SECRET = os.getenv('LINKEDIN_CLIENT_SECRET')
+
+# OAuth Settings
+OAUTH_REDIRECT_DOMAIN = os.getenv('OAUTH_REDIRECT_DOMAIN', 'http://localhost:8000')
+
+# Production flag - can be used to detect if we're in production
+IS_PRODUCTION = os.getenv('ENVIRONMENT') == 'production' or not DEBUG
