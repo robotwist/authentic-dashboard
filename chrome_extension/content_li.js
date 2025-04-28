@@ -297,41 +297,10 @@ let lastCollectionTime = 0;
 const COLLECTION_COOLDOWN = 5000; // 5 seconds between collections
 const MAX_POSTS_PER_BATCH = 25;
 
-/**
- * Send collected posts to the API via the background script
- * @param {Array} posts - Array of post objects 
- * @param {string} platform - Platform name ('linkedin', 'facebook', 'instagram')
- * @returns {Promise} - Promise resolving to the API response
- */
-function sendPostsToAPI(posts, platform) {
-  return new Promise((resolve, reject) => {
-    if (!posts || posts.length === 0) {
-      console.log('No posts to send');
-      resolve({ success: true, message: 'No posts to send' });
-      return;
-    }
-
-    console.log(`Sending ${posts.length} ${platform} posts to background script`);
-    
-    // Send posts to background script
-    chrome.runtime.sendMessage({
-      action: 'sendPosts',
-      platform: platform,
-      posts: posts
-    }, (response) => {
-      if (chrome.runtime.lastError) {
-        console.error('Error sending posts to background script:', chrome.runtime.lastError);
-        reject(chrome.runtime.lastError);
-      } else if (response && response.success) {
-        console.log('Successfully sent posts to background script:', response);
-        resolve(response);
-      } else {
-        console.error('Failed to send posts to background script:', response);
-        reject(new Error(response?.message || 'Unknown error'));
-      }
-    });
-  });
-}
+// LinkedIn content script
+import { sendPostsToAPI } from './modules/api-client.js';
+import { findElements, extractPostData, simulateInfiniteScroll } from './modules/utils.js';
+import { showNotification } from './modules/notifications.js';
 
 /**
  * Initialize the LinkedIn content script
@@ -504,72 +473,45 @@ function checkForNewPosts() {
 /**
  * Collect LinkedIn posts from the current page
  */
-function collectLinkedInPosts() {
-  // Prevent concurrent collection
-  // Access isCollecting from content.js via window
-  if (window.isCollecting === true) return;
-  window.isCollecting = true;
-  lastCollectionTime = Date.now();
+async function collectLinkedInPosts() {
+  const pageType = getLinkedInPageType();
+  const posts = findElements('linkedin', 'posts');
+  const processedData = [];
   
-  console.log('[Authentic] Collecting LinkedIn posts...');
-  
-  try {
-    // Get page type to help with context-specific selectors
-    const pageType = getLinkedInPageType();
+  for (const post of posts) {
+    const postId = post.dataset.authenticId;
     
-    // Find all post elements
-    const posts = findElements('linkedin', 'posts', pageType);
-    console.log(`[Authentic] Found ${posts.length} post elements on ${pageType} page`);
-    
-    // Apply intersection observer to these posts
-    applyIntersectionObserverToCurrentPosts();
-    
-    // Extract data from posts
-    const newPosts = [];
-    
-    posts.forEach(post => {
-      // Skip already processed posts
-      if (post.dataset.authenticProcessed === 'true' || processedPosts.has(post.dataset.authenticId)) {
-        return;
-      }
-      
-      // Extract post data with page type context
-      const postData = extractPostData('linkedin', post, pageType);
-      
-      // Skip if no valid data could be extracted
-      if (!postData) {
-        return;
-      }
-      
-      // Mark post as processed
-      post.dataset.authenticProcessed = 'true';
-      processedPosts.add(post.dataset.authenticId);
-      
-      // Add to new posts list
-      newPosts.push(postData);
-      
-      // Limit batch size
-      if (newPosts.length >= MAX_POSTS_PER_BATCH) {
-        return;
-      }
-    });
-    
-    console.log(`[Authentic] Extracted ${newPosts.length} new LinkedIn posts`);
-    
-    // Send posts to API if we have any
-    if (newPosts.length > 0) {
-      sendPostsToAPI(newPosts, 'linkedin')
-        .then(response => {
-          console.log(`[Authentic] Successfully uploaded ${newPosts.length} LinkedIn posts`);
-        })
-        .catch(error => {
-          console.error('[Authentic] Error uploading LinkedIn posts:', error);
-        });
+    // Skip if we've already processed this post
+    if (postId && processedPosts.has(postId)) {
+      continue;
     }
-  } catch (error) {
-    console.error('[Authentic] Error collecting LinkedIn posts:', error);
-  } finally {
-    window.isCollecting = false;
+    
+    // Extract post data
+    const postData = extractPostData('linkedin', post, pageType);
+    if (postData) {
+      processedData.push(postData);
+      
+      // Mark as processed
+      if (postId) {
+        processedPosts.add(postId);
+      }
+    }
+  }
+  
+  if (processedData.length > 0) {
+    try {
+      await sendPostsToAPI(processedData, 'linkedin', {
+        showNotifications: true
+      });
+      lastCollectionTime = Date.now();
+    } catch (error) {
+      console.error('[Authentic] Error sending LinkedIn posts:', error);
+      showNotification(
+        'Error',
+        `Failed to send LinkedIn posts: ${error.message}`,
+        'error'
+      );
+    }
   }
 }
 

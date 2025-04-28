@@ -3,6 +3,9 @@ import os
 import uuid
 import django
 from datetime import datetime
+import secrets
+from dotenv import load_dotenv
+from django.core.management import execute_from_command_line
 
 # Set up Django environment
 os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'config_project.settings')
@@ -45,4 +48,27 @@ try:
     print("This key will not be displayed again.")
     
 except Exception as e:
-    print(f"Error creating API key: {str(e)}") 
+    print(f"Error creating API key: {str(e)}")
+
+def generate_api_key():
+    # Generate a secure API key
+    api_key = secrets.token_urlsafe(32)
+    
+    # Update .env file
+    env_path = os.path.join(os.path.dirname(__file__), '.env')
+    with open(env_path, 'r') as f:
+        lines = f.readlines()
+    
+    with open(env_path, 'w') as f:
+        for line in lines:
+            if line.startswith('DEFAULT_API_KEY='):
+                f.write(f'DEFAULT_API_KEY={api_key}\n')
+            else:
+                f.write(line)
+    
+    print(f"\nGenerated API Key: {api_key}")
+    print("\nThe .env file has been updated with the new API key.")
+    print("Please use this key in your Chrome extension settings.")
+
+if __name__ == '__main__':
+    generate_api_key() 

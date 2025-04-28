@@ -1,8 +1,8 @@
 {
     "manifest_version": 3,
-    "name": "Authentic Dashboard Test",
-    "version": "1.0.1",
-    "description": "Test version without module imports",
+    "name": "Authentic Dashboard",
+    "version": "1.0.0",
+    "description": "Social media post collector for Authentic Dashboard",
     "action": {
       "default_popup": "popup.html",
       "default_icon": {
@@ -14,52 +14,53 @@
     "permissions": [
       "storage",
       "tabs",
-      "alarms",
-      "notifications",
-      "scripting"
+      "alarms"
     ],
     "host_permissions": [
       "*://*.facebook.com/*",
       "*://*.instagram.com/*",
       "*://*.linkedin.com/*",
-      "http://localhost:8000/*",
-      "https://localhost:8000/*",
-      "http://127.0.0.1:8000/*",
-      "https://127.0.0.1:8000/*"
+      "http://127.0.0.1:8000/*"
     ],
     "content_scripts": [
       {
         "matches": ["*://*.facebook.com/*"],
-        "js": ["extension_helper.js", "content.js", "content_fb.js"],
-        "run_at": "document_idle"
+        "js": ["content_fb.js"],
+        "type": "module"
       },
       {
         "matches": ["*://*.instagram.com/*"],
-        "js": ["extension_helper.js", "content.js", "content_ig.js"],
-        "run_at": "document_idle"
+        "js": ["content_ig.js"],
+        "type": "module"
       },
       {
         "matches": ["*://*.linkedin.com/*"],
-        "js": ["extension_helper.js", "content.js", "content_li.js"],
-        "run_at": "document_idle"
+        "js": ["content_li.js"],
+        "type": "module"
       }
     ],
     "background": {
-      "service_worker": "test_background.js"
+      "service_worker": "background.js",
+      "type": "module"
     },
     "web_accessible_resources": [
       {
-        "resources": ["modules/*", "icons/*", "content.js", "extension_helper.js"],
-        "matches": ["<all_urls>"]
+        "resources": [
+          "modules/*.js",
+          "shared/*.js",
+          "lib/*.js"
+        ],
+        "matches": [
+          "*://*.facebook.com/*",
+          "*://*.instagram.com/*",
+          "*://*.linkedin.com/*"
+        ]
       }
     ],
     "icons": {
       "16": "icons/icon16.png",
       "48": "icons/icon48.png",
       "128": "icons/icon128.png"
-    },
-    "content_security_policy": {
-      "extension_pages": "script-src 'self'; object-src 'self'; connect-src 'self' http://localhost:8000 https://localhost:8000 http://127.0.0.1:8000 https://127.0.0.1:8000;"
     },
     "options_page": "options.html"
 } 

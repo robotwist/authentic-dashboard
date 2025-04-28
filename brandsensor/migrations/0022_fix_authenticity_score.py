@@ -10,15 +10,18 @@ class Migration(migrations.Migration):
     operations = [
         migrations.RunSQL(
             sql="""
-            SELECT CASE 
-                WHEN COUNT(*) = 0 THEN
-                    'ALTER TABLE brandsensor_socialpost ADD COLUMN authenticity_score REAL NULL;'
-                ELSE
-                    'SELECT 1;'
-            END
-            FROM pragma_table_info('brandsensor_socialpost') 
-            WHERE name = 'authenticity_score';
+            DO $$
+            BEGIN
+                IF NOT EXISTS (
+                    SELECT 1 
+                    FROM information_schema.columns 
+                    WHERE table_name = 'brandsensor_socialpost' 
+                    AND column_name = 'authenticity_score'
+                ) THEN
+                    ALTER TABLE brandsensor_socialpost ADD COLUMN authenticity_score REAL NULL;
+                END IF;
+            END $$;
             """,
             reverse_sql="SELECT 1;",  # No-op for reversed migration
         ),
-    ] 
+    ]

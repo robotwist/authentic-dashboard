@@ -10,7 +10,12 @@ For the full list of settings and their values, see
 https://docs.djangoproject.com/en/5.0/ref/settings/
 """
 
+import os
 from pathlib import Path
+from dotenv import load_dotenv
+
+# Load environment variables from .env file
+load_dotenv()
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -20,12 +25,12 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 # See https://docs.djangoproject.com/en/5.0/howto/deployment/checklist/
 
 # SECURITY WARNING: keep the secret key used in production secret!
-SECRET_KEY = 'django-insecure-+lbcqx)%o0hj)5n5!9@o=n-z38-#(qur=u!q7e*5ggt^p^rjn_'
+SECRET_KEY = os.getenv('DJANGO_SECRET_KEY', 'django-insecure-+lbcqx)%o0hj)5n5!9@o=n-z38-#(qur=u!q7e*5ggt^p^rjn_')
 
 # SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = True
+DEBUG = os.getenv('DJANGO_DEBUG', 'False').lower() == 'true'
 
-ALLOWED_HOSTS = ['localhost', '127.0.0.1', '0.0.0.0', '[::1]']
+ALLOWED_HOSTS = os.getenv('ALLOWED_HOSTS', 'localhost,127.0.0.1,0.0.0.0,[::1]').split(',')
 
 
 # Application definition
@@ -57,14 +62,13 @@ MIDDLEWARE = [
 ]
 
 # CORS settings
-# Changed from CORS_ALLOW_ALL_ORIGINS to specific allowed origins for security
-CORS_ALLOWED_ORIGINS = [
-    'chrome-extension://*',  # Allow all Chrome extensions
-    'http://localhost:8000',
-    'http://127.0.0.1:8000',
-    'http://0.0.0.0:8000',
-    # Add production domains if needed
-]
+CORS_ALLOWED_ORIGINS = os.getenv('CORS_ALLOWED_ORIGINS', 'http://localhost:8000,http://127.0.0.1:8000').split(',')
+
+# Allow Chrome extension ID(s)
+CHROME_EXTENSION_IDS = os.getenv('CHROME_EXTENSION_IDS', '').split(',')
+if CHROME_EXTENSION_IDS:
+    CORS_ALLOWED_ORIGINS.extend([f'chrome-extension://{id}' for id in CHROME_EXTENSION_IDS if id])
+
 CORS_ALLOW_CREDENTIALS = True
 CORS_ALLOW_METHODS = [
     'GET',
@@ -74,6 +78,7 @@ CORS_ALLOW_METHODS = [
     'DELETE',
     'OPTIONS',
 ]
+
 CORS_ALLOW_HEADERS = [
     'accept',
     'accept-encoding',
@@ -84,11 +89,11 @@ CORS_ALLOW_HEADERS = [
     'user-agent',
     'x-csrftoken',
     'x-requested-with',
-    'x-api-key',  # Allow the API key header
+    os.getenv('API_KEY_HEADER', 'X-API-Key'),  # Configurable API key header
 ]
 
-# Add CORS_URLS_REGEX to limit CORS to specific URL patterns if needed
-CORS_URLS_REGEX = r'^/api/.*$'  # Only apply CORS to /api/ endpoints
+# Only apply CORS to API endpoints
+CORS_URLS_REGEX = r'^/api/.*$|^/dashboard-api/.*$'
 
 ROOT_URLCONF = 'config_project.urls'
 
@@ -118,12 +123,16 @@ WSGI_APPLICATION = 'config_project.wsgi.application'
 # Database
 # https://docs.djangoproject.com/en/5.0/ref/settings/#databases
 
-DATABASES = {
-    'default': {
-        'ENGINE': 'django.db.backends.sqlite3',
-        'NAME': BASE_DIR / 'db.sqlite3',
+# Import database settings
+try:
+    from .database_settings import DATABASES
+except ImportError:
+    DATABASES = {
+        'default': {
+            'ENGINE': 'django.db.backends.sqlite3',
+            'NAME': BASE_DIR / 'db.sqlite3',
+        }
     }
-}
 
 
 # Password validation
@@ -171,37 +180,47 @@ MEDIA_ROOT = BASE_DIR / 'media'
 
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
-# Redis Cache configuration
-try:
-    import django_redis
-    CACHES = {
-        "default": {
-            "BACKEND": "django_redis.cache.RedisCache",
-            "LOCATION": "redis://127.0.0.1:6379/1",
-            "OPTIONS": {
-                "CLIENT_CLASS": "django_redis.client.DefaultClient",
-                "SOCKET_CONNECT_TIMEOUT": 5,  # seconds
-                "SOCKET_TIMEOUT": 5,  # seconds
+# Redis and Caching Configuration
+REDIS_URL = os.getenv('REDIS_URL', 'redis://127.0.0.1:6379/1')
+
+CACHES = {
+    "default": {
+        "BACKEND": "django_redis.cache.RedisCache",
+        "LOCATION": REDIS_URL,
+        "OPTIONS": {
+            "CLIENT_CLASS": "django_redis.client.DefaultClient",
+            "SOCKET_CONNECT_TIMEOUT": int(os.getenv('REDIS_CONNECT_TIMEOUT', '5')),
+            "SOCKET_TIMEOUT": int(os.getenv('REDIS_SOCKET_TIMEOUT', '5')),
+            "RETRY_ON_TIMEOUT": True,
+            "MAX_CONNECTIONS": int(os.getenv('REDIS_MAX_CONNECTIONS', '100')),
+            "CONNECTION_POOL_CLASS": "redis.connection.BlockingConnectionPool",
+            "CONNECTION_POOL_CLASS_KWARGS": {
+                "max_connections": 50,
+                "timeout": 20,
             }
-        }
+        },
+        "KEY_PREFIX": "authentic_dashboard"
     }
+}
 
-    # Use Redis for session storage
-    SESSION_ENGINE = "django.contrib.sessions.backends.cache"
-    SESSION_CACHE_ALIAS = "default"
-except ImportError:
-    # Fallback to local memory cache if django_redis is not installed
-    CACHES = {
-        'default': {
-            'BACKEND': 'django.core.cache.backends.locmem.LocMemCache',
-            'LOCATION': 'unique-snowflake',
-        }
-    }
+# Session configuration - use cache for sessions
+SESSION_ENGINE = "django.contrib.sessions.backends.cache"
+SESSION_CACHE_ALIAS = "default"
 
-# Cache timeout settings (in seconds)
-CACHE_TTL = 60 * 15  # 15 minutes default
-CACHE_TTL_SHORT = 60 * 5  # 5 minutes for frequently changing data
-CACHE_TTL_LONG = 60 * 60 * 24  # 24 hours for static data
+# Cache time to live is 15 minutes
+CACHE_TTL = 60 * 15
+
+# Celery Configuration
+CELERY_BROKER_URL = REDIS_URL
+CELERY_RESULT_BACKEND = REDIS_URL
+CELERY_ACCEPT_CONTENT = ['json']
+CELERY_TASK_SERIALIZER = 'json'
+CELERY_RESULT_SERIALIZER = 'json'
+CELERY_TIMEZONE = TIME_ZONE
+CELERY_TASK_ALWAYS_EAGER = DEBUG  # Run tasks synchronously in development
+CELERY_TASK_TRACK_STARTED = True
+CELERY_TASK_TIME_LIMIT = 30 * 60  # 30 minutes
+CELERY_TASK_SOFT_TIME_LIMIT = 25 * 60  # 25 minutes
 
 # Authentication settings
 LOGIN_URL = '/login/'
@@ -222,14 +241,3 @@ REST_FRAMEWORK = {
     'DEFAULT_PAGINATION_CLASS': 'rest_framework.pagination.PageNumberPagination',
     'PAGE_SIZE': 20,
 }
-
-# Celery Configuration
-CELERY_BROKER_URL = 'redis://localhost:6379/0'  # Use Redis as the broker
-CELERY_RESULT_BACKEND = 'redis://localhost:6379/0'
-CELERY_ACCEPT_CONTENT = ['json']
-CELERY_TASK_SERIALIZER = 'json'
-CELERY_RESULT_SERIALIZER = 'json'
-CELERY_TIMEZONE = TIME_ZONE
-CELERY_TASK_TRACK_STARTED = True
-CELERY_TASK_TIME_LIMIT = 30 * 60  # 30 minutes
-CELERY_TASK_SOFT_TIME_LIMIT = 25 * 60  # 25 minutes

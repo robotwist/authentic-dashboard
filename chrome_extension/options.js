@@ -151,6 +151,10 @@ function saveApiKey(apiKey) {
  * Save all settings
  */
 function saveAllSettings() {
+  const saveButton = document.getElementById('save-all');
+  saveButton.disabled = true;
+  saveButton.textContent = 'Saving...';
+
   const settings = {
     apiKey: apiKeyInput.value.trim(),
     apiUrl: apiUrlInput.value.trim(),
@@ -171,16 +175,24 @@ function saveAllSettings() {
   // Validate settings
   if (settings.autoCollect && (settings.autoCollectInterval < 5 || settings.autoCollectInterval > 60)) {
     showStatus('Collection interval must be between 5 and 60 minutes', 'error');
+    resetSaveButton();
     return;
   }
   
   if (settings.maxPosts < 10 || settings.maxPosts > 100) {
     showStatus('Max posts must be between 10 and 100', 'error');
+    resetSaveButton();
     return;
   }
   
   // Save settings
   chrome.storage.sync.set({ settings }, () => {
+    if (chrome.runtime.lastError) {
+      showStatus('Error saving settings: ' + chrome.runtime.lastError.message, 'error');
+      resetSaveButton();
+      return;
+    }
+
     showStatus('All settings saved successfully');
     
     // Update API client if API settings changed
@@ -193,7 +205,14 @@ function saveAllSettings() {
     
     // Notify background script of settings change
     chrome.runtime.sendMessage({ action: 'settingsUpdated', settings });
+    resetSaveButton();
   });
+}
+
+function resetSaveButton() {
+  const saveButton = document.getElementById('save-all');
+  saveButton.disabled = false;
+  saveButton.textContent = 'Save All Settings';
 }
 
 /**

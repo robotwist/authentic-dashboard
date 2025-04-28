@@ -29,10 +29,13 @@
 import { setupNotifications } from './modules/notifications.js';
 import { setupScheduledTasks } from './modules/scheduler.js';
 import { setupMessageListeners } from './modules/messaging.js';
-import { checkApiAvailability } from './modules/api-client.js';
+import { checkApiAvailability, safeApiFetch, getApiSettings } from './modules/api-client.js';
 import { setupKeepAlive } from './modules/keep-alive.js';
 import { recordError, resetErrorStats } from './modules/error_handling.js';
 import { initSettingsSync } from './modules/settings.js';
+import { showNotification } from './modules/notifications.js';
+import { updateStats } from './modules/stats.js';
+import { scheduleAutoScan } from './modules/scanner.js';
 
 // Set up worker
 let backgroundWorker = null;
@@ -83,6 +86,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true;
   }
 });
+
 // Startup background script with error handling
 function initializeBackgroundScript() {
   try {
@@ -598,41 +602,148 @@ chrome.runtime.onStartup.addListener(function() {
 });
 
 // Handle installation and updates
-chrome.runtime.onInstalled.addListener(function(details) {
+chrome.runtime.onInstalled.addListener(async (details) => {
   if (details.reason === 'install') {
-    console.log("Extension installed. Setting up initial configuration...");
-    
     // Set default settings
     const defaultSettings = {
-      autoScan: true,
-      scanInterval: 60,
+      autoScan: false,
+      autoScanInterval: 30,
       showNotifications: true,
-      debugMode: false,
-      displayMode: 'compact'
+      advancedML: false,
+      collectSponsored: true
     };
     
-    chrome.storage.local.set({ 
-      settings: defaultSettings,
-      stats: {},
-      lastScanTime: 0
+    await chrome.storage.local.set({ settings: defaultSettings });
+    console.log('[Authentic] Extension installed with default settings');
+  }
+  
+  // Load settings and initialize auto-scan if enabled
+  const { settings } = await chrome.storage.local.get(['settings']);
+  if (settings && settings.autoScan) {
+    scheduleAutoScan(settings);
+  }
+});
+
+// Handle messages from content scripts and popup
+chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
+  // Handle different message types
+  switch (request.action) {
+    case 'sendPosts':
+      handleSendPosts(request, sendResponse);
+      return true; // Keep channel open for async response
+      
+    case 'checkConnection':
+      handleConnectionCheck(sendResponse);
+      return true;
+      
+    case 'ping':
+      sendResponse({ success: true });
+      return false;
+      
+    default:
+      console.warn('[Authentic] Unknown message action:', request.action);
+      sendResponse({ success: false, error: 'Unknown action' });
+      return false;
+  }
+});
+
+/**
+ * Handle sending posts to the API
+ * @param {Object} request - Message request
+ * @param {Function} sendResponse - Callback function
+ */
+async function handleSendPosts(request, sendResponse) {
+  try {
+    const { apiKey, apiEndpoint } = await getApiSettings();
+    
+    if (!apiKey) {
+      throw new Error('API key not configured');
+    }
+    
+    const response = await safeApiFetch(`${apiEndpoint}/api/collect-posts/`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-API-Key': apiKey
+      },
+      body: JSON.stringify({
+        platform: request.platform,
+        posts: request.posts,
+        batchId: request.batchId
+      })
     });
     
-    // Open onboarding page
-    chrome.tabs.create({
-      url: chrome.runtime.getURL('onboarding.html')
+    if (response.success) {
+      // Update stats
+      updateStats(request.platform, request.posts.length);
+      
+      sendResponse({
+        success: true,
+        message: `Successfully sent ${request.posts.length} posts`
+      });
+    } else {
+      throw new Error(response.message || 'API request failed');
+    }
+  } catch (error) {
+    console.error('[Authentic] Error sending posts:', error);
+    sendResponse({
+      success: false,
+      error: error.message || 'Failed to send posts'
     });
-  } else if (details.reason === 'update') {
-    const thisVersion = chrome.runtime.getManifest().version;
-    console.log(`Extension updated from ${details.previousVersion} to ${thisVersion}`);
+  }
+}
+
+/**
+ * Handle API connection check
+ * @param {Function} sendResponse - Callback function
+ */
+async function handleConnectionCheck(sendResponse) {
+  try {
+    const { apiKey, apiEndpoint } = await getApiSettings();
     
-    // Check if this is a major version change
-    const previousMajor = parseInt(details.previousVersion.split('.')[0], 10) || 0;
-    const currentMajor = parseInt(thisVersion.split('.')[0], 10) || 0;
+    if (!apiKey) {
+      throw new Error('API key not configured');
+    }
     
-    if (currentMajor > previousMajor) {
-      // Major version update, show update page
-      chrome.tabs.create({
-        url: chrome.runtime.getURL('update.html')
+    const response = await safeApiFetch(`${apiEndpoint}/api/health-check/`, {
+      method: 'GET',
+      headers: {
+        'X-API-Key': apiKey
+      }
+    });
+    
+    if (response.success) {
+      sendResponse({
+        success: true,
+        message: 'API connection successful'
+      });
+    } else {
+      throw new Error(response.message || 'Health check failed');
+    }
+  } catch (error) {
+    console.error('[Authentic] API connection check failed:', error);
+    sendResponse({
+      success: false,
+      error: error.message || 'Connection check failed'
+    });
+  }
+}
+
+// Listen for tab updates to handle dynamic page changes
+chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
+  if (changeInfo.status === 'complete' && tab.url) {
+    const supportedPlatforms = ['facebook.com', 'instagram.com', 'linkedin.com'];
+    const isSupported = supportedPlatforms.some(platform => tab.url.includes(platform));
+    
+    if (isSupported) {
+      chrome.tabs.sendMessage(tabId, {
+        action: 'pageChanged',
+        url: tab.url
+      }).catch(error => {
+        // Ignore errors when content script is not ready
+        if (!error.message.includes('Could not establish connection')) {
+          console.error('[Authentic] Error notifying content script of page change:', error);
+        }
       });
     }
   }

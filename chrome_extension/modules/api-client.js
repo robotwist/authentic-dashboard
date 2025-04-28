@@ -3,6 +3,8 @@
  */
 
 import { recordError } from './error_handling.js';
+import { showNotification } from './notifications.js';
+import { updateStats } from './stats.js';
 
 /**
  * Get configuration from the manifest
@@ -254,5 +256,122 @@ export async function sendToApi(endpoint, data, options = {}) {
       recordError('api', error, { component: 'api_send' });
       reject(error);
     }
+  });
+}
+
+/**
+ * Send collected posts to the API
+ * @param {Array} posts - Array of posts to send
+ * @param {string} platform - Platform name (facebook, instagram, linkedin)
+ * @param {Object} options - Additional options
+ * @returns {Promise} - Resolves with API response
+ */
+export async function sendPostsToAPI(posts, platform, options = {}) {
+  return new Promise((resolve, reject) => {
+    if (!posts || !Array.isArray(posts) || posts.length === 0) {
+      console.log('[Authentic] No posts to send');
+      resolve({ success: true, message: 'No posts to send' });
+      return;
+    }
+
+    // Generate a batch ID for this upload
+    const batchId = `batch_${Date.now().toString(36)}_${Math.random().toString(36).substring(2, 7)}`;
+    
+    console.log(`[Authentic] Sending ${posts.length} ${platform} posts to API (batch: ${batchId})`);
+
+    // Send message to background script to forward to API
+    chrome.runtime.sendMessage({
+      action: 'sendPosts',
+      platform: platform,
+      posts: posts,
+      batchId: batchId,
+      options: options
+    }, response => {
+      if (chrome.runtime.lastError) {
+        console.error('[Authentic] Error communicating with background script:', chrome.runtime.lastError);
+        
+        if (options.showNotifications) {
+          showNotification(
+            'Error',
+            `Failed to send posts: ${chrome.runtime.lastError.message}`,
+            'error'
+          );
+        }
+        
+        reject(chrome.runtime.lastError);
+        return;
+      }
+
+      if (response && response.success) {
+        console.log(`[Authentic] Successfully sent ${posts.length} posts to API`);
+        
+        // Update stats if successful
+        updateStats(platform, posts.length);
+
+        // Show success notification if enabled
+        if (options.showNotifications) {
+          showNotification(
+            'Authentic Dashboard',
+            `Successfully sent ${posts.length} posts from ${platform}.`
+          );
+        }
+
+        resolve(response);
+      } else {
+        const error = response?.error || 'Unknown error sending posts to API';
+        console.error('[Authentic] Failed to send posts to API:', error);
+        
+        if (options.showNotifications) {
+          showNotification(
+            'Error',
+            `Failed to send posts: ${error}`,
+            'error'
+          );
+        }
+        
+        reject(new Error(error));
+      }
+    });
+  });
+}
+
+/**
+ * Make a safe API call with error handling and retries
+ * @param {string} url - API endpoint
+ * @param {Object} options - Fetch options
+ * @param {number} retries - Number of retries (default: 3)
+ * @returns {Promise} - Resolves with API response
+ */
+export async function safeApiFetch(url, options, retries = 3) {
+  try {
+    const response = await fetch(url, options);
+    
+    if (!response.ok) {
+      throw new Error(`HTTP error! status: ${response.status}`);
+    }
+    
+    return await response.json();
+  } catch (error) {
+    if (retries > 0) {
+      console.log(`[Authentic] Retrying API call, ${retries} attempts remaining`);
+      await new Promise(resolve => setTimeout(resolve, 1000));
+      return safeApiFetch(url, options, retries - 1);
+    }
+    throw error;
+  }
+}
+
+/**
+ * Get the API settings from storage
+ * @returns {Promise<Object>} - Resolves with API settings
+ */
+export function getApiSettings() {
+  return new Promise((resolve) => {
+    chrome.storage.local.get(['apiKey', 'apiEndpoint'], function(result) {
+      resolve({
+        apiKey: result.apiKey,
+        apiEndpoint: result.apiEndpoint || 'http://127.0.0.1:8000'
+      });
+    });
   });
 } 

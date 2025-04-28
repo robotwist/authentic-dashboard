@@ -11,6 +11,12 @@ from datetime import timedelta
 import json
 import logging
 from .analytics import generate_error_trend_report
+from django.http import JsonResponse
+from django.db import connection
+from django.core.cache import cache
+from redis.exceptions import RedisError
+import psutil
+import os
 
 # Set up logger
 logger = logging.getLogger(__name__)
@@ -24,17 +30,54 @@ def ping(request):
 @api_view(['GET'])
 @permission_classes([AllowAny])
 def health_check(request):
-    """Comprehensive health check endpoint for the extension"""
-    return Response({
-        "status": "ok",
-        "message": "Server is healthy",
-        "timestamp": timezone.now().isoformat(),
-        "version": "1.0.0",
-        "components": {
-            "database": "connected",
-            "api": "running"
+    """
+    Health check endpoint that monitors:
+    - Database connection
+    - Redis connection
+    - System resources
+    - Application status
+    """
+    health_status = {
+        'status': 'healthy',
+        'database': {'status': 'healthy'},
+        'cache': {'status': 'healthy'},
+        'system': {
+            'cpu_usage': psutil.cpu_percent(),
+            'memory_usage': psutil.virtual_memory().percent,
+            'disk_usage': psutil.disk_usage('/').percent
         }
-    })
+    }
+
+    # Check database
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute('SELECT 1')
+    except Exception as e:
+        health_status['database'] = {
+            'status': 'unhealthy',
+            'error': str(e)
+        }
+        health_status['status'] = 'degraded'
+
+    # Check Redis
+    try:
+        cache.set('health_check', 'ok', timeout=10)
+        cache.get('health_check')
+    except RedisError as e:
+        health_status['cache'] = {
+            'status': 'unhealthy',
+            'error': str(e)
+        }
+        health_status['status'] = 'degraded'
+
+    # Add version info
+    health_status['version'] = {
+        'commit': os.getenv('GIT_COMMIT', 'unknown'),
+        'environment': os.getenv('DJANGO_ENV', 'development')
+    }
+
+    status_code = 200 if health_status['status'] == 'healthy' else 503
+    return JsonResponse(health_status, status=status_code)
 
 class ErrorReportViewSet(viewsets.ModelViewSet):
     """ViewSet for handling extension error reports"""

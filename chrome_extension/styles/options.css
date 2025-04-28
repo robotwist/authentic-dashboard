@@ -182,19 +182,45 @@ input[type="number"]:focus {
   background-color: var(--success-color);
   color: white;
   text-align: center;
-  padding: 10px;
+  padding: 12px;
   margin: 20px 0;
   border-radius: var(--border-radius);
   opacity: 0;
-  transition: var(--transition);
+  transform: translateY(-20px);
+  transition: opacity 0.3s ease, transform 0.3s ease;
+  position: fixed;
+  top: 20px;
+  left: 50%;
+  transform: translateX(-50%) translateY(-100%);
+  z-index: 1000;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+  min-width: 300px;
+  max-width: 80%;
 }
 
 .status-bar.visible {
   opacity: 1;
+  transform: translateX(-50%) translateY(0);
 }
 
 .status-bar.error {
   background-color: var(--danger-color);
+}
+
+.status-message {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+}
+
+.status-message::before {
+  content: '✓';
+  font-weight: bold;
+}
+
+.status-bar.error .status-message::before {
+  content: '⚠';
 }
 
 footer {
