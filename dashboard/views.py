@@ -20,6 +20,7 @@ import os
 from django.contrib.auth.decorators import login_required
 from django.conf import settings
 from .utils.social_api import ThreadsAPI
+from django.contrib import messages
 
 # Set up logger
 logger = logging.getLogger(__name__)
@@ -308,4 +309,57 @@ def threads_thread_detail(request, thread_id):
             'api_error': str(e)
         })
     
-    return render(request, 'dashboard/thread_detail.html', context) 
+    return render(request, 'dashboard/thread_detail.html', context)
+
+@login_required
+def thread_embed(request):
+    """
+    Generate and display embed code for Threads posts
+    """
+    # Get user's Threads account
+    threads_account = SocialMediaAccount.objects.filter(
+        user=request.user,
+        platform='threads',
+        is_active=True
+    ).first()
+    
+    if not threads_account or not threads_account.is_token_valid():
+        messages.error(request, 'You need a connected Threads account to use this feature.')
+        return redirect('dashboard:threads_dashboard')
+    
+    context = {
+        'threads_account': threads_account,
+        'embed_examples': []  # In a real app, fetch saved embeds from the database
+    }
+    
+    # Process form submission
+    if request.method == 'POST':
+        thread_url = request.POST.get('thread_url', '').strip()
+        if not thread_url:
+            messages.error(request, 'Please provide a valid Thread URL.')
+            return render(request, 'dashboard/embed_thread.html', context)
+        
+        try:
+            # Initialize API client
+            threads_api = ThreadsAPI(threads_account.access_token)
+            
+            # Get the embed code
+            embed_data = threads_api.get_embed_code(thread_url)
+            
+            if 'html' in embed_data:
+                context['embed_html'] = embed_data['html']
+                
+                # In a real app, you might save this to the database
+                # EmbeddedThread.objects.create(
+                #     user=request.user,
+                #     thread_url=thread_url,
+                #     html=embed_data['html']
+                # )
+                
+                messages.success(request, 'Embed code generated successfully!')
+            else:
+                messages.error(request, 'Could not generate embed code for this URL.')
+        except Exception as e:
+            messages.error(request, f'Error generating embed code: {str(e)}')
+    
+    return render(request, 'dashboard/embed_thread.html', context) 

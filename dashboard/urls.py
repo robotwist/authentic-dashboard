@@ -35,7 +35,8 @@ urlpatterns = [
     # Threads API Integration
     path('threads/', views.threads_dashboard, name='threads_dashboard'),
     path('threads/post/', views.threads_post, name='threads_post'),
-    path('threads/<str:thread_id>/', views.threads_thread_detail, name='thread_detail'),
+    path('threads/thread/<str:thread_id>/', views.threads_thread_detail, name='thread_detail'),
+    path('threads/embed/', views.thread_embed, name='thread_embed'),
     
     # Existing Dashboard URLs
     path('', error_analytics_view, name='index'),

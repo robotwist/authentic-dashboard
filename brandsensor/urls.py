@@ -3,7 +3,7 @@ from rest_framework import routers
 from . import auth_views, dashboard_views, post_views, ml_views, api_views
 from .auth_views import (
     facebook_auth, facebook_callback, facebook_token_auth,
-    instagram_auth, linkedin_auth, threads_auth
+    instagram_auth, linkedin_auth, threads_auth, threads_callback
 )
 from django.views.generic import TemplateView
 
@@ -70,6 +70,7 @@ urlpatterns = [
     
     # Threads OAuth (if available)
     path('auth/threads/', threads_auth, name='threads_auth'),
+    path('auth/threads/callback/', threads_callback, name='threads_callback'),
 
     # Facebook specific views
     path('auth/facebook/login/', TemplateView.as_view(template_name='auth/facebook_login.html'), name='facebook_login_page'),

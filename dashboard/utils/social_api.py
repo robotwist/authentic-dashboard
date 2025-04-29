@@ -438,4 +438,126 @@ class ThreadsAPI(SocialAPIClient):
             params={
                 'fields': 'id,text,created_time,permalink,like_count,reply_count,repost_count,quote_count,media{media_type,media_url},user{id,username,profile_pic_url}'
             }
-        ) 
+        )
+        
+    def create_poll(self, text, options, duration_hours=24, link=None, media_ids=None):
+        """
+        Create a new thread with a poll
+        
+        Args:
+            text: The text content of the thread
+            options: List of poll options (2-4 options required)
+            duration_hours: Poll duration in hours (1-168)
+            link: Optional URL to include
+            media_ids: Optional list of media IDs to attach
+        """
+        if not 2 <= len(options) <= 4:
+            raise ValueError("Poll must have between 2 and 4 options")
+            
+        if not 1 <= duration_hours <= 168:
+            raise ValueError("Poll duration must be between 1 and 168 hours")
+            
+        data = {
+            'text': text,
+            'poll': {
+                'options': options,
+                'duration': duration_hours * 3600  # Convert to seconds
+            }
+        }
+        
+        if link:
+            data['link'] = link
+            
+        if media_ids:
+            data['media_ids'] = media_ids
+            
+        return self._make_request(
+            'POST',
+            'me/threads',
+            data=data
+        )
+        
+    def get_mentions(self, limit=25):
+        """
+        Get threads where the user has been mentioned
+        
+        Args:
+            limit: Maximum number of mentions to return
+        """
+        return self._make_request(
+            'GET',
+            'me/mentions',
+            params={
+                'fields': 'id,text,created_time,permalink,user{id,username,profile_pic_url}',
+                'limit': limit
+            }
+        )
+        
+    def get_embed_code(self, thread_url):
+        """
+        Get oEmbed code for embedding a thread on a website
+        
+        Args:
+            thread_url: URL of the thread to embed
+        """
+        return self._make_request(
+            'GET',
+            'https://graph.threads.net/oembed',
+            params={
+                'url': thread_url,
+                'omitscript': False
+            }
+        )
+        
+    def create_thread_with_georestrictions(self, text, countries, link=None, media_ids=None):
+        """
+        Create a new thread with geographic restrictions
+        
+        Args:
+            text: The text content of the thread
+            countries: List of country codes to restrict to (ISO 3166-1 alpha-2)
+            link: Optional URL to include
+            media_ids: Optional list of media IDs to attach
+        """
+        data = {
+            'text': text,
+            'geo_restrictions': {
+                'countries': countries
+            }
+        }
+        
+        if link:
+            data['link'] = link
+            
+        if media_ids:
+            data['media_ids'] = media_ids
+            
+        return self._make_request(
+            'POST',
+            'me/threads',
+            data=data
+        )
+        
+    def upload_media_with_alt_text(self, media_path, alt_text, media_type='image'):
+        """
+        Upload media with alt text for accessibility
+        
+        Args:
+            media_path: Path to the media file
+            alt_text: Alternative text for the media
+            media_type: Type of media ('image' or 'video')
+        """
+        # First create a media upload session
+        media_id = self.upload_media(media_path, media_type)
+        
+        # Add alt text to the media
+        if media_id:
+            self._make_request(
+                'POST',
+                f'me/media/{media_id}',
+                data={
+                    'alt_text': alt_text
+                }
+            )
+            
+        return media_id 

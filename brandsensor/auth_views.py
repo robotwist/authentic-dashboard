@@ -2,7 +2,11 @@ from django.shortcuts import render, redirect, get_object_or_404
 from django.contrib.auth.decorators import login_required
 from django.contrib.auth.models import User
 from django.contrib.auth import authenticate, login, logout
+from django.contrib import messages
 from django.utils import timezone
+from django.conf import settings
+from rest_framework.decorators import api_view, permission_classes
+from rest_framework.permissions import AllowAny
 import secrets
 import string
 import json
@@ -10,13 +14,14 @@ import logging
 import requests
 from urllib.parse import urlencode
 
-from .models import UserPreference, APIKey, BehaviorLog, SocialMediaAccount
+from .models import UserPreference, APIKey, BehaviorLog
+from dashboard.models import SocialMediaAccount, UserProfile
 from .utils import get_user_data
 from config_project.social_auth_settings import (
     FACEBOOK_CONFIG, INSTAGRAM_CONFIG, LINKEDIN_CONFIG, THREADS_CONFIG,
     OAUTH_CONFIG
 )
-from dashboard.utils.social_api import FacebookAPI
+from dashboard.utils.social_api import FacebookAPI, ThreadsAPI
 
 logger = logging.getLogger(__name__)
 
@@ -467,3 +472,72 @@ def threads_auth(request):
     
     auth_url = f"{THREADS_CONFIG['AUTH_ENDPOINT']}?{urlencode(auth_params)}"
     return redirect(auth_url)
+
+@login_required
+def threads_callback(request):
+    """
+    Handle Threads OAuth callback
+    """
+    code = request.GET.get('code')
+    state = request.GET.get('state')
+    
+    # Verify state (security check)
+    if not code or state != 'threads':
+        messages.error(request, 'Failed to connect Threads account. Invalid callback parameters.')
+        return redirect('dashboard:profile')
+    
+    # Exchange authorization code for access token
+    try:
+        response = requests.post(THREADS_CONFIG['TOKEN_ENDPOINT'], data={
+            'client_id': THREADS_CONFIG['APP_ID'],
+            'client_secret': THREADS_CONFIG['APP_SECRET'],
+            'code': code,
+            'redirect_uri': OAUTH_CONFIG['THREADS_REDIRECT_URI'],
+            'grant_type': 'authorization_code'
+        })
+        
+        response.raise_for_status()
+        token_data = response.json()
+        
+        # Get access token and expiry
+        access_token = token_data.get('access_token')
+        expires_in = token_data.get('expires_in', 0)
+        
+        if not access_token:
+            messages.error(request, 'Failed to obtain access token for Threads.')
+            return redirect('dashboard:profile')
+        
+        # Get user data from Threads API
+        threads_api = ThreadsAPI(access_token)
+        user_data = threads_api.get_user_profile()
+        
+        # Save or update social media account
+        SocialMediaAccount.objects.update_or_create(
+            user=request.user,
+            platform='threads',
+            account_id=user_data['id'],
+            defaults={
+                'access_token': access_token,
+                'token_expires_at': timezone.now() + timezone.timedelta(seconds=expires_in),
+                'is_active': True
+            }
+        )
+        
+        messages.success(request, 'Threads account connected successfully!')
+        
+        # Log the authentication
+        BehaviorLog.objects.create(
+            user=request.user,
+            behavior_type='social_auth',
+            platform='threads',
+            details=f"Connected Threads account: {user_data.get('username', 'Unknown')}"
+        )
+        
+    except requests.exceptions.RequestException as e:
+        logger.error(f"Threads OAuth error: {str(e)}")
+        messages.error(request, f'Failed to connect Threads account: {str(e)}')
+    except Exception as e:
+        logger.error(f"Unexpected error in Threads callback: {str(e)}")
+        messages.error(request, 'An unexpected error occurred while connecting your Threads account.')
+    
+    return redirect('dashboard:profile')

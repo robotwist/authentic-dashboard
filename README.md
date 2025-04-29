@@ -9,6 +9,7 @@ A sophisticated social media content aggregation and filtering platform that hel
   - Facebook
   - Instagram
   - LinkedIn
+  - Threads
 - Advanced content filtering:
   - Keyword-based filtering
   - Hashtag filtering
@@ -85,6 +86,48 @@ python manage.py runserver
 2. Create a new app
 3. Configure OAuth settings
 4. Add the app credentials to .env
+
+### Threads
+1. Create a Meta Developer account
+2. Create a new app in the Meta Developers Console
+3. Add the "Access the Threads API" use case
+4. Configure the required permissions:
+   - threads_basic
+   - threads_content_publish (for posting content)
+   - threads_manage_insights (for analytics)
+   - threads_manage_replies (for reply management)
+   - threads_read_replies (for accessing replies)
+   - threads_keyword_search (for search functionality)
+5. Set up OAuth redirect URIs
+6. Add the app credentials to .env
+
+## API Capabilities
+
+### Threads API
+The Threads API integration allows:
+- Creating and publishing posts
+- Replying to posts
+- Reposting and quoting public posts
+- Keyword search functionality
+- Analytics and insights on post performance
+- Media upload support for images and videos
+- Real-time updates via webhook integrations
+- Poll creation functionality
+- Post deletion
+- Fetching mentions where a profile has been tagged
+- Embedding Threads content in websites via oEmbed
+- Geographic restrictions (geo-gating) for posts
+- Support for alt text for accessibility
+- Share metrics for tracking off-platform sharing
+
+Note: The Threads API has rate limits of 250 posts and 1,000 replies per 24 hours.
+
+## Documentation
+
+For more detailed documentation on API implementations and features:
+
+- [Threads API Features](docs/threads_api_features.md) - Comprehensive guide with implementation examples
+- [Threads API Updates](docs/threads_api_updates.md) - Summary of recent API updates and changes
 
 ## Contributing
 

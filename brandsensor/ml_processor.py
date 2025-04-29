@@ -81,6 +81,27 @@ try:
 except ImportError:
     HAS_TRANSFORMERS = False
 
+# Try importing transformers for advanced NLP
+try:
+    from transformers import pipeline
+    HAS_TRANSFORMERS = True
+    
+    # Initialize sentiment analysis pipeline
+    try:
+        SENTIMENT_PIPELINE = pipeline(
+            "sentiment-analysis",
+            model="distilbert-base-uncased-finetuned-sst-2-english",
+            return_all_scores=True
+        )
+        logger.info("Transformer-based sentiment analysis is available")
+    except Exception as e:
+        logger.warning(f"Failed to load sentiment transformer: {str(e)}")
+        SENTIMENT_PIPELINE = None
+except ImportError:
+    HAS_TRANSFORMERS = False
+    SENTIMENT_PIPELINE = None
+    logger.info("Transformers library not available, using basic sentiment analysis")
+
 # Image model flags
 HAS_CLIP = False
 HAS_BLIP = False
@@ -205,6 +226,22 @@ SENTIMENT_LEXICON = {
     ]
 }
 
+# Threads-specific categories and keywords
+THREADS_CATEGORIES = {
+    "discussion": ["thoughts", "opinion", "discuss", "conversation", "debate", "talking", "perspective", "point of view", "chat"],
+    "announcement": ["announcement", "launching", "introducing", "news", "update", "released", "new feature", "coming soon"],
+    "question": ["question", "help", "asking", "curious", "wondering", "need advice", "what do you think", "how do you", "anyone know", "?"],
+    "personal_update": ["personal", "update", "life", "today", "just", "me", "my", "i'm", "feeling", "day", "week", "excited", "happy", "sad"],
+    "meme": ["meme", "joke", "funny", "lol", "haha", "humor", "hilarious", "laughing"],
+    "recommendation": ["recommend", "suggestion", "try", "check out", "worth", "love this", "great", "amazing", "best"],
+    "creative": ["created", "made", "wrote", "design", "art", "music", "photo", "drawing", "painting", "creative", "craft"],
+    "promotional": ["promo", "discount", "sale", "offer", "deal", "buy", "shop", "product", "selling", "marketing", "ad"],
+    "tech": ["tech", "technology", "programming", "code", "software", "app", "device", "digital", "online", "web", "internet", "ai", "data"],
+    "culture": ["culture", "movie", "book", "music", "show", "series", "film", "art", "artist", "entertainment", "media", "streaming"],
+    "health": ["health", "fitness", "workout", "exercise", "diet", "mental health", "wellbeing", "nutrition", "wellness"],
+    "trend": ["trend", "trending", "viral", "everyone", "popular", "going around", "movement", "challenge"]
+}
+
 def preprocess_text(text):
     """Clean and preprocess text for analysis"""
     if not text:
@@ -227,10 +264,47 @@ def preprocess_text(text):
     
     return tokens
 
-def analyze_sentiment(text, use_lexicon=True):
+# Advanced sentiment analysis with transformers
+def analyze_sentiment_with_transformer(text):
+    """
+    Analyze sentiment using a transformer model.
+    Returns a normalized sentiment score between -1 and 1
+    """
+    if not text or not HAS_TRANSFORMERS or SENTIMENT_PIPELINE is None:
+        return None
+    
+    try:
+        # Truncate text if too long
+        truncated_text = text[:512]
+        
+        # Get sentiment predictions
+        results = SENTIMENT_PIPELINE(truncated_text)
+        
+        # Extract scores
+        if isinstance(results, list) and len(results) > 0:
+            result = results[0]
+            
+            # Find positive and negative scores
+            positive_score = next((item['score'] for item in result if item['label'].lower() in ('positive', 'pos')), 0.5)
+            negative_score = next((item['score'] for item in result if item['label'].lower() in ('negative', 'neg')), 0.5)
+            
+            # Calculate normalized sentiment score between -1 and 1
+            # Positive score of 1.0 will give 1.0, negative score of 1.0 will give -1.0
+            sentiment_score = (positive_score - negative_score)
+            
+            return sentiment_score
+        
+        return None
+    except Exception as e:
+        logger.error(f"Error in transformer sentiment analysis: {str(e)}")
+        return None
+
+def analyze_sentiment(text, use_transformer=True):
     """
     Analyze the sentiment of the given text
     Returns a dictionary with sentiment score and indicators
+    If transformers are available, uses advanced models
+    Otherwise falls back to lexicon-based approach
     """
     if not text:
         return {
@@ -247,17 +321,31 @@ def analyze_sentiment(text, use_lexicon=True):
             'negative_indicators': text.negative_indicators
         }
     
+    # Try transformer-based sentiment analysis first
+    transformer_score = None
+    if use_transformer and HAS_TRANSFORMERS and SENTIMENT_PIPELINE is not None:
+        transformer_score = analyze_sentiment_with_transformer(text)
+    
+    # If transformer analysis worked, use that
+    if transformer_score is not None:
+        return {
+            'sentiment_score': transformer_score,
+            'positive_indicators': 1 if transformer_score > 0 else 0,
+            'negative_indicators': 1 if transformer_score < 0 else 0,
+            'method': 'transformer'
+        }
+    
+    # Otherwise fall back to lexicon-based approach
     tokens = preprocess_text(text.lower())
     positive_count = 0
     negative_count = 0
     
-    if use_lexicon:
-        # Use the sentiment lexicon for analysis
-        for word in tokens:
-            if word in SENTIMENT_LEXICON['positive']:
-                positive_count += 1
-            elif word in SENTIMENT_LEXICON['negative']:
-                negative_count += 1
+    # Use the sentiment lexicon for analysis
+    for word in tokens:
+        if word in SENTIMENT_LEXICON['positive']:
+            positive_count += 1
+        elif word in SENTIMENT_LEXICON['negative']:
+            negative_count += 1
     
     # Calculate sentiment score
     total = positive_count + negative_count
@@ -269,7 +357,8 @@ def analyze_sentiment(text, use_lexicon=True):
     return {
         'sentiment_score': sentiment_score,
         'positive_indicators': positive_count,
-        'negative_indicators': negative_count
+        'negative_indicators': negative_count,
+        'method': 'lexicon'
     }
 
 def classify_topics(text):
@@ -545,6 +634,123 @@ def calculate_relevance(post, user_id):
     # Cap relevance between 0 and 1
     return max(0.0, min(1.0, relevance_score))
 
+def classify_threads_content(text):
+    """
+    Classify Threads content into specialized categories
+    
+    Args:
+        text: The text content of the Thread
+        
+    Returns:
+        Dictionary with category scores and the top category
+    """
+    if not text:
+        return {}, ""
+    
+    # Clean and tokenize the text
+    text = text.lower()
+    
+    # Calculate scores for each category
+    category_scores = {}
+    for category, keywords in THREADS_CATEGORIES.items():
+        score = 0
+        for keyword in keywords:
+            if keyword in text:
+                score += 1
+        
+        if score > 0:
+            category_scores[category] = score
+    
+    # If no categories matched, default to "other"
+    if not category_scores:
+        return {"other": 1.0}, "other"
+    
+    # Normalize scores
+    total_score = sum(category_scores.values())
+    normalized_scores = {category: score/total_score for category, score in category_scores.items()}
+    
+    # Get the top category
+    top_category = max(normalized_scores.items(), key=lambda x: x[1])[0]
+    
+    return normalized_scores, top_category
+
+def process_threads_post(post):
+    """
+    Apply specialized Threads processing to a post
+    
+    Args:
+        post: The SocialPost object to process
+        
+    Returns:
+        The processed post with Threads-specific metadata
+    """
+    if post.platform != 'threads':
+        return post
+        
+    # Skip if already processed
+    if post.ml_processed and post.automated_category and "thread_type" in (post.extra_data or {}):
+        return post
+        
+    try:
+        # Extract content from the post
+        content = post.content
+        
+        # Skip processing if the post has no content
+        if not content or len(content) < 3:
+            return post
+            
+        # Classify the thread content
+        category_scores, top_category = classify_threads_content(content)
+        
+        # Set category if not already set
+        if not post.automated_category:
+            post.automated_category = top_category
+            
+        # Store the category scores in extra_data
+        extra_data = post.extra_data or {}
+        extra_data['thread_categories'] = category_scores
+        
+        # Determine thread type based on content patterns
+        thread_type = "standard"
+        
+        # Check for question threads
+        if "?" in content or any(q in content.lower() for q in ["what", "how", "why", "when", "where", "who", "can", "could", "should"]):
+            thread_type = "question"
+            
+        # Check for announcement threads
+        elif any(a in content.lower() for a in ["announcing", "announcement", "introducing", "launched", "new", "release"]):
+            thread_type = "announcement"
+            
+        # Check for polls/opinions
+        elif any(p in content.lower() for p in ["vote", "poll", "opinion", "thoughts on", "what do you think"]):
+            thread_type = "poll"
+            
+        # Store thread type
+        extra_data['thread_type'] = thread_type
+        post.extra_data = extra_data
+        
+        # Save the processed post
+        post.ml_processed = True
+        post.ml_processed_at = timezone.now()
+        post.save()
+        
+        # Log the ML processing
+        MLPredictionLog.objects.create(
+            post=post,
+            prediction_type='threads_classification',
+            prediction_value=category_scores.get(top_category, 0),
+            raw_output=json.dumps({
+                'categories': category_scores,
+                'thread_type': thread_type
+            })
+        )
+        
+        return post
+        
+    except Exception as e:
+        logger.error(f"Error processing Threads post {post.id}: {str(e)}")
+        return post
+
 def process_post(post):
     """
     Process a post with ML algorithms to extract insights.
@@ -558,6 +764,10 @@ def process_post(post):
         return post
     
     try:
+        # Apply platform-specific processing
+        if post.platform == 'threads':
+            post = process_threads_post(post)
+            
         # Extract content from the post
         content = post.content
         
@@ -572,12 +782,11 @@ def process_post(post):
             post.positive_indicators = sentiment_result.get('positive_indicators', 0)
             post.negative_indicators = sentiment_result.get('negative_indicators', 0)
         
-        # Classify topics and categories
+        # Classify topics and categories (if not already done by platform-specific processing)
         if post.automated_category is None:
-            topics = classify_topics(content)
-            if topics:
-                primary_topic = max(topics.items(), key=lambda x: x[1])
-                post.automated_category = primary_topic[0]
+            topics, primary_topic = classify_topics(content)
+            if primary_topic:
+                post.automated_category = primary_topic
                 
                 # Store all topics with scores above a threshold as tags
                 threshold = 0.2
