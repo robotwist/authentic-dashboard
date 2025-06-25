@@ -1,0 +1,66 @@
+{
+    "manifest_version": 3,
+    "name": "Authentic Dashboard",
+    "version": "1.0.0",
+    "description": "Social media post collector for Authentic Dashboard",
+    "action": {
+      "default_popup": "popup.html",
+      "default_icon": {
+        "16": "icons/icon16.png",
+        "48": "icons/icon48.png",
+        "128": "icons/icon128.png"
+      }
+    },
+    "permissions": [
+      "storage",
+      "tabs",
+      "alarms"
+    ],
+    "host_permissions": [
+      "*://*.facebook.com/*",
+      "*://*.instagram.com/*",
+      "*://*.linkedin.com/*",
+      "http://127.0.0.1:8000/*"
+    ],
+    "content_scripts": [
+      {
+        "matches": ["*://*.facebook.com/*"],
+        "js": ["content_fb.js"],
+        "type": "module"
+      },
+      {
+        "matches": ["*://*.instagram.com/*"],
+        "js": ["content_ig.js"],
+        "type": "module"
+      },
+      {
+        "matches": ["*://*.linkedin.com/*"],
+        "js": ["content_li.js"],
+        "type": "module"
+      }
+    ],
+    "background": {
+      "service_worker": "background.js",
+      "type": "module"
+    },
+    "web_accessible_resources": [
+      {
+        "resources": [
+          "modules/*.js",
+          "shared/*.js",
+          "lib/*.js"
+        ],
+        "matches": [
+          "*://*.facebook.com/*",
+          "*://*.instagram.com/*",
+          "*://*.linkedin.com/*"
+        ]
+      }
+    ],
+    "icons": {
+      "16": "icons/icon16.png",
+      "48": "icons/icon48.png",
+      "128": "icons/icon128.png"
+    },
+    "options_page": "options.html"
+} 
