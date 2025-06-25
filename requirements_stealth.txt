@@ -1,0 +1,22 @@
+# Stealth Collection Requirements
+aiohttp==3.9.1
+asyncio-throttle==1.0.2
+fake-useragent==1.4.0
+playwright==1.40.0
+beautifulsoup4==4.12.2
+lxml==4.9.3
+selenium==4.15.2
+requests==2.31.0
+
+# Anti-detection
+curl-cffi==0.6.2
+tls-client==0.2.2
+undetected-chromedriver==3.5.4
+
+# Proxy support
+aiohttp-socks==0.8.4
+pysocks==1.7.1
+
+# Data processing
+pandas==2.1.4
+numpy==1.24.4
