@@ -1,0 +1,27 @@
+{
+  "collection": {
+    "max_posts_per_session": 50,
+    "session_duration_minutes": 30,
+    "rotation_threshold": 10,
+    "health_check_interval": 300
+  },
+  "proxies": {
+    "providers": [],
+    "max_concurrent": 5,
+    "cooldown_seconds": 30
+  },
+  "platforms": {
+    "facebook": {
+      "enabled": true,
+      "max_posts": 100
+    },
+    "instagram": {
+      "enabled": true,
+      "max_posts": 100
+    },
+    "linkedin": {
+      "enabled": true,
+      "max_posts": 100
+    }
+  }
+}
