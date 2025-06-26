@@ -126,4 +126,4 @@ def verify_api_key(request):
             'user_id': user.id
         })
     else:
-        return JsonResponse({'valid': False}, status=401) 
+        return JsonResponse({'valid': False}, status=401)
