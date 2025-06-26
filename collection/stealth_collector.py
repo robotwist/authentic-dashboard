@@ -24,6 +24,13 @@ class StealthCollector:
         self.session = None
         self.current_proxy = None
         
+        # Ensure proxy manager has required config
+        if not hasattr(proxy_manager, 'config') or not proxy_manager.config:
+            proxy_manager.config = {
+                'rotation_interval': 300,
+                'max_requests_per_proxy': 100
+            }
+        
     async def initialize_session(self):
         """Initialize HTTP session with stealth configuration"""
         
@@ -46,7 +53,7 @@ class StealthCollector:
             headers=self.browser_fingerprint.get_headers()
         )
         
-        logger.info(f"Initialized stealth session with proxy: {self.current_proxy['ip']}")
+        logger.info(f"Initialized stealth session with proxy: {self.current_proxy.get('id', 'unknown')}")
         
     async def collect_facebook_posts(self, target_url: str, max_posts: int = 25) -> List[Dict]:
         """
@@ -62,7 +69,8 @@ class StealthCollector:
             await asyncio.sleep(random.uniform(2, 5))
             
             # Navigate to target URL
-            async with self.session.get(target_url, proxy=self.current_proxy['url']) as response:
+            proxy_url = self.current_proxy.get('url') if self.current_proxy else None
+            async with self.session.get(target_url, proxy=proxy_url) as response:
                 if response.status == 200:
                     html = await response.text()
                     posts = self._parse_facebook_posts(html, max_posts)
