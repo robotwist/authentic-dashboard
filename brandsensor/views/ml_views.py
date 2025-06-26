@@ -1,27 +1,17 @@
-"""
-ML Views Module
-
-Contains all machine learning related views for the BrandSensor application.
-"""
-
-import json
-import logging
 from django.shortcuts import render, redirect
-from django.http import JsonResponse
 from django.contrib.auth.decorators import login_required
+from django.http import JsonResponse
 from django.views.decorators.csrf import csrf_exempt
+from django.db.models import Q, Count, Avg, F
 from django.utils import timezone
-from django.db.models import Q, Count, Avg
-from django.conf import settings
+from django.db.utils import IntegrityError
+import logging
+import datetime
+import json
 
-from ..models import (
-    SocialPost, 
-    UserPreference,
-    MLModel,
-    MLPredictionLog,
-    InterpretationLog
-)
-from ..ml_processor import process_post, process_user_posts
+from ..models import SocialPost, MLModel, MLPredictionLog
+from ..ml_processor import process_user_posts
+from ..utils import get_user_data
 
 logger = logging.getLogger(__name__)
 
@@ -29,233 +19,185 @@ logger = logging.getLogger(__name__)
 @csrf_exempt
 def process_ml(request):
     """
-    Process posts through ML models for sentiment analysis and authenticity scoring
+    Process posts with ML models
     """
-    if request.method != 'POST':
-        return JsonResponse({'error': 'Only POST method allowed'}, status=405)
-    
-    user = request.user
-    
-    try:
-        # Process all user posts through ML
-        posts = SocialPost.objects.filter(user=user)
-        processed_count = 0
-        
-        for post in posts:
-            try:
-                result = process_post(post)
-                if result:
-                    post.sentiment = result.get('sentiment', post.sentiment)
-                    post.authenticity_score = result.get('authenticity_score', post.authenticity_score)
-                    post.save()
-                    processed_count += 1
-            except Exception as e:
-                logger.error(f"Error processing post {post.id}: {e}")
-        
+    if request.method == "POST":
+        count = process_user_posts(request.user.id, limit=int(request.POST.get('limit', 100)))
         return JsonResponse({
-            'status': 'success',
-            'processed_posts': processed_count,
-            'total_posts': posts.count()
+            "status": "success", 
+            "processed": count,
+            "message": f"Successfully processed {count} posts with machine learning."
         })
-        
-    except Exception as e:
-        logger.error(f"Error in ML processing: {e}")
-        return JsonResponse({'error': 'Internal server error'}, status=500)
+    
+    return JsonResponse({"error": "Only POST allowed"}, status=405)
 
 @login_required
 def ml_dashboard(request):
     """
-    Machine Learning dashboard showing model performance and insights
+    ML Dashboard view with model performance metrics
     """
-    user = request.user
+    user_data = get_user_data(request.user)
     
-    # Get ML processing statistics
-    total_posts = SocialPost.objects.filter(user=user).count()
-    processed_posts = SocialPost.objects.filter(
-        user=user,
-        sentiment__isnull=False
-    ).count()
+    # Get ML processed posts
+    ml_posts = SocialPost.objects.filter(
+        user=request.user,
+        automated_category__isnull=False
+    ).exclude(automated_category='')
     
-    # Sentiment distribution
-    sentiment_stats = SocialPost.objects.filter(user=user).aggregate(
-        positive=Count('id', filter=Q(sentiment='positive')),
-        negative=Count('id', filter=Q(sentiment='negative')),
-        neutral=Count('id', filter=Q(sentiment='neutral'))
-    )
-    
-    # Authenticity score distribution
-    authenticity_stats = SocialPost.objects.filter(user=user).aggregate(
-        avg_score=Avg('authenticity_score'),
-        high_quality=Count('id', filter=Q(authenticity_score__gte=0.8)),
-        medium_quality=Count('id', filter=Q(authenticity_score__range=(0.5, 0.8))),
-        low_quality=Count('id', filter=Q(authenticity_score__lt=0.5))
-    )
-    
-    # Recent ML predictions
-    recent_predictions = MLPredictionLog.objects.filter(
-        user=user
-    ).order_by('-timestamp')[:10]
-    
-    # Model performance metrics
-    model_stats = {}
-    if recent_predictions.exists():
-        for prediction in recent_predictions:
-            model_name = prediction.model_used
-            if model_name not in model_stats:
-                model_stats[model_name] = {
-                    'predictions': 0,
-                    'avg_confidence': 0,
-                    'total_confidence': 0
-                }
-            
-            model_stats[model_name]['predictions'] += 1
-            try:
-                confidence_data = json.loads(prediction.confidence_scores)
-                avg_confidence = sum(confidence_data.values()) / len(confidence_data)
-                model_stats[model_name]['total_confidence'] += avg_confidence
-            except (json.JSONDecodeError, ZeroDivisionError, TypeError):
-                pass
-        
-        # Calculate average confidence for each model
-        for model_name, stats in model_stats.items():
-            if stats['predictions'] > 0:
-                stats['avg_confidence'] = stats['total_confidence'] / stats['predictions']
+    # Get basic stats
+    total_processed = ml_posts.count()
+    total_posts = SocialPost.objects.filter(user=request.user).count()
+    processing_rate = (total_processed / total_posts * 100) if total_posts > 0 else 0
     
     context = {
-        'user': user,
+        'user_data': user_data,
+        'total_processed': total_processed,
         'total_posts': total_posts,
-        'processed_posts': processed_posts,
-        'sentiment_stats': sentiment_stats,
-        'authenticity_stats': authenticity_stats,
-        'recent_predictions': recent_predictions,
-        'model_stats': model_stats,
-        'processing_enabled': getattr(settings, 'ML_PROCESSING_ENABLED', False)
+        'processing_rate': round(processing_rate, 1),
+        'ml_posts': ml_posts[:20],  # Show recent 20
     }
     
-    return render(request, 'brandsensor/ml_dashboard.html', context)
+    return render(request, "brandsensor/ml_dashboard.html", context)
 
 @login_required
 def ml_insights(request):
     """
-    Advanced ML insights and analytics
+    ML Insights view with detailed analytics and visualizations
     """
-    user = request.user
+    user_data = get_user_data(request.user)
     
-    # Get posts with ML processing
-    posts_qs = SocialPost.objects.filter(
-        user=user,
-        sentiment__isnull=False,
-        authenticity_score__isnull=False
+    # Get filters from URL parameters
+    days_filter = request.GET.get('days', '30')
+    platform_filter = request.GET.get('platform', '')
+    
+    try:
+        days_ago = int(days_filter)
+    except ValueError:
+        days_ago = 30
+    
+    since_date = timezone.now() - datetime.timedelta(days=days_ago)
+    
+    # Base query for posts
+    posts_query = SocialPost.objects.filter(
+        user=request.user,
+        created_at__gte=since_date
     )
     
-    # Time-based sentiment trends
-    from django.db.models.functions import TruncDate
-    sentiment_trends = posts_qs.annotate(
-        date=TruncDate('created_at')
-    ).values('date').annotate(
-        positive=Count('id', filter=Q(sentiment='positive')),
-        negative=Count('id', filter=Q(sentiment='negative')),
-        neutral=Count('id', filter=Q(sentiment='neutral'))
-    ).order_by('date')
+    if platform_filter:
+        posts_query = posts_query.filter(platform=platform_filter)
     
-    # Platform-specific sentiment analysis
-    platform_sentiment = posts_qs.values('platform').annotate(
-        positive=Count('id', filter=Q(sentiment='positive')),
-        negative=Count('id', filter=Q(sentiment='negative')),
-        neutral=Count('id', filter=Q(sentiment='neutral')),
-        avg_authenticity=Avg('authenticity_score')
-    ).order_by('platform')
+    # Get ML processed posts
+    ml_posts = posts_query.filter(
+        automated_category__isnull=False
+    ).exclude(automated_category='').order_by('-created_at')
     
-    # Brand sentiment analysis
-    brand_sentiment = posts_qs.filter(brand__isnull=False).values(
-        'brand__name'
-    ).annotate(
-        positive=Count('id', filter=Q(sentiment='positive')),
-        negative=Count('id', filter=Q(sentiment='negative')),
-        neutral=Count('id', filter=Q(sentiment='neutral')),
-        avg_authenticity=Avg('authenticity_score'),
-        total_posts=Count('id')
-    ).order_by('-total_posts')[:10]
+    # Get posts with images for image analysis
+    posts_with_images = posts_query.exclude(image_urls='').order_by('-created_at')
     
-    # Content quality insights
-    quality_insights = {
-        'high_quality_posts': posts_qs.filter(authenticity_score__gte=0.8).count(),
-        'medium_quality_posts': posts_qs.filter(
-            authenticity_score__range=(0.5, 0.8)
-        ).count(),
-        'low_quality_posts': posts_qs.filter(authenticity_score__lt=0.5).count(),
-        'avg_authenticity_by_platform': posts_qs.values('platform').annotate(
-            avg_score=Avg('authenticity_score')
-        ).order_by('-avg_score')
+    # Get platform choices for filter dropdown
+    platforms = SocialPost.PLATFORM_CHOICES
+    
+    # Platform statistics
+    platform_stats = []
+    for platform_code, platform_name in SocialPost.PLATFORM_CHOICES:
+        platform_posts = posts_query.filter(platform=platform_code)
+        platform_stats.append({
+            'platform': platform_name,
+            'code': platform_code,
+            'count': platform_posts.count(),
+            'sentiment': platform_posts.filter(sentiment_score__isnull=False).aggregate(Avg('sentiment_score'))['sentiment_score__avg'] or 0,
+            'engagement': platform_posts.aggregate(Avg('engagement_count'))['engagement_count__avg'] or 0,
+        })
+    
+    # Get category distribution
+    category_counts = ml_posts.exclude(automated_category='').values('automated_category').annotate(
+        count=Count('id')
+    ).order_by('-count')
+    
+    # Prepare for visualization (limit to top 10)
+    category_data = {item['automated_category']: item['count'] for item in category_counts[:10]}
+    
+    # Enhanced image analysis - Process and get images with captions
+    posts_with_captions = []
+    for post in posts_with_images[:10]:  # Limit to 10 for performance
+        image_urls = post.image_urls.split(',') if post.image_urls else []
+        image_data = []
+        
+        for url in image_urls[:3]:  # Process up to 3 images per post
+            url = url.strip()
+            if url:
+                # Check if we have ML data for this image
+                image_analysis = json.loads(post.image_analysis) if post.image_analysis else {}
+                caption = image_analysis.get('caption', 'No caption available')
+                aesthetics = image_analysis.get('aesthetics', {})
+                objects = image_analysis.get('objects', [])
+                
+                image_data.append({
+                    'url': url,
+                    'caption': caption,
+                    'aesthetics': aesthetics,
+                    'objects': objects[:5] if objects else [],  # Show top 5 objects
+                })
+        
+        if image_data:
+            posts_with_captions.append({
+                'post': post,
+                'images': image_data
+            })
+    
+    # Get topic distribution over time
+    topic_time_series = []
+    weekly_data = []
+    
+    # Group posts by week and get top topics for each week
+    week_posts = {}
+    for post in ml_posts:
+        week = post.created_at.strftime('%Y-%U')  # Year and week number
+        if week not in week_posts:
+            week_posts[week] = []
+        week_posts[week].append(post)
+    
+    # For each week, get the top topics
+    for week, posts in sorted(week_posts.items()):
+        topics = {}
+        for post in posts:
+            if post.automated_category:
+                topic = post.automated_category
+                if topic not in topics:
+                    topics[topic] = 0
+                topics[topic] += 1
+        
+        top_topics = sorted(topics.items(), key=lambda x: x[1], reverse=True)[:3]
+        week_date = datetime.datetime.strptime(week + '-1', '%Y-%U-%w')
+        weekly_data.append({
+            'week': week_date.strftime('%b %d'),
+            'topics': [{'name': t[0], 'count': t[1]} for t in top_topics]
+        })
+    
+    # Get image analysis statistics
+    image_analysis_stats = {
+        'total_images': posts_with_images.count(),
+        'faces_detected': posts_query.filter(image_analysis__icontains='faces').count(),
+        'has_aesthetics': posts_query.filter(image_analysis__icontains='aesthetics').count(),
+        'has_objects': posts_query.filter(image_analysis__icontains='objects').count(),
     }
-    
-    # Recent interpretations
-    recent_interpretations = InterpretationLog.objects.filter(
-        user=user
-    ).order_by('-timestamp')[:5] if InterpretationLog.objects.filter(user=user).exists() else []
-    
-    # Prediction accuracy (if we have user feedback)
-    prediction_accuracy = calculate_prediction_accuracy(user)
     
     context = {
-        'user': user,
-        'sentiment_trends': list(sentiment_trends),
-        'platform_sentiment': list(platform_sentiment),
-        'brand_sentiment': list(brand_sentiment),
-        'quality_insights': quality_insights,
-        'recent_interpretations': recent_interpretations,
-        'prediction_accuracy': prediction_accuracy,
-        'total_analyzed_posts': posts_qs.count()
+        'ml_posts': ml_posts[:20],
+        'ml_posts_count': ml_posts.count(),
+        'platform_stats': platform_stats,
+        'category_data': json.dumps(category_data),
+        'posts_with_images': posts_with_images[:20],
+        'posts_with_captions': posts_with_captions,
+        'image_posts_count': posts_with_images.count(),
+        'days_filter': days_filter,
+        'platform_filter': platform_filter,
+        'platforms': platforms,
+        'today_posts': user_data['today_posts'],
+        'this_week_posts': user_data['this_week_posts'],
+        'SocialPost': SocialPost,  # Pass the model class for template access
+        'weekly_data': weekly_data,
+        'image_analysis_stats': image_analysis_stats,
     }
     
-    return render(request, 'brandsensor/ml_insights.html', context)
-
-def calculate_prediction_accuracy(user):
-    """
-    Calculate ML prediction accuracy based on user feedback/corrections
-    """
-    try:
-        # Get posts where user has made corrections
-        corrected_posts = SocialPost.objects.filter(
-            user=user,
-            sentiment_override=True
-        )
-        
-        if not corrected_posts.exists():
-            return None
-        
-        # Compare original ML predictions with user corrections
-        # This is a simplified accuracy calculation
-        total_corrections = corrected_posts.count()
-        
-        # Get original predictions from MLPredictionLog
-        accurate_predictions = 0
-        for post in corrected_posts:
-            try:
-                original_prediction = MLPredictionLog.objects.filter(
-                    user=user,
-                    post=post
-                ).order_by('timestamp').first()
-                
-                if original_prediction:
-                    original_data = json.loads(original_prediction.predictions)
-                    original_sentiment = original_data.get('sentiment')
-                    
-                    # If original prediction matches current sentiment, it was accurate
-                    if original_sentiment == post.sentiment:
-                        accurate_predictions += 1
-                        
-            except (json.JSONDecodeError, AttributeError):
-                continue
-        
-        accuracy_percentage = (accurate_predictions / total_corrections) * 100 if total_corrections > 0 else 0
-        
-        return {
-            'accuracy_percentage': round(accuracy_percentage, 2),
-            'total_corrections': total_corrections,
-            'accurate_predictions': accurate_predictions
-        }
-        
-    except Exception as e:
-        logger.error(f"Error calculating prediction accuracy: {e}")
-        return None 
+    return render(request, "brandsensor/ml_insights.html", context) 

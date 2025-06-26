@@ -1,0 +1,407 @@
+/**
+ * RETRO WAVE GLOW SYSTEM
+ * Lush melange glow effects with lavender blue and orange
+ * 
+ * Color Palette:
+ * - Lavender Blue: #8A2BE2 (BlueViolet) / #9370DB (MediumPurple) / #6A5ACD (SlateBlue)
+ * - Orange: #FF6500 (OrangeRed) / #FF7F00 (Orange) / #FF8C00 (DarkOrange)
+ */
+
+:root {
+  /* ===== RETRO WAVE COLOR PALETTE ===== */
+  
+  /* Lavender Blue Spectrum */
+  --retro-lavender-primary: #8A2BE2;      /* BlueViolet */
+  --retro-lavender-medium: #9370DB;       /* MediumPurple */
+  --retro-lavender-light: #DDA0DD;        /* Plum */
+  --retro-lavender-glow: rgba(138, 43, 226, 0.6);
+  --retro-lavender-glow-intense: rgba(138, 43, 226, 0.8);
+  
+  /* Orange Spectrum */
+  --retro-orange-primary: #FF6500;        /* OrangeRed */
+  --retro-orange-medium: #FF7F00;         /* Orange */
+  --retro-orange-light: #FFA500;          /* Orange */
+  --retro-orange-glow: rgba(255, 101, 0, 0.6);
+  --retro-orange-glow-intense: rgba(255, 101, 0, 0.8);
+  
+  /* Gradient Combinations */
+  --retro-gradient-primary: linear-gradient(135deg, var(--retro-lavender-primary), var(--retro-orange-primary));
+  --retro-gradient-soft: linear-gradient(135deg, var(--retro-lavender-medium), var(--retro-orange-medium));
+  --retro-gradient-wave: linear-gradient(90deg, 
+    var(--retro-lavender-primary) 0%, 
+    var(--retro-lavender-medium) 25%, 
+    var(--retro-orange-medium) 75%, 
+    var(--retro-orange-primary) 100%);
+  
+  /* Glow Effects */
+  --retro-glow-subtle: 0 0 10px var(--retro-lavender-glow), 0 0 20px var(--retro-orange-glow);
+  --retro-glow-medium: 0 0 15px var(--retro-lavender-glow), 0 0 30px var(--retro-orange-glow), 0 0 45px var(--retro-lavender-glow);
+  --retro-glow-intense: 0 0 20px var(--retro-lavender-glow-intense), 0 0 40px var(--retro-orange-glow-intense), 0 0 60px var(--retro-lavender-glow), 0 0 80px var(--retro-orange-glow);
+  
+  /* Animation Durations */
+  --retro-transition-fast: 0.2s ease-out;
+  --retro-transition-medium: 0.4s ease-out;
+  --retro-transition-slow: 0.6s ease-out;
+}
+
+/* ========================================
+   RETRO WAVE FOOTER/BOTTOM STYLING
+   ======================================== */
+
+.retro-wave-footer,
+.footer,
+footer {
+  position: relative;
+  background: var(--retro-gradient-wave);
+  padding: 2rem 0;
+  overflow: hidden;
+}
+
+.retro-wave-footer::before,
+.footer::before,
+footer::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: -100%;
+  width: 300%;
+  height: 100%;
+  background: linear-gradient(90deg, 
+    transparent 0%, 
+    var(--retro-lavender-glow) 25%, 
+    var(--retro-orange-glow) 50%, 
+    var(--retro-lavender-glow) 75%, 
+    transparent 100%);
+  animation: retro-wave-sweep 3s ease-in-out infinite;
+  opacity: 0.3;
+}
+
+@keyframes retro-wave-sweep {
+  0% { transform: translateX(-100%); }
+  50% { transform: translateX(0%); }
+  100% { transform: translateX(100%); }
+}
+
+/* ========================================
+   BUTTON GLOW EFFECTS
+   ======================================== */
+
+/* Primary Buttons - Lavender Blue Focus */
+.btn,
+.btn-primary,
+.collect-btn,
+.facebook-login-btn,
+.instagram-btn,
+.linkedin-btn,
+button[type="submit"],
+.social-login-btn {
+  position: relative;
+  transition: all var(--retro-transition-medium);
+  border: 2px solid transparent;
+  background: var(--retro-gradient-soft);
+  color: white;
+  text-shadow: 0 0 5px rgba(0, 0, 0, 0.3);
+  overflow: hidden;
+}
+
+.btn::before,
+.btn-primary::before,
+.collect-btn::before,
+.facebook-login-btn::before,
+.instagram-btn::before,
+.linkedin-btn::before,
+button[type="submit"]::before,
+.social-login-btn::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: -100%;
+  width: 100%;
+  height: 100%;
+  background: linear-gradient(90deg, 
+    transparent 0%, 
+    rgba(255, 255, 255, 0.2) 50%, 
+    transparent 100%);
+  transition: left var(--retro-transition-medium);
+  z-index: 1;
+}
+
+/* Hover Effects */
+.btn:hover,
+.btn-primary:hover,
+.collect-btn:hover,
+.facebook-login-btn:hover,
+.instagram-btn:hover,
+.linkedin-btn:hover,
+button[type="submit"]:hover,
+.social-login-btn:hover {
+  box-shadow: var(--retro-glow-medium);
+  border-color: var(--retro-lavender-light);
+  transform: translateY(-2px);
+  background: var(--retro-gradient-primary);
+}
+
+.btn:hover::before,
+.btn-primary:hover::before,
+.collect-btn:hover::before,
+.facebook-login-btn:hover::before,
+.instagram-btn:hover::before,
+.linkedin-btn:hover::before,
+button[type="submit"]:hover::before,
+.social-login-btn:hover::before {
+  left: 100%;
+}
+
+/* Focus Effects */
+.btn:focus,
+.btn-primary:focus,
+.collect-btn:focus,
+.facebook-login-btn:focus,
+.instagram-btn:focus,
+.linkedin-btn:focus,
+button[type="submit"]:focus,
+.social-login-btn:focus {
+  outline: none;
+  box-shadow: var(--retro-glow-intense);
+  border-color: var(--retro-orange-light);
+  transform: scale(1.05);
+}
+
+/* Active/Pressed Effects */
+.btn:active,
+.btn-primary:active,
+.collect-btn:active,
+.facebook-login-btn:active,
+.instagram-btn:active,
+.linkedin-btn:active,
+button[type="submit"]:active,
+.social-login-btn:active {
+  transform: translateY(0) scale(0.98);
+  box-shadow: var(--retro-glow-subtle);
+}
+
+/* ========================================
+   SECONDARY BUTTONS - Orange Focus
+   ======================================== */
+
+.btn-secondary,
+.btn-outline,
+.btn-link,
+.icon-btn,
+.close-btn,
+.retry-btn {
+  position: relative;
+  transition: all var(--retro-transition-medium);
+  border: 2px solid var(--retro-orange-medium);
+  background: transparent;
+  color: var(--retro-orange-primary);
+  overflow: hidden;
+}
+
+.btn-secondary:hover,
+.btn-outline:hover,
+.btn-link:hover,
+.icon-btn:hover,
+.close-btn:hover,
+.retry-btn:hover {
+  background: var(--retro-orange-primary);
+  color: white;
+  box-shadow: var(--retro-glow-medium);
+  border-color: var(--retro-orange-light);
+  transform: translateY(-1px);
+}
+
+.btn-secondary:focus,
+.btn-outline:focus,
+.btn-link:focus,
+.icon-btn:focus,
+.close-btn:focus,
+.retry-btn:focus {
+  outline: none;
+  box-shadow: 0 0 15px var(--retro-orange-glow), 0 0 30px var(--retro-lavender-glow);
+  border-color: var(--retro-lavender-medium);
+}
+
+/* ========================================
+   FORM INPUTS WITH RETRO GLOW
+   ======================================== */
+
+.form-control,
+input[type="text"],
+input[type="email"],
+input[type="password"],
+textarea,
+select {
+  transition: all var(--retro-transition-medium);
+  border: 2px solid var(--retro-lavender-light);
+  background: rgba(255, 255, 255, 0.95);
+}
+
+.form-control:focus,
+input[type="text"]:focus,
+input[type="email"]:focus,
+input[type="password"]:focus,
+textarea:focus,
+select:focus {
+  outline: none;
+  border-color: var(--retro-lavender-primary);
+  box-shadow: 0 0 10px var(--retro-lavender-glow), inset 0 0 5px rgba(138, 43, 226, 0.1);
+  background: rgba(255, 255, 255, 1);
+}
+
+/* ========================================
+   CARDS AND CONTAINERS
+   ======================================== */
+
+.card,
+.auth-container,
+.welcome-modal-content,
+.facebook-status-container {
+  transition: all var(--retro-transition-slow);
+  border: 1px solid transparent;
+}
+
+.card:hover,
+.auth-container:hover,
+.welcome-modal-content:hover {
+  border-color: var(--retro-lavender-light);
+  box-shadow: var(--retro-glow-subtle);
+  transform: translateY(-2px);
+}
+
+/* ========================================
+   INTERACTIVE ELEMENTS
+   ======================================== */
+
+/* Links with glow */
+a:not(.btn):not(.btn-link) {
+  color: var(--retro-lavender-primary);
+  transition: all var(--retro-transition-fast);
+  text-decoration: none;
+  position: relative;
+}
+
+a:not(.btn):not(.btn-link):hover {
+  color: var(--retro-orange-primary);
+  text-shadow: 0 0 5px var(--retro-orange-glow);
+}
+
+a:not(.btn):not(.btn-link)::after {
+  content: '';
+  position: absolute;
+  bottom: -2px;
+  left: 0;
+  width: 0;
+  height: 2px;
+  background: var(--retro-gradient-primary);
+  transition: width var(--retro-transition-medium);
+}
+
+a:not(.btn):not(.btn-link):hover::after {
+  width: 100%;
+}
+
+/* ========================================
+   NAVIGATION ELEMENTS
+   ======================================== */
+
+.navbar,
+.nav-item,
+.nav-link {
+  transition: all var(--retro-transition-medium);
+}
+
+.nav-link:hover {
+  color: var(--retro-lavender-primary) !important;
+  text-shadow: 0 0 8px var(--retro-lavender-glow);
+}
+
+.nav-link.active {
+  color: var(--retro-orange-primary) !important;
+  text-shadow: 0 0 10px var(--retro-orange-glow);
+}
+
+/* ========================================
+   BADGES AND INDICATORS
+   ======================================== */
+
+.badge,
+.status-connected,
+.status-not-authorized {
+  transition: all var(--retro-transition-medium);
+  border: 1px solid transparent;
+}
+
+.badge:hover,
+.status-connected:hover {
+  box-shadow: var(--retro-glow-subtle);
+  border-color: var(--retro-lavender-light);
+}
+
+/* ========================================
+   SPECIAL ANIMATIONS
+   ======================================== */
+
+/* Pulsing glow for important elements */
+@keyframes retro-pulse {
+  0%, 100% { 
+    box-shadow: var(--retro-glow-subtle);
+    transform: scale(1);
+  }
+  50% { 
+    box-shadow: var(--retro-glow-medium);
+    transform: scale(1.02);
+  }
+}
+
+.retro-pulse {
+  animation: retro-pulse 2s ease-in-out infinite;
+}
+
+/* Shimmer effect for special elements */
+@keyframes retro-shimmer {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+
+.retro-shimmer {
+  background: var(--retro-gradient-wave);
+  background-size: 200% 100%;
+  animation: retro-shimmer 2s ease-in-out infinite;
+}
+
+/* ========================================
+   RESPONSIVE ADJUSTMENTS
+   ======================================== */
+
+@media (max-width: 768px) {
+  :root {
+    --retro-glow-subtle: 0 0 8px var(--retro-lavender-glow), 0 0 16px var(--retro-orange-glow);
+    --retro-glow-medium: 0 0 12px var(--retro-lavender-glow), 0 0 24px var(--retro-orange-glow);
+    --retro-glow-intense: 0 0 16px var(--retro-lavender-glow-intense), 0 0 32px var(--retro-orange-glow-intense);
+  }
+  
+  .btn:hover,
+  .btn-primary:hover {
+    transform: translateY(-1px);
+  }
+  
+  .card:hover,
+  .auth-container:hover {
+    transform: translateY(-1px);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+  
+  .retro-wave-footer::before,
+  .footer::before,
+  footer::before {
+    animation: none;
+  }
+} 

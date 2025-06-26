@@ -3,6 +3,9 @@
 {% block title %}Authentic Dashboard{% endblock %}
 
 {% block extra_css %}
+<!-- Retro Wave Glow CSS -->
+<link rel="stylesheet" href="{% static 'css/retro-wave-glow.css' %}?v=1.0.2">
+
 <style>
   .dashboard-insights {
     margin-bottom: var(--space-xl);
@@ -11,75 +14,107 @@
   }
   
   .insights-card {
-    background-color: var(--card-bg);
+    background-color: #180f0f40 !important;
     border-radius: var(--radius);
-    box-shadow: var(--shadow);
-    transition: transform 0.3s ease, box-shadow 0.3s ease;
+    box-shadow: var(--retro-glow-subtle);
+    transition: all var(--retro-transition-medium);
     height: 100%;
     overflow: hidden;
     display: flex;
     flex-direction: column;
     margin-bottom: var(--space-md);
+    border: 1px solid var(--retro-lavender-light);
+    color: white !important;
   }
   
   .insights-card:hover {
     transform: translateY(-3px);
-    box-shadow: var(--shadow-lg);
+    box-shadow: var(--retro-glow-medium);
+    border-color: var(--retro-orange-primary);
   }
   
   .insights-card-header {
-    background: linear-gradient(135deg, var(--primary) 0%, var(--secondary) 100%);
+    background: var(--retro-gradient-primary);
     padding: var(--space-md) var(--space-lg);
-    color: white;
+    color: white !important;
     display: flex;
     align-items: center;
     justify-content: space-between;
+    position: relative;
+    overflow: hidden;
+  }
+  
+  .insights-card-header::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: -100%;
+    width: 100%;
+    height: 100%;
+    background: var(--retro-gradient-wave);
+    animation: retro-wave-sweep 3s ease-in-out infinite;
   }
   
   .insights-card-header h5 {
     margin: 0;
-    color: white;
+    color: white !important;
     font-weight: 600;
+    text-shadow: 0 0 8px var(--retro-lavender-glow);
+    position: relative;
+    z-index: 2;
   }
   
   .insights-card-body {
     padding: var(--space-lg);
     flex: 1;
+    background-color: #180f0f40 !important;
+    color: white !important;
   }
   
   .stat-card {
-    background: linear-gradient(135deg, rgba(123, 104, 238, 0.1) 0%, rgba(123, 104, 238, 0.05) 100%);
+    background: rgba(138, 43, 226, 0.15) !important;
     border-radius: var(--radius-sm);
     padding: var(--space-md);
     margin-bottom: var(--space-md);
     display: flex;
     align-items: center;
+    border: 1px solid var(--retro-lavender-light);
+    transition: all var(--retro-transition-medium);
+    color: white !important;
+  }
+  
+  .stat-card:hover {
+    box-shadow: var(--retro-glow-subtle);
+    border-color: var(--retro-orange-primary);
+    transform: translateY(-2px);
   }
   
   .stat-icon {
     width: 45px;
     height: 45px;
     border-radius: 50%;
-    background: linear-gradient(135deg, var(--primary) 0%, var(--secondary) 100%);
+    background: var(--retro-gradient-primary);
     display: flex;
     align-items: center;
     justify-content: center;
     margin-right: var(--space-md);
-    color: white;
+    color: white !important;
     flex-shrink: 0;
     font-size: 1.25rem;
+    box-shadow: 0 0 15px var(--retro-lavender-glow);
   }
   
   .stat-content h4 {
     margin: 0;
     font-size: 1.2rem;
     font-weight: 700;
+    color: white !important;
   }
   
   .stat-content p {
     margin: 0;
     font-size: 0.875rem;
-    color: var(--light-text);
+    color: rgba(255, 255, 255, 0.8) !important;
   }
   
   .filter-bar {

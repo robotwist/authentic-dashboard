@@ -1634,7 +1634,7 @@ function renderRankedPosts(posts, options = {}) {
 function getCategoryFromScore(score) {
     // Define score ranges
     const categories = [
-        { name: "Pure soul", range: [90, 100], description: "Vulnerable, funny, deep, unique." },
+        { name: "Pure Feed", range: [90, 100], description: "Vulnerable, funny, deep, unique." },
         { name: "Insightful", range: [70, 89], description: "Honest, charmingly human." },
         { name: "Neutral", range: [40, 69], description: "Safe but not manipulative." },
         { name: "Performative", range: [20, 39], description: "Cringe, bland, try-hard." },

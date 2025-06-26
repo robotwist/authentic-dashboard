@@ -1,353 +1,341 @@
-"""
-Dashboard Views Module
-
-Contains all dashboard-related views for the BrandSensor application.
-"""
-
-import os
-import json
-import logging
-import datetime
-from datetime import timedelta
-from collections import Counter, defaultdict
 from django.shortcuts import render, redirect, get_object_or_404
-from django.http import JsonResponse, HttpResponse
 from django.contrib.auth.decorators import login_required
+from django.http import JsonResponse
+from django.db.models import Q, Count, Sum, Avg, F
 from django.utils import timezone
-from django.db.models import Q, Count, Sum, Avg, F, Value, CharField
-from django.db.models.functions import TruncDate
-from django.core.cache import cache
 from django.core.paginator import Paginator
-from django.conf import settings
+from django.contrib import messages
+import datetime
+import logging
 
-from ..models import (
-    SocialPost, 
-    Brand, 
-    BehaviorLog, 
-    UserPreferences,
-    UserPreference,
-    FilterPreset,
-    MLPredictionLog,
-    InterpretationLog,
-    SocialConnection
-)
-from ..utils import get_user_data
+from ..models import SocialPost, UserPreference, Brand, BehaviorLog, FilterPreset
+from ..ml_processor import process_user_posts
+from ..utils import get_user_data, process_image_analysis
 
 logger = logging.getLogger(__name__)
-
-def user_cache_key(user_id, prefix, **kwargs):
-    """Generate a cache key for user-specific data."""
-    suffix = '_'.join(f"{k}_{v}" for k, v in sorted(kwargs.items()))
-    return f"{prefix}_{user_id}_{suffix}" if suffix else f"{prefix}_{user_id}"
 
 @login_required
 def dashboard(request):
     """
-    Main dashboard view for authenticated users
+    Main dashboard view with posts, analytics and filtering
     """
-    user = request.user
-    
-    # Handle filter form submission
-    filter_params = extract_filter_params(request)
-    
-    # Build cache key based on user and filters
-    cache_key = user_cache_key(
-        user.id, 
-        'dashboard_data',
-        **filter_params
-    )
-    
-    # Try to get data from cache
-    dashboard_data = cache.get(cache_key)
-    
-    if not dashboard_data:
-        # Generate dashboard data
-        dashboard_data = generate_dashboard_data(user, filter_params)
-        # Cache for 5 minutes
-        cache.set(cache_key, dashboard_data, 300)
-    
-    # Get user preferences and brands for UI
+    # Process any unprocessed posts first
     try:
-        preferences = UserPreference.objects.get(user=user)
-    except UserPreference.DoesNotExist:
-        preferences = UserPreference.objects.create(user=user)
-    
-    # Get all brands for filter dropdown
-    brands = Brand.objects.all().order_by('name')
-    
-    # Get filter presets
-    filter_presets = FilterPreset.objects.filter(user=user).order_by('name')
-    
-    context = {
-        **dashboard_data,
-        'user': user,
-        'preferences': preferences,
-        'brands': brands,
-        'filter_presets': filter_presets,
-        'active_filters': filter_params,
-    }
-    
-    return render(request, 'brandsensor/dashboard.html', context)
+        process_user_posts(request.user.id, limit=50)
+    except Exception as e:
+        logger.error(f"Error processing posts for dashboard: {str(e)}")
 
-def extract_filter_params(request):
-    """Extract filter parameters from request"""
-    filter_params = {}
-    
-    # Date range filters
-    date_from = request.GET.get('date_from')
-    date_to = request.GET.get('date_to')
-    
-    if date_from:
-        filter_params['date_from'] = date_from
-    if date_to:
-        filter_params['date_to'] = date_to
-    
-    # Platform filter
-    platform = request.GET.get('platform')
-    if platform and platform != 'all':
-        filter_params['platform'] = platform
-    
-    # Brand filter
-    brand_id = request.GET.get('brand')
-    if brand_id and brand_id != 'all':
-        filter_params['brand_id'] = brand_id
-    
-    # Sentiment filter
-    sentiment = request.GET.get('sentiment')
-    if sentiment and sentiment != 'all':
-        filter_params['sentiment'] = sentiment
-    
-    # Authenticity filter
-    authenticity = request.GET.get('authenticity')
-    if authenticity and authenticity != 'all':
-        filter_params['authenticity'] = authenticity
-    
-    # Search query
-    search = request.GET.get('search')
-    if search:
-        filter_params['search'] = search
-    
-    return filter_params
+    # Fetch user data using the utility function
+    user_data = get_user_data(request.user)
 
-def generate_dashboard_data(user, filter_params):
-    """Generate dashboard data based on user and filters"""
+    # Get user preferences or create default
+    preferences, created = UserPreference.objects.get_or_create(user=request.user)
     
-    # Base queryset for posts
-    posts_qs = SocialPost.objects.filter(user=user)
+    # Get filters from URL parameters
+    days_filter = request.GET.get('days', '7')
+    platform_filter = request.GET.get('platform', '')
+    friends_only = request.GET.get('friends_only', 'false') == 'true'
+    hide_sponsored = request.GET.get('hide_sponsored', 'true') == 'true'
+    min_authenticity = request.GET.get('min_authenticity', '')
+    max_authenticity = request.GET.get('max_authenticity', '')
     
-    # Apply filters
-    posts_qs = apply_dashboard_filters(posts_qs, filter_params)
+    # Convert days filter to integer
+    try:
+        days_ago = int(days_filter)
+    except ValueError:
+        days_ago = 7
     
-    # Get total counts
-    total_posts = posts_qs.count()
+    # Calculate date range
+    since_date = timezone.now() - datetime.timedelta(days=days_ago)
     
-    # Recent posts for feed
-    recent_posts = posts_qs.order_by('-created_at')[:20]
-    
-    # Platform breakdown
-    platform_stats = posts_qs.values('platform').annotate(
-        count=Count('id')
-    ).order_by('-count')
-    
-    # Brand sentiment analysis
-    brand_sentiment = posts_qs.filter(brand__isnull=False).values(
-        'brand__name'
-    ).annotate(
-        positive=Count('id', filter=Q(sentiment='positive')),
-        negative=Count('id', filter=Q(sentiment='negative')),
-        neutral=Count('id', filter=Q(sentiment='neutral')),
-        total=Count('id')
-    ).order_by('-total')[:10]
-    
-    # Daily activity
-    daily_activity = posts_qs.annotate(
-        date=TruncDate('created_at')
-    ).values('date').annotate(
-        count=Count('id')
-    ).order_by('date')
-    
-    # Top keywords/hashtags
-    hashtags = extract_hashtags_from_posts(posts_qs)
-    top_hashtags = hashtags.most_common(10)
-    
-    # Authenticity score distribution
-    authenticity_stats = posts_qs.aggregate(
-        avg_authenticity=Avg('authenticity_score'),
-        high_authenticity=Count('id', filter=Q(authenticity_score__gte=0.8)),
-        medium_authenticity=Count('id', filter=Q(authenticity_score__range=(0.5, 0.8))),
-        low_authenticity=Count('id', filter=Q(authenticity_score__lt=0.5))
+    # Base query
+    posts = SocialPost.objects.filter(
+        user=request.user,
+        created_at__gte=since_date,
+        hidden=False
     )
     
-    return {
-        'total_posts': total_posts,
-        'recent_posts': recent_posts,
-        'platform_stats': platform_stats,
-        'brand_sentiment': brand_sentiment,
-        'daily_activity': daily_activity,
-        'top_hashtags': top_hashtags,
-        'authenticity_stats': authenticity_stats,
-    }
-
-def apply_dashboard_filters(queryset, filter_params):
-    """Apply various filters to the posts queryset"""
+    # Apply platform filter if specified
+    if platform_filter:
+        posts = posts.filter(platform=platform_filter)
     
-    if 'date_from' in filter_params:
-        try:
-            date_from = datetime.datetime.strptime(filter_params['date_from'], '%Y-%m-%d')
-            queryset = queryset.filter(created_at__gte=date_from)
-        except ValueError:
-            pass
+    # Apply friends filter
+    if friends_only and preferences.friends_list:
+        friends = [f.strip().lower() for f in preferences.friends_list.split(',')]
+        friends_query = Q()
+        for friend in friends:
+            if friend:
+                friends_query |= Q(original_user__icontains=friend)
+        posts = posts.filter(friends_query)
     
-    if 'date_to' in filter_params:
-        try:
-            date_to = datetime.datetime.strptime(filter_params['date_to'], '%Y-%m-%d')
-            queryset = queryset.filter(created_at__lte=date_to)
-        except ValueError:
-            pass
+    # Apply sponsored content filter
+    if hide_sponsored:
+        posts = posts.filter(is_sponsored=False)
     
-    if 'platform' in filter_params:
-        queryset = queryset.filter(platform=filter_params['platform'])
+    # Apply authenticity score filters
+    if min_authenticity and min_authenticity.isdigit():
+        posts = posts.filter(authenticity_score__gte=int(min_authenticity))
     
-    if 'brand_id' in filter_params:
-        try:
-            brand_id = int(filter_params['brand_id'])
-            queryset = queryset.filter(brand_id=brand_id)
-        except (ValueError, TypeError):
-            pass
+    if max_authenticity and max_authenticity.isdigit():
+        posts = posts.filter(authenticity_score__lte=int(max_authenticity))
     
-    if 'sentiment' in filter_params:
-        queryset = queryset.filter(sentiment=filter_params['sentiment'])
-    
-    if 'authenticity' in filter_params:
-        if filter_params['authenticity'] == 'high':
-            queryset = queryset.filter(authenticity_score__gte=0.8)
-        elif filter_params['authenticity'] == 'medium':
-            queryset = queryset.filter(authenticity_score__range=(0.5, 0.8))
-        elif filter_params['authenticity'] == 'low':
-            queryset = queryset.filter(authenticity_score__lt=0.5)
-    
-    if 'search' in filter_params:
-        search_query = filter_params['search']
-        queryset = queryset.filter(
-            Q(content__icontains=search_query) |
-            Q(author__icontains=search_query) |
-            Q(brand__name__icontains=search_query)
+    # Apply user preference filters
+    if preferences.hide_political_content:
+        posts = posts.exclude(
+            Q(content__icontains='trump') | 
+            Q(content__icontains='biden') | 
+            Q(content__icontains='election') |
+            Q(automated_category__iexact='politics') |
+            Q(category__icontains='political')
         )
     
-    return queryset
-
-def extract_hashtags_from_posts(posts_qs):
-    """Extract hashtags from posts content"""
-    hashtags = Counter()
+    if preferences.hide_sexual_content:
+        posts = posts.exclude(
+            Q(content__icontains='onlyfans') | 
+            Q(content__icontains='dating') |
+            Q(automated_category__iexact='adult') |
+            Q(category__icontains='sexual')
+        )
     
-    for post in posts_qs.only('content'):
-        if post.content:
-            # Simple hashtag extraction
-            import re
-            found_hashtags = re.findall(r'#\w+', post.content.lower())
-            hashtags.update(found_hashtags)
+    # Apply interest filter if set
+    if preferences.interest_filter:
+        interests = [interest.strip() for interest in preferences.interest_filter.split(',')]
+        interest_query = Q()
+        for interest in interests:
+            if interest:
+                interest_query |= (
+                    Q(content__icontains=interest) | 
+                    Q(category__icontains=interest) | 
+                    Q(hashtags__icontains=interest) |
+                    Q(automated_category__iexact=interest)
+                )
+        
+        if interest_query:
+            posts = posts.filter(interest_query)
     
-    return hashtags
+    # Apply approved brands filter if set
+    if preferences.approved_brands:
+        approved = [b.strip().lower() for b in preferences.approved_brands.split(',')]
+        brand_query = Q()
+        for brand in approved:
+            if brand:
+                brand_query |= Q(original_user__icontains=brand)
+        
+        if brand_query:
+            posts = posts.filter(brand_query)
+    
+    # Apply excluded keywords filter
+    if preferences.excluded_keywords:
+        excluded = [k.strip() for k in preferences.excluded_keywords.split(',')]
+        for keyword in excluded:
+            if keyword:
+                posts = posts.exclude(content__icontains=keyword)
+    
+    # Order posts by authenticity score and date
+    posts = posts.order_by('-authenticity_score', '-collected_at')
+    
+    # Pagination
+    paginator = Paginator(posts, 25)
+    page_number = request.GET.get('page', 1)
+    page_posts = paginator.get_page(page_number)
+    
+    # Get platform choices for filter dropdown
+    platforms = SocialPost.PLATFORM_CHOICES
+    
+    # Get analytics data
+    total_posts = posts.count()
+    avg_authenticity = posts.aggregate(Avg('authenticity_score'))['authenticity_score__avg'] or 0
+    
+    # Platform distribution
+    platform_stats = []
+    for platform_code, platform_name in platforms:
+        count = posts.filter(platform=platform_code).count()
+        if count > 0:
+            platform_stats.append({
+                'platform': platform_name,
+                'code': platform_code,
+                'count': count
+            })
+    
+    # Process image analysis data
+    image_posts = SocialPost.objects.filter(user=request.user).exclude(image_urls='')
+    image_analysis_stats = process_image_analysis(image_posts)
+    
+    # Get top categories
+    category_stats = posts.exclude(category='').values('category').annotate(
+        count=Count('id'),
+        name=F('category')
+    ).order_by('-count')[:5]
+    
+    # Get sentiment distribution
+    sentiment_distribution = posts.filter(
+        sentiment_score__isnull=False
+    ).values('sentiment_score').annotate(
+        count=Count('id')
+    ).order_by('sentiment_score')
+    
+    # Group sentiment scores into bins
+    sentiment_bins = {
+        'very_negative': 0,
+        'negative': 0,
+        'neutral': 0,
+        'positive': 0,
+        'very_positive': 0
+    }
+    
+    for item in sentiment_distribution:
+        score = item['sentiment_score']
+        count = item['count']
+        
+        if score < -0.6:
+            sentiment_bins['very_negative'] += count
+        elif score < -0.2:
+            sentiment_bins['negative'] += count
+        elif score < 0.2:
+            sentiment_bins['neutral'] += count
+        elif score < 0.6:
+            sentiment_bins['positive'] += count
+        else:
+            sentiment_bins['very_positive'] += count
+    
+    context = {
+        'posts': page_posts,
+        'user_data': user_data,
+        'preferences': preferences,
+        'total_posts': total_posts,
+        'avg_authenticity': round(avg_authenticity, 1),
+        'platform_stats': platform_stats,
+        'category_stats': category_stats,
+        'sentiment_bins': sentiment_bins,
+        'image_analysis_stats': image_analysis_stats,
+        'platforms': platforms,
+        'days_filter': days_filter,
+        'platform_filter': platform_filter,
+        'friends_only': friends_only,
+        'hide_sponsored': hide_sponsored,
+        'min_authenticity': min_authenticity,
+        'max_authenticity': max_authenticity,
+    }
+    
+    return render(request, "brandsensor/dashboard.html", context)
 
 @login_required
 def toggle_mode(request):
     """
-    Toggle between different viewing modes (light/dark, compact/expanded, etc.)
+    Toggle between different dashboard modes
     """
-    if request.method == 'POST':
-        mode_type = request.POST.get('mode_type')
-        mode_value = request.POST.get('mode_value')
-        
-        if mode_type and mode_value:
-            # Update user preferences
-            try:
-                preferences = UserPreference.objects.get(user=request.user)
-            except UserPreference.DoesNotExist:
-                preferences = UserPreference.objects.create(user=request.user)
-            
-            # Handle different mode types
-            if mode_type == 'theme':
-                # Assuming we add a theme field to UserPreference model
-                preferences.theme = mode_value
-                preferences.save()
-            elif mode_type == 'view_mode':
-                # Assuming we add a view_mode field to UserPreference model  
-                preferences.view_mode = mode_value
-                preferences.save()
-            
-            return JsonResponse({'status': 'success'})
+    mode = request.GET.get('mode', 'default')
     
-    return JsonResponse({'status': 'error', 'message': 'Invalid request'})
+    # Store mode preference in session
+    request.session['dashboard_mode'] = mode
+    
+    return redirect('dashboard')
 
 @login_required
 def onboarding(request):
     """
-    User onboarding flow for new users
+    User onboarding flow
     """
-    user = request.user
+    user_data = get_user_data(request.user)
     
     # Check if user has completed onboarding
-    try:
-        preferences = UserPreference.objects.get(user=user)
-        if preferences.onboarding_completed:
-            return redirect('dashboard')
-    except UserPreference.DoesNotExist:
-        preferences = UserPreference.objects.create(user=user)
+    preferences = user_data.get('preferences')
+    if preferences and preferences.onboarding_completed:
+        return redirect('dashboard')
     
     if request.method == 'POST':
-        # Handle onboarding form submission
-        step = request.POST.get('step')
+        # Process onboarding form
+        interests = request.POST.get('interests', '')
+        friends_list = request.POST.get('friends_list', '')
         
-        if step == 'preferences':
-            # Update user preferences from onboarding
-            handle_onboarding_preferences(request, preferences)
-        elif step == 'brands':
-            # Handle brand selection
-            handle_onboarding_brands(request, user)
-        elif step == 'complete':
-            # Mark onboarding as completed
+        if preferences:
+            preferences.interest_filter = interests
+            preferences.friends_list = friends_list
             preferences.onboarding_completed = True
             preferences.save()
-            return redirect('dashboard')
+        
+        messages.success(request, "Onboarding completed! Welcome to your dashboard.")
+        return redirect('dashboard')
     
-    # Get context for onboarding
     context = {
-        'user': user,
-        'preferences': preferences,
-        'brands': Brand.objects.all().order_by('name'),
-        'platforms': ['facebook', 'instagram', 'twitter', 'linkedin', 'tiktok'],
+        'user_data': user_data,
     }
     
-    return render(request, 'brandsensor/onboarding.html', context)
+    return render(request, "brandsensor/onboarding.html", context)
 
-def handle_onboarding_preferences(request, preferences):
-    """Handle preference updates during onboarding"""
+@login_required
+def pure_feed(request):
+    """
+    Pure Feed view - displays social posts ranked by authenticity score
+    """
+    # Process any unprocessed posts
+    try:
+        process_user_posts(request.user.id, limit=100)
+    except Exception as e:
+        logger.error(f"Error processing posts for pure feed: {str(e)}")
     
-    # Update notification preferences
-    preferences.email_notifications = 'email_notifications' in request.POST
-    preferences.browser_notifications = 'browser_notifications' in request.POST
+    # Get filters from URL parameters
+    days_filter = request.GET.get('days', '30')
+    try:
+        days_ago = int(days_filter)
+    except ValueError:
+        days_ago = 30
     
-    # Update content filtering preferences
-    if 'filter_inappropriate' in request.POST:
-        preferences.filter_inappropriate_content = True
+    platform_filter = request.GET.get('platform', '')
+    min_score = request.GET.get('min_score', '')
+    max_score = request.GET.get('max_score', '')
     
-    if 'filter_low_quality' in request.POST:
-        preferences.filter_low_quality_content = True
+    since_date = timezone.now() - datetime.timedelta(days=days_ago)
     
-    preferences.save()
-
-def handle_onboarding_brands(request, user):
-    """Handle brand selection during onboarding"""
+    # Base query - all posts in time range
+    posts = SocialPost.objects.filter(
+        user=request.user,
+        created_at__gte=since_date,
+        hidden=False
+    )
     
-    selected_brands = request.POST.getlist('brands')
+    # Apply platform filter if specified
+    if platform_filter:
+        posts = posts.filter(platform=platform_filter)
     
-    if selected_brands:
-        try:
-            preferences = UserPreference.objects.get(user=user)
-        except UserPreference.DoesNotExist:
-            preferences = UserPreference.objects.create(user=user)
-        
-        # Set approved brands (assuming this field exists)
-        brands = Brand.objects.filter(id__in=selected_brands)
-        preferences.approved_brands.set(brands)
-        preferences.save() 
+    # Filter by score range if specified
+    if min_score and min_score.isdigit():
+        posts = posts.filter(authenticity_score__gte=int(min_score))
+    
+    if max_score and max_score.isdigit():
+        posts = posts.filter(authenticity_score__lte=int(max_score))
+    
+    # Order by authenticity score (highest first)
+    posts = posts.order_by('-authenticity_score', '-collected_at')
+    
+    # Pagination
+    paginator = Paginator(posts, 30)
+    page_number = request.GET.get('page', 1)
+    page_posts = paginator.get_page(page_number)
+    
+    # Get statistics
+    total_posts = posts.count()
+    avg_score = posts.aggregate(Avg('authenticity_score'))['authenticity_score__avg'] or 0
+    
+    # Score distribution
+    score_ranges = {
+        'pure': posts.filter(authenticity_score__gte=90).count(),
+        'good': posts.filter(authenticity_score__gte=70, authenticity_score__lt=90).count(),
+        'neutral': posts.filter(authenticity_score__gte=40, authenticity_score__lt=70).count(),
+        'poor': posts.filter(authenticity_score__gte=20, authenticity_score__lt=40).count(),
+        'spam': posts.filter(authenticity_score__lt=20).count(),
+    }
+    
+    context = {
+        'posts': page_posts,
+        'total_posts': total_posts,
+        'avg_score': round(avg_score, 1),
+        'score_ranges': score_ranges,
+        'platforms': SocialPost.PLATFORM_CHOICES,
+        'days_filter': days_filter,
+        'platform_filter': platform_filter,
+        'min_score': min_score,
+        'max_score': max_score,
+    }
+    
+    return render(request, "brandsensor/pure_feed.html", context) 

@@ -200,10 +200,13 @@ class FilteredContent(models.Model):
         return f"{self.user.username}'s {self.content_type} from {self.social_account.platform}"
 
 @receiver(post_save, sender=User)
-def create_user_profile(sender, instance, created, if_created, **kwargs):
+def create_user_profile(sender, instance, created, **kwargs):
     if created:
         UserProfile.objects.create(user=instance)
 
 @receiver(post_save, sender=User)
 def save_user_profile(sender, instance, **kwargs):
-    instance.userprofile.save() 
+    try:
+        instance.userprofile.save()
+    except UserProfile.DoesNotExist:
+        pass 
