@@ -4,7 +4,11 @@
 {% block title %}ML Insights - Authentic Internet{% endblock %}
 
 {% block extra_css %}
+<!-- Retro Wave Glow CSS -->
+<link rel="stylesheet" href="{% static 'css/retro-wave-glow.css' %}?v=1.0.2">
+
 <style>
+  /* Override base styles with retro wave theme */
   .insights-section {
     margin-bottom: var(--space-xl);
     position: relative;
@@ -12,74 +16,106 @@
   }
   
   .insights-card {
-    background-color: var(--card-bg);
+    background-color: #180f0f40 !important;
     border-radius: var(--radius);
-    box-shadow: var(--shadow);
-    transition: transform 0.3s ease, box-shadow 0.3s ease;
+    box-shadow: var(--retro-glow-subtle);
+    transition: all var(--retro-transition-medium);
     height: 100%;
     overflow: hidden;
     display: flex;
     flex-direction: column;
+    border: 1px solid var(--retro-lavender-light);
+    color: white !important;
   }
   
   .insights-card:hover {
     transform: translateY(-5px);
-    box-shadow: var(--shadow-lg);
+    box-shadow: var(--retro-glow-medium);
+    border-color: var(--retro-orange-primary);
   }
   
   .insights-card-header {
-    background: linear-gradient(135deg, var(--primary) 0%, var(--secondary) 100%);
+    background: var(--retro-gradient-primary);
     padding: var(--space-md) var(--space-lg);
-    color: white;
+    color: white !important;
     display: flex;
     align-items: center;
     justify-content: space-between;
+    position: relative;
+    overflow: hidden;
+  }
+  
+  .insights-card-header::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: -100%;
+    width: 100%;
+    height: 100%;
+    background: var(--retro-gradient-wave);
+    animation: retro-wave-sweep 3s ease-in-out infinite;
   }
   
   .insights-card-header h5 {
     margin: 0;
-    color: white;
+    color: white !important;
     font-weight: 600;
+    text-shadow: 0 0 8px var(--retro-lavender-glow);
+    position: relative;
+    z-index: 2;
   }
   
   .insights-card-body {
     padding: var(--space-lg);
     flex: 1;
+    background-color: #180f0f40 !important;
+    color: white !important;
   }
   
   .stat-card {
-    background: linear-gradient(135deg, rgba(123, 104, 238, 0.1) 0%, rgba(123, 104, 238, 0.05) 100%);
+    background: rgba(138, 43, 226, 0.15) !important;
     border-radius: var(--radius-sm);
     padding: var(--space-md);
     margin-bottom: var(--space-md);
     display: flex;
     align-items: center;
+    border: 1px solid var(--retro-lavender-light);
+    transition: all var(--retro-transition-medium);
+    color: white !important;
+  }
+  
+  .stat-card:hover {
+    box-shadow: var(--retro-glow-subtle);
+    border-color: var(--retro-orange-primary);
+    transform: translateY(-2px);
   }
   
   .stat-icon {
     width: 45px;
     height: 45px;
     border-radius: 50%;
-    background: linear-gradient(135deg, var(--primary) 0%, var(--secondary) 100%);
+    background: var(--retro-gradient-primary);
     display: flex;
     align-items: center;
     justify-content: center;
     margin-right: var(--space-md);
-    color: white;
+    color: white !important;
     flex-shrink: 0;
     font-size: 1.25rem;
+    box-shadow: 0 0 15px var(--retro-lavender-glow);
   }
   
   .stat-content h4 {
     margin: 0;
     font-size: 1.2rem;
     font-weight: 700;
+    color: white !important;
   }
   
   .stat-content p {
     margin: 0;
     font-size: 0.875rem;
-    color: var(--light-text);
+    color: rgba(255, 255, 255, 0.8) !important;
   }
   
   .image-card {
@@ -87,8 +123,16 @@
     margin-bottom: var(--space-md);
     border-radius: var(--radius-sm);
     overflow: hidden;
-    background-color: var(--card-bg);
-    box-shadow: var(--shadow-sm);
+    background-color: #180f0f40 !important;
+    box-shadow: var(--retro-glow-subtle);
+    border: 1px solid var(--retro-lavender-light);
+    transition: all var(--retro-transition-medium);
+  }
+  
+  .image-card:hover {
+    box-shadow: var(--retro-glow-medium);
+    border-color: var(--retro-orange-primary);
+    transform: translateY(-2px);
   }
   
   .image-card img {
@@ -104,20 +148,22 @@
     left: 0;
     right: 0;
     padding: var(--space-md);
-    background: linear-gradient(to top, rgba(0,0,0,0.8) 0%, rgba(0,0,0,0) 100%);
-    color: white;
+    background: linear-gradient(to top, rgba(24, 15, 15, 0.9) 0%, rgba(24, 15, 15, 0.3) 100%);
+    color: white !important;
   }
   
   .image-overlay h5 {
     margin: 0;
-    color: white;
+    color: white !important;
     font-size: 0.95rem;
+    text-shadow: 0 0 5px var(--retro-lavender-glow);
   }
   
   .image-overlay p {
     margin: 0;
     font-size: 0.8rem;
     opacity: 0.9;
+    color: rgba(255, 255, 255, 0.8) !important;
   }
   
   .image-badges {
@@ -133,31 +179,40 @@
     font-size: 0.7rem;
     padding: 0.2rem 0.5rem;
     border-radius: 50px;
-    background-color: rgba(0,0,0,0.6);
-    color: white;
+    background-color: rgba(138, 43, 226, 0.8);
+    color: white !important;
     backdrop-filter: blur(4px);
+    border: 1px solid var(--retro-lavender-light);
+    box-shadow: 0 0 8px var(--retro-lavender-glow);
   }
   
   .image-badge.score {
-    background-color: rgba(255, 126, 95, 0.9);
+    background-color: rgba(255, 101, 0, 0.9);
+    border-color: var(--retro-orange-primary);
+    box-shadow: 0 0 8px var(--retro-orange-glow);
   }
   
   .filter-bar {
-    background-color: var(--card-bg);
+    background-color: #180f0f40 !important;
     border-radius: var(--radius);
     padding: var(--space-md) var(--space-lg);
     margin-bottom: var(--space-xl);
-    box-shadow: var(--shadow-sm);
+    box-shadow: var(--retro-glow-subtle);
     display: flex;
     flex-wrap: wrap;
     gap: var(--space-md);
     align-items: center;
+    border: 1px solid var(--retro-lavender-light);
+    color: white !important;
   }
   
   .chart-container {
     height: 300px;
     width: 100%;
     position: relative;
+    background-color: rgba(24, 15, 15, 0.2) !important;
+    border-radius: var(--radius-sm);
+    padding: var(--space-md);
   }
   
   .platform-pill {
@@ -168,8 +223,15 @@
     font-size: 0.85rem;
     margin-right: 0.5rem;
     margin-bottom: 0.5rem;
-    background-color: rgba(123, 104, 238, 0.1);
-    color: var(--accent);
+    background-color: rgba(138, 43, 226, 0.2) !important;
+    color: white !important;
+    border: 1px solid var(--retro-lavender-light);
+    transition: all var(--retro-transition-medium);
+  }
+  
+  .platform-pill:hover {
+    box-shadow: var(--retro-glow-subtle);
+    border-color: var(--retro-orange-primary);
   }
   
   .platform-pill i {
@@ -177,23 +239,27 @@
   }
   
   .platform-pill.facebook {
-    background-color: rgba(24, 119, 242, 0.1);
-    color: #1877f2;
+    background-color: rgba(24, 119, 242, 0.2) !important;
+    color: #4a9eff !important;
+    border-color: #1877f2;
   }
   
   .platform-pill.instagram {
-    background-color: rgba(193, 53, 132, 0.1);
-    color: #c13584;
+    background-color: rgba(193, 53, 132, 0.2) !important;
+    color: #e91e63 !important;
+    border-color: #c13584;
   }
   
   .platform-pill.twitter {
-    background-color: rgba(29, 161, 242, 0.1);
-    color: #1da1f2;
+    background-color: rgba(29, 161, 242, 0.2) !important;
+    color: #64b5f6 !important;
+    border-color: #1da1f2;
   }
   
   .platform-pill.linkedin {
-    background-color: rgba(0, 119, 181, 0.1);
-    color: #0077b5;
+    background-color: rgba(0, 119, 181, 0.2) !important;
+    color: #42a5f5 !important;
+    border-color: #0077b5;
   }
   
   .no-data-message {
@@ -203,14 +269,127 @@
     justify-content: center;
     padding: var(--space-xl);
     text-align: center;
-    color: var(--light-text);
+    color: rgba(255, 255, 255, 0.8) !important;
+    background-color: rgba(24, 15, 15, 0.3) !important;
+    border-radius: var(--radius-sm);
+    border: 1px solid var(--retro-lavender-light);
   }
   
   .no-data-message i {
     font-size: 3rem;
     margin-bottom: var(--space-md);
-    color: var(--primary);
-    opacity: 0.5;
+    color: var(--retro-lavender-primary) !important;
+    opacity: 0.7;
+    text-shadow: 0 0 10px var(--retro-lavender-glow);
+  }
+  
+  .no-data-message h5 {
+    color: white !important;
+    text-shadow: 0 0 5px var(--retro-lavender-glow);
+  }
+  
+  .no-data-message p {
+    color: rgba(255, 255, 255, 0.8) !important;
+  }
+  
+  /* Additional retro wave styling for all elements */
+  .card,
+  .card-header,
+  .card-body {
+    background-color: #180f0f40 !important;
+    color: white !important;
+    border-color: var(--retro-lavender-light) !important;
+  }
+  
+  .card-header {
+    background: var(--retro-gradient-primary) !important;
+  }
+  
+  .card-header h5 {
+    color: white !important;
+    text-shadow: 0 0 8px var(--retro-lavender-glow);
+  }
+  
+  .bg-primary {
+    background: var(--retro-gradient-primary) !important;
+  }
+  
+  .text-white {
+    color: white !important;
+  }
+  
+  .bg-light {
+    background-color: rgba(138, 43, 226, 0.1) !important;
+    color: white !important;
+  }
+  
+  .text-primary {
+    color: var(--retro-lavender-primary) !important;
+  }
+  
+  .text-muted {
+    color: rgba(255, 255, 255, 0.7) !important;
+  }
+  
+  .badge-light {
+    background-color: rgba(255, 255, 255, 0.2) !important;
+    color: white !important;
+    border: 1px solid var(--retro-lavender-light);
+  }
+  
+  .btn-outline {
+    border-color: var(--retro-lavender-primary) !important;
+    color: var(--retro-lavender-primary) !important;
+    background-color: transparent !important;
+  }
+  
+  .btn-outline:hover {
+    background-color: var(--retro-lavender-primary) !important;
+    color: white !important;
+    box-shadow: var(--retro-glow-subtle);
+  }
+  
+  /* Table styling for content analysis */
+  .table,
+  .table th,
+  .table td {
+    color: white !important;
+    border-color: rgba(255, 255, 255, 0.2) !important;
+  }
+  
+  .table thead th {
+    color: var(--retro-lavender-primary) !important;
+    border-bottom-color: var(--retro-lavender-primary) !important;
+  }
+  
+  .table tbody tr:hover {
+    background-color: rgba(138, 43, 226, 0.1) !important;
+  }
+  
+  /* Pipeline diagram styling */
+  .pipeline-step {
+    color: white !important;
+  }
+  
+  .step-icon {
+    background: var(--retro-gradient-primary) !important;
+    color: white !important;
+    box-shadow: 0 0 15px var(--retro-lavender-glow);
+  }
+  
+  .step-name {
+    color: white !important;
+    text-shadow: 0 0 5px var(--retro-lavender-glow);
+  }
+  
+  /* Force all text to be visible */
+  * {
+    color: white !important;
+  }
+  
+  h1, h2, h3, h4, h5, h6 {
+    color: white !important;
+    text-shadow: 0 0 8px var(--retro-lavender-glow);
   }
   
   @media (max-width: 768px) {

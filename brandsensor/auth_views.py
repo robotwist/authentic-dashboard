@@ -30,10 +30,16 @@ def landing(request):
     Landing page view - redirects to dashboard if authenticated,
     otherwise shows marketing/onboarding page
     """
-    if request.user.is_authenticated:
-        return redirect('dashboard')
-    
-    return render(request, "brandsensor/landing.html")
+    try:
+        if request.user.is_authenticated:
+            return redirect('dashboard')
+        
+        return render(request, "brandsensor/landing.html")
+    except Exception as e:
+        # Debug: log the error
+        logger.error(f"Landing view error: {e}")
+        from django.http import HttpResponse
+        return HttpResponse(f"Landing view error: {e}", status=500)
 
 def user_login(request):
     """

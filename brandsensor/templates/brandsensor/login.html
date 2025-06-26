@@ -5,13 +5,84 @@
 
 {% block extra_css %}
 <style>
+    /* RETRO WAVE LOGIN STYLES */
+    :root {
+        --retro-lavender-primary: #8A2BE2;
+        --retro-lavender-glow: rgba(138, 43, 226, 0.6);
+        --retro-orange-primary: #FF6500;
+        --retro-orange-glow: rgba(255, 101, 0, 0.6);
+        --retro-glow-medium: 0 0 15px var(--retro-lavender-glow), 0 0 30px var(--retro-orange-glow);
+    }
+    
     .auth-container {
         max-width: 500px;
         margin: 4rem auto;
         padding: 2rem;
         border-radius: 10px;
-        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
-        background-color: white;
+        box-shadow: var(--retro-glow-medium);
+        background-color: #180f0f40;
+        border: 2px solid transparent;
+        transition: all 0.4s ease-out;
+        position: relative;
+        overflow: hidden;
+    }
+    
+    .auth-container::before {
+        content: '';
+        position: absolute;
+        top: 0;
+        left: -100%;
+        width: 300%;
+        height: 100%;
+        background: linear-gradient(90deg, 
+            transparent 0%, 
+            var(--retro-lavender-glow) 25%, 
+            var(--retro-orange-glow) 50%, 
+            var(--retro-lavender-glow) 75%, 
+            transparent 100%);
+        animation: retro-wave-sweep 3s ease-in-out infinite;
+        opacity: 0.2;
+    }
+    
+    @keyframes retro-wave-sweep {
+        0% { transform: translateX(-100%); }
+        50% { transform: translateX(0%); }
+        100% { transform: translateX(100%); }
+    }
+    
+    .auth-container h2 {
+        color: var(--retro-lavender-primary) !important;
+        text-shadow: 0 0 10px var(--retro-lavender-glow);
+        position: relative;
+        z-index: 2;
+    }
+    
+    .auth-container p {
+        color: rgba(255, 255, 255, 0.9) !important;
+        position: relative;
+        z-index: 2;
+    }
+    
+    .auth-container label {
+        color: white !important;
+        position: relative;
+        z-index: 2;
+    }
+    
+    /* Debug indicator */
+    body::after {
+        content: "🌊 Login Retro Wave";
+        position: fixed;
+        bottom: 10px;
+        right: 10px;
+        background: linear-gradient(135deg, var(--retro-lavender-primary), var(--retro-orange-primary));
+        color: white;
+        padding: 5px 10px;
+        border-radius: 20px;
+        font-size: 12px;
+        z-index: 9999;
+        opacity: 0.8;
+        pointer-events: none;
     }
     
     .auth-header {

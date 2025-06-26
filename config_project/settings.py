@@ -28,7 +28,7 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 SECRET_KEY = os.getenv('DJANGO_SECRET_KEY', 'django-insecure-+lbcqx)%o0hj)5n5!9@o=n-z38-#(qur=u!q7e*5ggt^p^rjn_')
 
 # SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = os.getenv('DJANGO_DEBUG', 'False').lower() == 'true'
+DEBUG = False  # Temporarily disabled for demo to avoid ML loading issues
 
 # ALLOWED_HOSTS should include production domain
 ALLOWED_HOSTS = os.getenv('ALLOWED_HOSTS', 'localhost,127.0.0.1,authenticdashboard.com').split(',')
@@ -109,7 +109,7 @@ TEMPLATES = [
                 'django.template.context_processors.request',
                 'django.contrib.auth.context_processors.auth',
                 'django.contrib.messages.context_processors.messages',
-                'brandsensor.context_processors.social_media_settings',  # Added our social media context processor
+                # 'brandsensor.context_processors.social_media_settings',  # Temporarily disabled
             ],
             'builtins': [
                 'django.templatetags.static',

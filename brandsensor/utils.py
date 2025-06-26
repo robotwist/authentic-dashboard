@@ -126,19 +126,34 @@ def process_image_analysis(posts):
                 # Extract objects
                 if 'objects' in analysis:
                     for obj in analysis['objects']:
-                        object_name = obj.get('name', 'unknown')
+                        # Handle both string objects and dict objects
+                        if isinstance(obj, str):
+                            object_name = obj
+                        elif isinstance(obj, dict):
+                            object_name = obj.get('name', 'unknown')
+                        else:
+                            object_name = 'unknown'
                         object_counts[object_name] = object_counts.get(object_name, 0) + 1
                 
                 # Count faces
                 if 'faces' in analysis:
-                    num_faces = len(analysis['faces'])
+                    # Handle both integer faces and list faces
+                    if isinstance(analysis['faces'], int):
+                        num_faces = analysis['faces']
+                    elif isinstance(analysis['faces'], list):
+                        num_faces = len(analysis['faces'])
+                    else:
+                        num_faces = 0
                     face_count += num_faces
                     if num_faces > 0:
                         posts_with_faces += 1
                 
                 # Collect aesthetics scores
-                if 'aesthetics' in analysis and isinstance(analysis['aesthetics'], (int, float)):
-                    aesthetic_scores.append(analysis['aesthetics'])
+                if 'aesthetics' in analysis:
+                    if isinstance(analysis['aesthetics'], (int, float)):
+                        aesthetic_scores.append(analysis['aesthetics'])
+                    elif isinstance(analysis['aesthetics'], dict) and 'score' in analysis['aesthetics']:
+                        aesthetic_scores.append(analysis['aesthetics']['score'])
                 
                 # Collect captions
                 if 'caption' in analysis and analysis['caption']:

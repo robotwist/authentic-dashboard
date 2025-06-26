@@ -1152,7 +1152,7 @@ def pure_feed(request):
     """
     Pure Feed view - displays social posts ranked by authenticity score
     Using the 0-100 scale:
-    90-100: Pure soul. Vulnerable, funny, deep, unique.
+    90-100: Pure Feed. Vulnerable, funny, deep, unique.
     70-89: Insightful, honest, charmingly human.
     40-69: Neutral. Meh. Safe but not manipulative.
     20-39: Performative, cringe, bland, try-hard.
@@ -1202,7 +1202,7 @@ def pure_feed(request):
     
     # Count posts by score bracket
     score_brackets = [
-        {'name': 'Pure soul (90-100)', 'min': 90, 'max': 100, 'description': 'Vulnerable, funny, deep, unique'},
+        {'name': 'Pure Feed (90-100)', 'min': 90, 'max': 100, 'description': 'Vulnerable, funny, deep, unique'},
         {'name': 'Insightful (70-89)', 'min': 70, 'max': 89, 'description': 'Honest, charmingly human'},
         {'name': 'Neutral (40-69)', 'min': 40, 'max': 69, 'description': 'Meh. Safe but not manipulative'},
         {'name': 'Performative (20-39)', 'min': 20, 'max': 39, 'description': 'Cringe, bland, try-hard'},

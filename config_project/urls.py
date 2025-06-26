@@ -21,12 +21,10 @@ from django.conf.urls.static import static
 
 urlpatterns = [
     path('admin/', admin.site.urls),
-    # Include all brandsensor URLs
+    # Include all brandsensor URLs at root level
     path('', include('brandsensor.urls')),
-    # Include dashboard URLs with API prefix
-    path('dashboard-api/', include('dashboard.urls')),
-    # Also include dashboard URLs at root level for health checks
-    path('', include('dashboard.urls')),
+    # Include dashboard URLs with unique prefix and namespace
+    path('threads-api/', include('dashboard.urls', namespace='threads_dashboard')),
 ]
 
 if settings.DEBUG:

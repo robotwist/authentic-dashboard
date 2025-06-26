@@ -6,6 +6,7 @@ from .auth_views import (
     instagram_auth, linkedin_auth, threads_auth, threads_callback
 )
 from django.views.generic import TemplateView
+from django.http import HttpResponse
 
 # Set up REST Framework router
 router = routers.DefaultRouter()
@@ -16,6 +17,7 @@ router.register(r'presets', api_views.FilterPresetViewSet, basename='filterprese
 urlpatterns = [
     # Auth related views
     path('', auth_views.landing, name='landing'),
+    path('test/', lambda request: HttpResponse("Test page works!"), name='test'),
     path('login/', auth_views.user_login, name='login'),
     path('logout/', auth_views.user_logout, name='logout'),
     path('register/', auth_views.user_register, name='register'),
