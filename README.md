@@ -148,7 +148,7 @@ PROXY_PORT=7777
 - **URL**: `http://127.0.0.1:8001/`
 - **Username**: `demo`
 - **Password**: `demo123`
-- **API Key**: `demo_api_key_12345`
+- **API Key**: `<your_generated_demo_api_key>`
 
 ### **Sample Data Included**
 - **6 Sample Posts** with authenticity scores (8.3% to 96.1%)
@@ -173,7 +173,7 @@ python manage.py test brandsensor.tests
 curl http://127.0.0.1:8001/api/health-check/
 
 # Authenticated endpoints
-curl -H "X-API-Key: demo_api_key_12345" \
+curl -H "X-API-Key: <your_demo_api_key>" \
      http://127.0.0.1:8001/api/posts/
 ```
 
